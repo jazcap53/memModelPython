@@ -8,6 +8,5 @@ memModel
 *.o
 *.swp
 *Blurb*
-*.py
 *.pl
 *.sh
