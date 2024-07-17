@@ -1,5 +1,5 @@
 from ajTypes import bNum_t, u32Const
-from ArrBit import ArrBit
+from arrBit import ArrBit
 
 class WipeList:
     DIRTY_BEFORE_WIPE = 16
