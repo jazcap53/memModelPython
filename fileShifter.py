@@ -5,17 +5,16 @@ from ajUtils import get_cur_time
 
 class FileShifter:
     @staticmethod
-    def shift_files(f_name: str, action: Callable[[str], None]) -> int:
+    def shift_files(f_name: str, action: Callable[[str], None], binary_mode: bool = False) -> int:
         had_error = 0
         tmp_file = f_name + ".tmp"
 
         try:
-            with open(tmp_file, "w") as f:
+            mode = "wb" if binary_mode else "w"
+            with open(tmp_file, mode) as f:
                 action(f)
 
-            os.unlink(f_name)
-            os.link(tmp_file, f_name)
-            os.unlink(tmp_file)
+            os.replace(tmp_file, f_name)
         except IOError:
             had_error = -1
         except OSError as e:

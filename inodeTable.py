@@ -26,6 +26,7 @@ class InodeTable:
         self.load_tbl()
         # Initialize all inodes as available
         self.avail.set()  # This sets all bits to 1 (available)
+        self.modified = False
 
     def ref_tbl_node(self, i_num: inNum_t) -> Inode:
         blk_num = i_num // lNum_tConst.INODES_PER_BLOCK.value
@@ -39,6 +40,7 @@ class InodeTable:
                 self.avail.reset(ix)
                 node = self.ref_tbl_node(ix)
                 node.cr_time = get_cur_time(True)
+                self.modified = True
                 return ix
         print("No available inodes found.")
         return SENTINEL_INUM
@@ -51,6 +53,7 @@ class InodeTable:
         node.cr_time = 0
         node.indirect = [SENTINEL_BNUM] * u32Const.CT_INODE_INDIRECTS.value
         self.avail.set(i_num)
+        self.modified = True
 
     def node_in_use(self, i_num: inNum_t) -> bool:
         if i_num == SENTINEL_INUM:
@@ -68,6 +71,7 @@ class InodeTable:
         for i, item in enumerate(node.b_nums):
             if item == SENTINEL_BNUM:
                 node.b_nums[i] = blk
+                self.modified = True
                 return True
         return False
 
@@ -78,6 +82,7 @@ class InodeTable:
                 if item == tgt:
                     node.b_nums[i] = SENTINEL_BNUM
                     print(f"{self.tabs(2, True)}Releasing block number {tgt} from inode {i_num}")
+                    self.modified = True
                     return True
         return False
 
@@ -131,7 +136,12 @@ class InodeTable:
                     f.write(struct.pack('I', node.i_num))
             print(f"\n{self.tabs(1)}Inode table stored.")
 
-        self.shifter.shift_files(self.file_name, do_store_tbl)
+        self.shifter.shift_files(self.file_name, do_store_tbl, binary_mode=True)
+
+    def ensure_stored(self) -> None:
+        if self.modified:
+            self.store_tbl()
+            self.modified = False
 
 
 if __name__ == '__main__':
