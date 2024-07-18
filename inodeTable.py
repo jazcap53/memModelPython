@@ -24,9 +24,8 @@ class InodeTable:
         self.tbl = [[Inode() for _ in range(lNum_tConst.INODES_PER_BLOCK.value)]
                     for _ in range(u32Const.NUM_INODE_TBL_BLOCKS.value)]
         self.load_tbl()
-
-    def __del__(self):
-        self.store_tbl()
+        # Initialize all inodes as available
+        self.avail.set()  # This sets all bits to 1 (available)
 
     def ref_tbl_node(self, i_num: inNum_t) -> Inode:
         blk_num = i_num // lNum_tConst.INODES_PER_BLOCK.value
@@ -96,22 +95,29 @@ class InodeTable:
         return [item for item in self.ref_tbl_node(i_num).b_nums if item != SENTINEL_BNUM]
 
     def load_tbl(self) -> None:
-        with open(self.file_name, 'rb') as f:
-            avail_bytes = f.read(u32Const.NUM_INODE_TBL_BLOCKS.value * lNum_tConst.INODES_PER_BLOCK.value // 8)
-            self.avail = ArrBit.from_bytes(avail_bytes, u32Const.NUM_INODE_TBL_BLOCKS.value,
+        try:
+            with open(self.file_name, 'rb') as f:
+                avail_bytes = f.read(u32Const.NUM_INODE_TBL_BLOCKS.value * lNum_tConst.INODES_PER_BLOCK.value // 8)
+                self.avail = ArrBit.from_bytes(avail_bytes, u32Const.NUM_INODE_TBL_BLOCKS.value,
                                                lNum_tConst.INODES_PER_BLOCK.value)
 
-            for i in range(u32Const.NUM_INODE_TBL_BLOCKS.value):
-                for j in range(lNum_tConst.INODES_PER_BLOCK.value):
-                    node = Inode()
-                    node.b_nums = list(
-                        struct.unpack(f'{u32Const.CT_INODE_BNUMS.value}I', f.read(4 * u32Const.CT_INODE_BNUMS.value)))
-                    node.lkd, = struct.unpack('I', f.read(4))
-                    node.cr_time, = struct.unpack('Q', f.read(8))
-                    node.indirect = list(struct.unpack(f'{u32Const.CT_INODE_INDIRECTS.value}I',
-                                                       f.read(4 * u32Const.CT_INODE_INDIRECTS.value)))
-                    node.i_num, = struct.unpack('I', f.read(4))
-                    self.tbl[i][j] = node
+                for i in range(u32Const.NUM_INODE_TBL_BLOCKS.value):
+                    for j in range(lNum_tConst.INODES_PER_BLOCK.value):
+                        node = Inode()
+                        node.b_nums = list(
+                            struct.unpack(f'{u32Const.CT_INODE_BNUMS.value}I',
+                                          f.read(4 * u32Const.CT_INODE_BNUMS.value)))
+                        node.lkd, = struct.unpack('I', f.read(4))
+                        node.cr_time, = struct.unpack('Q', f.read(8))
+                        node.indirect = list(struct.unpack(f'{u32Const.CT_INODE_INDIRECTS.value}I',
+                                                           f.read(4 * u32Const.CT_INODE_INDIRECTS.value)))
+                        node.i_num, = struct.unpack('I', f.read(4))
+                        self.tbl[i][j] = node
+                        if node.i_num != SENTINEL_INUM:
+                            self.avail.reset(i * lNum_tConst.INODES_PER_BLOCK.value + j)
+        except FileNotFoundError:
+            print(f"Inode table file not found. Initializing with all inodes available.")
+            self.avail.set()  # Set all inodes as available
 
     def store_tbl(self) -> None:
         def do_store_tbl(f):
@@ -168,6 +174,9 @@ if __name__ == '__main__':
         print(f"Is node {inode_num} in use after release? {inode_table.node_in_use(inode_num)}")
     else:
         print("No available inodes to test with.")
+
+    # Explicitly store the table before exiting
+    inode_table.store_tbl()
 
     # Clean up
     import os
