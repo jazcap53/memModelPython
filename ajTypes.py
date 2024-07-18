@@ -11,8 +11,8 @@ Line = List[int]  # std::array<unsigned char, 64>
 
 # Constants
 SENTINEL_32 = sys.maxsize
-SENTINEL_INUM = sys.maxsize
-SENTINEL_BNUM = sys.maxsize
+SENTINEL_INUM = 0xFFFFFFFF
+SENTINEL_BNUM = 0xFFFFFFFF  # Maximum value for a 32-bit unsigned integer
 
 class u32Const(Enum):
     BLOCK_BYTES = 4096

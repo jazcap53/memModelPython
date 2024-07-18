@@ -61,6 +61,24 @@ class ArrBit(Generic[T, U, V]):
                         self.arBt[i][j] = True
         return self
 
+    @classmethod
+    def from_bytes(cls, bytes_data: bytes, array_size: int, bitset_size: int) -> 'ArrBit':
+        arr_bit = cls(array_size, bitset_size)
+        for i, byte in enumerate(bytes_data):
+            for j in range(8):
+                if byte & (1 << j):
+                    arr_bit.set(i * 8 + j)
+        return arr_bit
+
+    def to_bytes(self) -> bytes:
+        byte_count = (self.size() + 7) // 8
+        result = bytearray(byte_count)
+        for i in range(self.size()):
+            if self.test(i):
+                result[i // 8] |= 1 << (i % 8)
+        return bytes(result)
+
+
 if __name__ == '__main__':
     # Create an ArrBit instance
     arr_bit = ArrBit(array_size=4, bitset_size=8)
