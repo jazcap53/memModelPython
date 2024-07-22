@@ -9,8 +9,10 @@ class PgTabEntry:
     mem_slot_ix: int = 0
     acc_time: int = 0
 
+
 def pte_comp(l: PgTabEntry, r: PgTabEntry) -> bool:
     return r.acc_time < l.acc_time
+
 
 class PageTable:
     def __init__(self):
@@ -88,6 +90,7 @@ class PageTable:
         for i, p in enumerate(self.pg_tab):
             print(f"{self.tabs(2, True)}pgTblIx: {i:2}   block: {p.block_num}"
                   f"   memSlotIx: {p.mem_slot_ix}   accTime: {p.acc_time:6}")
+
 
 if __name__ == '__main__':
     # Basic tests
