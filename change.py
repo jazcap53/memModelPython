@@ -7,16 +7,22 @@ from ajTypes import bNum_t, lNum_t, Line, lNum_tConst
 from ajUtils import get_cur_time
 
 # Constants
-lNum_tConst.LINES_PER_PAGE.value = 63
+# lNum_tConst.LINES_PER_PAGE.value = 63
 BYTES_PER_LINE = 64
+
 
 @dataclass
 class Line:
     data: bytearray
 
+
 @dataclass
 class Select:
     data: List[int]
+
+    def to_bytes(self) -> bytes:
+        return bytes(self.data)
+
 
 class Change:
     def __init__(self, block_num: int, push_selects: bool = True):
