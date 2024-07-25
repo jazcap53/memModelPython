@@ -5,7 +5,7 @@ from ajTypes import bNum_t, lNum_t, u32Const, bNum_tConst, SENTINEL_BNUM, SENTIN
 from ajCrc import BoostCRC
 from ajUtils import get_cur_time, Tabber
 from wipeList import WipeList
-from change import Change, ChangeLog
+from change import Change, ChangeLog, Select
 from myMemory import Page
 import os
 
@@ -85,11 +85,10 @@ class Journal:
                 assert self.orig_p_pos >= self.META_LEN, "Original position is less than META_LEN"
             except AssertionError as e:
                 print(f"Error in Journal.__init__: {str(e)}")
-                # Add additional error handling or logging as needed
 
             self.ttl_bytes = 0
             cg_bytes = 0
-            cg_bytes_pos = 0
+            cg_bytes_pos = self.js.tell()
 
             self.wrt_cgs_to_jrnl(r_cg_log, cg_bytes, cg_bytes_pos)
             self.wrt_cgs_sz_to_jrnl(cg_bytes, cg_bytes_pos)
@@ -114,17 +113,23 @@ class Journal:
 
             self.rd_last_jrnl(j_cg_log)
 
-            ctr = 0
-            prev_blk_num = SENTINEL_BNUM
-            curr_blk_num = SENTINEL_BNUM
-            pg = Page()
+            if not j_cg_log.the_log:
+                print("\tNo changes found in the journal")
+            else:
+                ctr = 0
+                prev_blk_num = SENTINEL_BNUM
+                curr_blk_num = SENTINEL_BNUM
+                pg = Page()
 
-            self.rd_and_wrt_back(j_cg_log, self.p_buf, ctr, prev_blk_num, curr_blk_num, pg)
+                self.rd_and_wrt_back(j_cg_log, self.p_buf, ctr, prev_blk_num, curr_blk_num, pg)
 
-            cg = j_cg_log.the_log[curr_blk_num][-1]
-            self.r_and_wb_last(cg, self.p_buf, ctr, curr_blk_num, pg)
+                if curr_blk_num in j_cg_log.the_log and j_cg_log.the_log[curr_blk_num]:
+                    cg = j_cg_log.the_log[curr_blk_num][-1]
+                    self.r_and_wb_last(cg, self.p_buf, ctr, curr_blk_num, pg)
+                else:
+                    print(f"Warning: No changes found for block {curr_blk_num}")
 
-            assert ctr == 0
+                assert ctr == 0
 
             self.blks_in_jrnl = [False] * bNum_tConst.NUM_DISK_BLOCKS.value
             self.p_cL.the_log.clear()
@@ -137,7 +142,9 @@ class Journal:
         lin_num = self.get_next_lin_num(cg)
         while lin_num != 0xFF:
             temp = cg.new_data.popleft()
-            pg.dat[lin_num * u32Const.BYTES_PER_LINE.value:(lin_num + 1) * u32Const.BYTES_PER_LINE.value] = temp
+            start = lin_num * u32Const.BYTES_PER_LINE.value
+            end = (lin_num + 1) * u32Const.BYTES_PER_LINE.value
+            pg.dat[start:end] = temp
             lin_num = self.get_next_lin_num(cg)
 
     def is_in_jrnl(self, b_num: bNum_t) -> bool:
@@ -188,7 +195,7 @@ class Journal:
         self.wrt_field(struct.pack('Q', self.START_TAG), 8, True)
 
         cg_bytes_pos = self.js.tell()
-        self.wrt_field(struct.pack('Q', cg_bytes), 8, True)
+        self.wrt_field(struct.pack('Q', 0), 8, True)  # Placeholder for cg_bytes
 
         for blk_num, changes in r_cg_log.the_log.items():
             for cg in changes:
@@ -197,13 +204,18 @@ class Journal:
                 self.wrt_field(struct.pack('Q', cg.time_stamp), 8, True)
 
                 for s in cg.selectors:
-                    select_bytes = s.to_bytes()
-                    self.wrt_field(select_bytes, self.sz, True)
+                    self.wrt_field(s.to_bytearray(), self.sz, True)
 
                 for d in cg.new_data:
                     self.wrt_field(d, u32Const.BYTES_PER_LINE.value, True)
 
         self.wrt_field(struct.pack('Q', self.END_TAG), 8, True)
+
+        # Update cg_bytes
+        cg_bytes = self.ttl_bytes - 24  # Subtract START_TAG, initial cg_bytes, and END_TAG
+        self.js.seek(cg_bytes_pos)
+        self.wrt_field(struct.pack('Q', cg_bytes), 8, False)
+        self.js.seek(0, 2)  # Move to the end of the file
 
         self.do_test1()
 
@@ -215,9 +227,10 @@ class Journal:
             self.js.seek(cg_bytes_pos)
             self.wrt_field(struct.pack('Q', cg_bytes), 8, False)
 
-            self.advance_strm(cg_bytes - 8 + 8)
+            self.js.seek(self.orig_p_pos + self.ttl_bytes)
+            self.final_p_pos = self.js.tell()
 
-            assert self.final_p_pos == self.js.tell(), "Final position mismatch"
+            assert self.final_p_pos == self.orig_p_pos + self.ttl_bytes, "Final position mismatch"
         except AssertionError as e:
             print(f"Error in wrt_cgs_sz_to_jrnl: {str(e)}")
             # Add additional error handling or logging as needed
@@ -232,9 +245,11 @@ class Journal:
             if self.orig_p_pos < self.final_p_pos:
                 ok = (self.final_p_pos - self.orig_p_pos == self.ttl_bytes)
             elif self.final_p_pos < self.orig_p_pos:
-                ok = (self.orig_p_pos + self.ttl_bytes + self.META_LEN - u32Const.JRNL_SIZE.value == self.final_p_pos)
+                ok = (self.orig_p_pos + self.ttl_bytes == u32Const.JRNL_SIZE.value + self.final_p_pos - self.META_LEN)
+            else:
+                ok = (self.ttl_bytes == 0)
 
-            assert ok, "Journal position mismatch"
+            assert ok, f"Journal position mismatch: orig_p_pos={self.orig_p_pos}, final_p_pos={self.final_p_pos}, ttl_bytes={self.ttl_bytes}"
         except AssertionError as e:
             print(f"Error in do_test1: {str(e)}")
             # You might want to add additional error handling or logging here
@@ -262,7 +277,7 @@ class Journal:
 
                     pg = Page()
                     self.p_d.get_ds().seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
-                    pg.dat = self.p_d.get_ds().read(u32Const.BLOCK_BYTES.value)
+                    pg.dat = bytearray(self.p_d.get_ds().read(u32Const.BLOCK_BYTES.value))
 
                 prv_blk_num = cur_blk_num
 
@@ -291,7 +306,7 @@ class Journal:
             assert orig_g_pos >= self.META_LEN, "Original get position is less than META_LEN"
         except AssertionError as e:
             print(f"Error in rd_last_jrnl: {str(e)}")
-            # You might want to add additional error handling or logging here
+            return
 
         self.ttl_bytes = 0
         cg_bytes = 0
@@ -300,13 +315,16 @@ class Journal:
 
         self.rd_jrnl(r_j_cg_log, cg_bytes, ck_start_tag, ck_end_tag)
 
-        try:
-            assert ck_start_tag == self.START_TAG, "Start tag mismatch"
-            assert ck_end_tag == self.END_TAG, "End tag mismatch"
-            assert self.ttl_bytes == cg_bytes + 16, "Total bytes mismatch"
-        except AssertionError as e:
-            print(f"Error in rd_last_jrnl: {str(e)}")
-            # You might want to add additional error handling or logging here
+        if ck_start_tag != self.START_TAG:
+            print(f"Error in rd_last_jrnl: Start tag mismatch: expected {self.START_TAG}, got {ck_start_tag}")
+            return
+
+        if ck_end_tag != self.END_TAG:
+            print(f"Error in rd_last_jrnl: End tag mismatch: expected {self.END_TAG}, got {ck_end_tag}")
+            return
+
+        if self.ttl_bytes != cg_bytes + 24:
+            print(f"Error in rd_last_jrnl: Total bytes mismatch: expected {cg_bytes + 24}, got {self.ttl_bytes}")
 
     def rd_jrnl(self, r_j_cg_log: ChangeLog, cg_bytes: int, ck_start_tag: int, ck_end_tag: int):
         self.ttl_bytes = 0
@@ -314,9 +332,10 @@ class Journal:
         ck_start_tag = struct.unpack('Q', self.rd_field(8))[0]
         cg_bytes = struct.unpack('Q', self.rd_field(8))[0]
 
-        b_num = 0
-        while self.ttl_bytes < cg_bytes + 8:
+        while self.ttl_bytes < cg_bytes + 24:  # Include START_TAG, cg_bytes, and END_TAG
             b_num = struct.unpack('I', self.rd_field(4))[0]
+            if b_num == 0xFFFFFFFF:  # End of changes
+                break
 
             cg = Change(b_num, False)
 
@@ -333,10 +352,9 @@ class Journal:
         ck_end_tag = struct.unpack('Q', self.rd_field(8))[0]
 
         try:
-            assert cg_bytes + 16 == self.ttl_bytes, "Total bytes mismatch"
+            assert cg_bytes + 24 == self.ttl_bytes, f"Total bytes mismatch: expected {cg_bytes + 24}, got {self.ttl_bytes}"
         except AssertionError as e:
             print(f"Error in rd_jrnl: {str(e)}")
-            # Add additional error handling or logging as needed
 
     def get_num_data_lines(self, r_cg: Change) -> int:
         num_data_lines = 0

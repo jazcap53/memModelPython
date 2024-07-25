@@ -20,8 +20,8 @@ class Line:
 class Select:
     data: List[int]
 
-    def to_bytes(self) -> bytes:
-        return bytes(self.data)
+    def to_bytearray(self) -> bytearray:
+        return bytearray(self.data)
 
 
 class Change:
