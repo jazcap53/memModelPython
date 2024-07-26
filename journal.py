@@ -94,11 +94,25 @@ class Journal:
             actual_written_pos = self.js.tell()  # Add this line and break here
             self.wrt_cgs_sz_to_jrnl(cg_bytes, cg_bytes_pos)
 
-            new_g_pos = self.orig_p_pos
-            new_p_pos = self.js.tell()
-            u_ttl_bytes = self.ttl_bytes
+            current_pos = self.js.tell()
+            new_g_pos = self.orig_p_pos  # Where this chunk of data starts
+            new_p_pos = current_pos  # Where the NEXT chunk should start
 
-            self.wrt_metadata(new_g_pos, new_p_pos, u_ttl_bytes)
+            # Handle journal wraparound
+            if new_p_pos >= u32Const.JRNL_SIZE.value - self.META_LEN:
+                new_p_pos = self.META_LEN  # Reset to start, after metadata
+
+            bytes_written = current_pos - self.orig_p_pos  # How much we wrote this time
+
+            # Update total metadata
+            self.meta_get = new_g_pos
+            self.meta_put = new_p_pos
+            self.meta_sz += bytes_written
+
+            # Write updated metadata to start of file
+            self.wrt_metadata(self.meta_get, self.meta_put, self.meta_sz)
+
+            print(f"DEBUG: Updated metadata - get: {self.meta_get}, put: {self.meta_put}, size: {self.meta_sz}")
 
             print(f"\tChange log written to journal at time {get_cur_time()}")
             r_cg_log.cg_line_ct = 0
@@ -312,6 +326,11 @@ class Journal:
 
     def rd_last_jrnl(self, r_j_cg_log: ChangeLog):
         self.rd_metadata()
+
+        # Add this safeguard
+        if self.meta_get < self.META_LEN or self.meta_put < self.META_LEN:
+            print(f"Warning: Invalid metadata read. meta_get: {self.meta_get}, meta_put: {self.meta_put}")
+            return  # Exit early if metadata looks wrong
 
         self.js.seek(self.meta_get)
         orig_g_pos = self.js.tell()
