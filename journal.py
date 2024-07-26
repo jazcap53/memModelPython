@@ -183,6 +183,7 @@ class Journal:
             self.js.write(data)
             if do_ct:
                 self.ttl_bytes += dat_len
+        self.final_p_pos = self.js.tell()
 
     def advance_strm(self, length: int):
         new_pos = self.js.tell() + length
@@ -192,10 +193,14 @@ class Journal:
         self.js.seek(new_pos)
 
     def wrt_cgs_to_jrnl(self, r_cg_log: ChangeLog, cg_bytes: int, cg_bytes_pos: int):
-        self.wrt_field(struct.pack('Q', self.START_TAG), 8, True)
+        self.ttl_bytes = 0
+        initial_pos = self.js.tell()
 
-        cg_bytes_pos = self.js.tell()
-        self.wrt_field(struct.pack('Q', 0), 8, True)  # Placeholder for cg_bytes
+        # Write a placeholder for cg_bytes
+        self.wrt_field(struct.pack('Q', 0), 8, True)
+
+        # Write the rest of the data
+        self.wrt_field(struct.pack('Q', self.START_TAG), 8, True)
 
         for blk_num, changes in r_cg_log.the_log.items():
             for cg in changes:
@@ -211,11 +216,20 @@ class Journal:
 
         self.wrt_field(struct.pack('Q', self.END_TAG), 8, True)
 
-        # Update cg_bytes
-        cg_bytes = self.ttl_bytes - 24  # Subtract START_TAG, initial cg_bytes, and END_TAG
-        self.js.seek(cg_bytes_pos)
+        # Calculate final cg_bytes
+        cg_bytes = self.ttl_bytes - 24
+
+        # Go back and write the actual cg_bytes
+        current_pos = self.js.tell()
+        self.js.seek(initial_pos)
         self.wrt_field(struct.pack('Q', cg_bytes), 8, False)
-        self.js.seek(0, 2)  # Move to the end of the file
+        self.js.seek(current_pos)
+
+        self.final_p_pos = self.js.tell()
+        # self.js.seek(0, 2)  # Move to the end of the file
+
+        # Update final_p_pos
+        self.final_p_pos = self.js.tell()
 
         self.do_test1()
 
@@ -236,23 +250,22 @@ class Journal:
             # Add additional error handling or logging as needed
 
     def do_test1(self):
-        ok = False
-        self.final_p_pos = self.js.tell()
-
         try:
-            assert 0 < self.ttl_bytes < u32Const.JRNL_SIZE.value - self.META_LEN, "Total bytes out of expected range"
+            assert 0 < self.ttl_bytes < u32Const.JRNL_SIZE.value - self.META_LEN, f"Total bytes out of expected "
+            "range: {self.ttl_bytes}"
 
-            if self.orig_p_pos < self.final_p_pos:
-                ok = (self.final_p_pos - self.orig_p_pos == self.ttl_bytes)
-            elif self.final_p_pos < self.orig_p_pos:
-                ok = (self.orig_p_pos + self.ttl_bytes == u32Const.JRNL_SIZE.value + self.final_p_pos - self.META_LEN)
-            else:
-                ok = (self.ttl_bytes == 0)
+            expected_bytes = self.final_p_pos - self.orig_p_pos
+            if expected_bytes < 0:  # Handle wraparound
+                expected_bytes += u32Const.JRNL_SIZE.value - self.META_LEN
 
-            assert ok, f"Journal position mismatch: orig_p_pos={self.orig_p_pos}, final_p_pos={self.final_p_pos}, ttl_bytes={self.ttl_bytes}"
+            assert self.ttl_bytes == expected_bytes, (
+                f"Journal position mismatch: orig_p_pos={self.orig_p_pos}, "
+                f"final_p_pos={self.final_p_pos}, ttl_bytes={self.ttl_bytes}, "
+                f"expected_bytes={expected_bytes}"
+            )
         except AssertionError as e:
             print(f"Error in do_test1: {str(e)}")
-            # You might want to add additional error handling or logging here
+            print(f"Current file position: {self.js.tell()}")
 
     def rd_metadata(self):
         self.js.seek(0)
