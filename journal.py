@@ -91,6 +91,7 @@ class Journal:
             cg_bytes_pos = self.js.tell()
 
             self.wrt_cgs_to_jrnl(r_cg_log, cg_bytes, cg_bytes_pos)
+            actual_written_pos = self.js.tell()  # Add this line and break here
             self.wrt_cgs_sz_to_jrnl(cg_bytes, cg_bytes_pos)
 
             new_g_pos = self.orig_p_pos
@@ -229,7 +230,7 @@ class Journal:
         # self.js.seek(0, 2)  # Move to the end of the file
 
         # Update final_p_pos
-        self.final_p_pos = self.js.tell()
+        # self.final_p_pos = self.js.tell()
 
         self.do_test1()
 
@@ -342,10 +343,10 @@ class Journal:
     def rd_jrnl(self, r_j_cg_log: ChangeLog, cg_bytes: int, ck_start_tag: int, ck_end_tag: int):
         self.ttl_bytes = 0
 
-        ck_start_tag = struct.unpack('Q', self.rd_field(8))[0]
         cg_bytes = struct.unpack('Q', self.rd_field(8))[0]
+        ck_start_tag = struct.unpack('Q', self.rd_field(8))[0]
 
-        while self.ttl_bytes < cg_bytes + 24:  # Include START_TAG, cg_bytes, and END_TAG
+        while self.ttl_bytes < cg_bytes + 16:  # Include START_TAG and cg_bytes
             b_num = struct.unpack('I', self.rd_field(4))[0]
             if b_num == 0xFFFFFFFF:  # End of changes
                 break
