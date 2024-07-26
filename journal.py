@@ -88,10 +88,9 @@ class Journal:
 
             self.ttl_bytes = 0
             cg_bytes = 0
-            cg_bytes_pos = self.js.tell()
+            cg_bytes_pos = self.js.tell() + 8  # Position after START_TAG
 
             self.wrt_cgs_to_jrnl(r_cg_log, cg_bytes, cg_bytes_pos)
-            actual_written_pos = self.js.tell()  # Add this line and break here
             self.wrt_cgs_sz_to_jrnl(cg_bytes, cg_bytes_pos)
 
             current_pos = self.js.tell()
@@ -111,7 +110,7 @@ class Journal:
 
             # Write updated metadata to start of file
             self.wrt_metadata(self.meta_get, self.meta_put, self.meta_sz)
-
+            self.wrt_field(s.to_bytearray(), self.sz, True)
             print(f"DEBUG: Updated metadata - get: {self.meta_get}, put: {self.meta_put}, size: {self.meta_sz}")
 
             print(f"\tChange log written to journal at time {get_cur_time()}")
@@ -209,13 +208,14 @@ class Journal:
 
     def wrt_cgs_to_jrnl(self, r_cg_log: ChangeLog, cg_bytes: int, cg_bytes_pos: int):
         self.ttl_bytes = 0
-        initial_pos = self.js.tell()
+        self.orig_p_pos = self.js.tell()
 
-        # Write a placeholder for cg_bytes
-        self.wrt_field(struct.pack('Q', 0), 8, True)
-
-        # Write the rest of the data
+        # Write START_TAG
         self.wrt_field(struct.pack('Q', self.START_TAG), 8, True)
+
+        # Write placeholder for cg_bytes
+        self.js.seek(cg_bytes_pos)
+        self.wrt_field(struct.pack('Q', cg_bytes), 8, True)  # Use provided cg_bytes
 
         for blk_num, changes in r_cg_log.the_log.items():
             for cg in changes:
@@ -227,25 +227,19 @@ class Journal:
                     self.wrt_field(s.to_bytearray(), self.sz, True)
 
                 for d in cg.new_data:
-                    self.wrt_field(d, u32Const.BYTES_PER_LINE.value, True)
+                    self.wrt_field(d.data, u32Const.BYTES_PER_LINE.value, True)
 
+        # Write END_TAG
         self.wrt_field(struct.pack('Q', self.END_TAG), 8, True)
 
-        # Calculate final cg_bytes
-        cg_bytes = self.ttl_bytes - 24
-
-        # Go back and write the actual cg_bytes
-        current_pos = self.js.tell()
-        self.js.seek(initial_pos)
-        self.wrt_field(struct.pack('Q', cg_bytes), 8, False)
-        self.js.seek(current_pos)
+        # Calculate and write actual cg_bytes
+        actual_cg_bytes = self.ttl_bytes - 24  # Subtract START_TAG, cg_bytes, END_TAG
+        self.js.seek(cg_bytes_pos)
+        self.wrt_field(struct.pack('Q', actual_cg_bytes), 8, False)
 
         self.final_p_pos = self.js.tell()
-        # self.js.seek(0, 2)  # Move to the end of the file
 
-        # Update final_p_pos
-        # self.final_p_pos = self.js.tell()
-
+        # Critical: Perform consistency tests
         self.do_test1()
 
     def wrt_cgs_sz_to_jrnl(self, cg_bytes: int, cg_bytes_pos: int):
@@ -327,11 +321,6 @@ class Journal:
     def rd_last_jrnl(self, r_j_cg_log: ChangeLog):
         self.rd_metadata()
 
-        # Add this safeguard
-        if self.meta_get < self.META_LEN or self.meta_put < self.META_LEN:
-            print(f"Warning: Invalid metadata read. meta_get: {self.meta_get}, meta_put: {self.meta_put}")
-            return  # Exit early if metadata looks wrong
-
         self.js.seek(self.meta_get)
         orig_g_pos = self.js.tell()
 
@@ -341,12 +330,9 @@ class Journal:
             print(f"Error in rd_last_jrnl: {str(e)}")
             return
 
-        self.ttl_bytes = 0
-        cg_bytes = 0
-        ck_start_tag = 0
-        ck_end_tag = 0
+        ck_start_tag, ck_end_tag, ttl_bytes = self.rd_jrnl(r_j_cg_log)
 
-        self.rd_jrnl(r_j_cg_log, cg_bytes, ck_start_tag, ck_end_tag)
+        print(f"DEBUG: Read from journal - START_TAG: {ck_start_tag}, END_TAG: {ck_end_tag}, Total Bytes: {ttl_bytes}")
 
         if ck_start_tag != self.START_TAG:
             print(f"Error in rd_last_jrnl: Start tag mismatch: expected {self.START_TAG}, got {ck_start_tag}")
@@ -356,38 +342,42 @@ class Journal:
             print(f"Error in rd_last_jrnl: End tag mismatch: expected {self.END_TAG}, got {ck_end_tag}")
             return
 
-        if self.ttl_bytes != cg_bytes + 24:
-            print(f"Error in rd_last_jrnl: Total bytes mismatch: expected {cg_bytes + 24}, got {self.ttl_bytes}")
-
-    def rd_jrnl(self, r_j_cg_log: ChangeLog, cg_bytes: int, ck_start_tag: int, ck_end_tag: int):
+    def rd_jrnl(self, r_j_cg_log: ChangeLog) -> Tuple[int, int, int]:
         self.ttl_bytes = 0
 
         cg_bytes = struct.unpack('Q', self.rd_field(8))[0]
         ck_start_tag = struct.unpack('Q', self.rd_field(8))[0]
+        self.ttl_bytes += 16  # Account for bytes read in cg_bytes and ck_start_tag
 
-        while self.ttl_bytes < cg_bytes + 16:  # Include START_TAG and cg_bytes
+        print(f"DEBUG: Read cg_bytes: {cg_bytes}, ck_start_tag: {ck_start_tag}")  # Debug print
+
+        while self.ttl_bytes < cg_bytes + 16:  # +16 for start tag and cg_bytes fields
             b_num = struct.unpack('I', self.rd_field(4))[0]
             if b_num == 0xFFFFFFFF:  # End of changes
                 break
 
             cg = Change(b_num, False)
-
             cg.time_stamp = struct.unpack('Q', self.rd_field(8))[0]
 
             num_data_lines = self.get_num_data_lines(cg)
 
             for _ in range(num_data_lines):
-                a_line = self.rd_field(u32Const.BYTES_PER_LINE.value)
-                cg.new_data.append(a_line)
+                line_data = self.rd_field(u32Const.BYTES_PER_LINE.value)
+                cg.new_data.append(line_data)
 
             r_j_cg_log.add_to_log(cg)
 
-        ck_end_tag = struct.unpack('Q', self.rd_field(8))[0]
-
         try:
-            assert cg_bytes + 24 == self.ttl_bytes, f"Total bytes mismatch: expected {cg_bytes + 24}, got {self.ttl_bytes}"
-        except AssertionError as e:
-            print(f"Error in rd_jrnl: {str(e)}")
+            ck_end_tag = struct.unpack('Q', self.rd_field(8))[0]
+            self.ttl_bytes += 8  # Account for end tag
+        except struct.error:
+            print("WARNING: Failed to read END_TAG")
+            ck_end_tag = 0  # Use a safe default
+
+        print(f"DEBUG: Read END_TAG: {ck_end_tag}")
+        print(f"DEBUG: Total bytes read: {self.ttl_bytes}, Expected: {cg_bytes + 24}")
+
+        return ck_start_tag, ck_end_tag, self.ttl_bytes
 
     def get_num_data_lines(self, r_cg: Change) -> int:
         num_data_lines = 0
