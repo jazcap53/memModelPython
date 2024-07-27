@@ -15,6 +15,7 @@ class Journal:
     END_TAG = 4205560943366639022
     META_LEN = 24
     NUM_PGS_JRNL_BUF = 16
+    CPP_SELECT_T_SZ = 8
 
     def __init__(self, f_name: str, sim_disk, change_log, status, crash_chk):
         self.f_name = f_name
@@ -22,6 +23,7 @@ class Journal:
         self.p_cL = change_log
         self.p_stt = status
         self.p_cck = crash_chk
+        self.sz = Journal.CPP_SELECT_T_SZ
 
         # Initialize the file if it doesn't exist or is too small
         if not os.path.exists(self.f_name):
@@ -110,7 +112,8 @@ class Journal:
 
             # Write updated metadata to start of file
             self.wrt_metadata(self.meta_get, self.meta_put, self.meta_sz)
-            self.wrt_field(s.to_bytearray(), self.sz, True)
+            for s in cg.selectors:
+                self.wrt_field(s.to_bytearray(), self.sz, True)
             print(f"DEBUG: Updated metadata - get: {self.meta_get}, put: {self.meta_put}, size: {self.meta_sz}")
 
             print(f"\tChange log written to journal at time {get_cur_time()}")
@@ -222,20 +225,27 @@ class Journal:
                 self.wrt_field(struct.pack('I', cg.block_num), 4, True)
                 self.blks_in_jrnl[cg.block_num] = True
                 self.wrt_field(struct.pack('Q', cg.time_stamp), 8, True)
-
                 for s in cg.selectors:
                     self.wrt_field(s.to_bytearray(), self.sz, True)
-
                 for d in cg.new_data:
-                    self.wrt_field(d.data, u32Const.BYTES_PER_LINE.value, True)
+                    self.wrt_field(d if isinstance(d, bytes) else d.data, u32Const.BYTES_PER_LINE.value, True)
 
         # Write END_TAG
         self.wrt_field(struct.pack('Q', self.END_TAG), 8, True)
 
         # Calculate and write actual cg_bytes
-        actual_cg_bytes = self.ttl_bytes - 24  # Subtract START_TAG, cg_bytes, END_TAG
+        # Calculate actual_cg_bytes (excluding START_TAG, initial cg_bytes placeholder, and END_TAG)
+        actual_cg_bytes = self.ttl_bytes - 24
+
+        # Store the current position
+        current_pos = self.js.tell()
+
+        # Seek to the cg_bytes_pos without changing ttl_bytes
         self.js.seek(cg_bytes_pos)
         self.wrt_field(struct.pack('Q', actual_cg_bytes), 8, False)
+
+        # Return to the end of the written data
+        self.js.seek(current_pos)
 
         self.final_p_pos = self.js.tell()
 
@@ -535,7 +545,10 @@ if __name__ == "__main__":
     cg.new_data.append(b'A' * u32Const.BYTES_PER_LINE.value)
     change_log.the_log[1] = [cg]
     change_log.cg_line_ct = 1
+
+    print("Testing wrt_cg_log_to_jrnl...")
     journal.wrt_cg_log_to_jrnl(change_log)
+    print("wrt_cg_log_to_jrnl completed successfully!")
 
     # Test purge_jrnl
     journal.purge_jrnl(True, False)
