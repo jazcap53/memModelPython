@@ -30,6 +30,7 @@ class Journal:
             # File doesn't exist, create it and fill with zeros
             with open(self.f_name, "wb") as f:
                 f.write(b'\0' * u32Const.JRNL_SIZE.value)
+                print(f"Creating new journal file: {self.f_name}")  # Debug info
         else:
             # File exists, check its size and extend if necessary
             with open(self.f_name, "r+b") as f:
@@ -119,6 +120,12 @@ class Journal:
             print(f"\tChange log written to journal at time {get_cur_time()}")
             r_cg_log.cg_line_ct = 0
             self.p_stt.wrt("Change log written")
+
+            self.js.flush()
+            os.fsync(self.js.fileno())
+            self.js.close()
+            self.js = open(self.f_name, "r+b")
+            _ = False
 
     def purge_jrnl(self, keep_going: bool, had_crash: bool):
         print(f"{self.tabs(1, True)}Purging journal{'(after crash)' if had_crash else ''}")
@@ -213,25 +220,25 @@ class Journal:
         self.ttl_bytes = 0
         self.orig_p_pos = self.js.tell()
 
-        # Write START_TAG
-        self.wrt_field(struct.pack('Q', self.START_TAG), 8, True)
+        # Writing START_TAG
+        start_tag_bytes = struct.pack('>Q', self.START_TAG)
+        self.wrt_field(start_tag_bytes, 8, True)
 
-        # Write placeholder for cg_bytes
-        self.js.seek(cg_bytes_pos)
-        self.wrt_field(struct.pack('Q', cg_bytes), 8, True)  # Use provided cg_bytes
+        # Write placeholder for cg_bytes (which will be updated later)
+        self.wrt_field(struct.pack('>Q', 0), 8, True)  # Initially write 0, update later
 
         for blk_num, changes in r_cg_log.the_log.items():
             for cg in changes:
                 self.wrt_field(struct.pack('I', cg.block_num), 4, True)
                 self.blks_in_jrnl[cg.block_num] = True
-                self.wrt_field(struct.pack('Q', cg.time_stamp), 8, True)
+                self.wrt_field(struct.pack('>Q', cg.time_stamp), 8, True)
                 for s in cg.selectors:
                     self.wrt_field(s.to_bytearray(), self.sz, True)
                 for d in cg.new_data:
                     self.wrt_field(d if isinstance(d, bytes) else d.data, u32Const.BYTES_PER_LINE.value, True)
 
         # Write END_TAG
-        self.wrt_field(struct.pack('Q', self.END_TAG), 8, True)
+        self.wrt_field(struct.pack('>Q', self.END_TAG), 8, True)
 
         # Calculate and write actual cg_bytes
         # Calculate actual_cg_bytes (excluding START_TAG, initial cg_bytes placeholder, and END_TAG)
@@ -242,7 +249,7 @@ class Journal:
 
         # Seek to the cg_bytes_pos without changing ttl_bytes
         self.js.seek(cg_bytes_pos)
-        self.wrt_field(struct.pack('Q', actual_cg_bytes), 8, False)
+        self.wrt_field(struct.pack('>Q', actual_cg_bytes), 8, False)
 
         # Return to the end of the written data
         self.js.seek(current_pos)
@@ -252,13 +259,16 @@ class Journal:
         # Critical: Perform consistency tests
         self.do_test1()
 
+        self.js.flush()
+        os.fsync(self.js.fileno())
+
     def wrt_cgs_sz_to_jrnl(self, cg_bytes: int, cg_bytes_pos: int):
         try:
             assert 16 <= self.ttl_bytes, "Total bytes is less than 16"
             cg_bytes = self.ttl_bytes - 16
 
             self.js.seek(cg_bytes_pos)
-            self.wrt_field(struct.pack('Q', cg_bytes), 8, False)
+            self.wrt_field(struct.pack('>Q', cg_bytes), 8, False)
 
             self.js.seek(self.orig_p_pos + self.ttl_bytes)
             self.final_p_pos = self.js.tell()
@@ -330,6 +340,12 @@ class Journal:
 
     def rd_last_jrnl(self, r_j_cg_log: ChangeLog):
         self.rd_metadata()
+        if self.meta_get == -1:
+            print("Warning: No metadata available. Journal might be empty.")
+            return
+        if self.meta_get < self.META_LEN or self.meta_get >= u32Const.JRNL_SIZE.value:
+            print(f"Error: Invalid metadata. meta_get={self.meta_get}")
+            return
 
         self.js.seek(self.meta_get)
         orig_g_pos = self.js.tell()
@@ -355,8 +371,18 @@ class Journal:
     def rd_jrnl(self, r_j_cg_log: ChangeLog) -> Tuple[int, int, int]:
         self.ttl_bytes = 0
 
-        cg_bytes = struct.unpack('Q', self.rd_field(8))[0]
-        ck_start_tag = struct.unpack('Q', self.rd_field(8))[0]
+        start_tag_bytes = self.js.read(8)
+        ck_start_tag = struct.unpack('>Q', start_tag_bytes)[0]
+        self.ttl_bytes += 8
+
+        if ck_start_tag != self.START_TAG:
+            print(f"Invalid journaled data. Start tag: {ck_start_tag:X} (expected: {self.START_TAG:X})")
+            return 0, 0, 0  # Return safe values if we have corrupt data
+
+        cg_bytes_bytes = self.js.read(8)
+        cg_bytes = struct.unpack('>Q', cg_bytes_bytes)[0]
+        self.ttl_bytes += 8
+
         self.ttl_bytes += 16  # Account for bytes read in cg_bytes and ck_start_tag
 
         print(f"DEBUG: Read cg_bytes: {cg_bytes}, ck_start_tag: {ck_start_tag}")  # Debug print
@@ -367,7 +393,7 @@ class Journal:
                 break
 
             cg = Change(b_num, False)
-            cg.time_stamp = struct.unpack('Q', self.rd_field(8))[0]
+            cg.time_stamp = struct.unpack('>Q', self.rd_field(8))[0]
 
             num_data_lines = self.get_num_data_lines(cg)
 
@@ -378,7 +404,7 @@ class Journal:
             r_j_cg_log.add_to_log(cg)
 
         try:
-            ck_end_tag = struct.unpack('Q', self.rd_field(8))[0]
+            ck_end_tag = struct.unpack('>Q', self.rd_field(8))[0]
             self.ttl_bytes += 8  # Account for end tag
         except struct.error:
             print("WARNING: Failed to read END_TAG")
