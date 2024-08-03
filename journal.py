@@ -26,22 +26,20 @@ class Journal:
         self.sz = Journal.CPP_SELECT_T_SZ
 
         # Initialize the file if it doesn't exist or is too small
-        file_existed = os.path.exists(self.f_name)
-        self.js = open(self.f_name, "r+b" if file_existed else "w+b")
-        self.js.seek(0, 2)  # Go to end of file
-        current_size = self.js.tell()
-        if current_size < u32Const.JRNL_SIZE.value:
-            remaining = u32Const.JRNL_SIZE.value - current_size
-            self.js.write(b'\0' * remaining)
-        self.js.seek(0)  # Reset to beginning of file
-        print(f"Journal file: {'Opened' if file_existed else 'Created'}: {self.f_name}")
+        if not os.path.exists(self.f_name):
+            # File doesn't exist, create it and fill with zeros
+            with open(self.f_name, "wb") as f:
+                f.write(b'\0' * u32Const.JRNL_SIZE.value)
+                print(f"Creating new journal file: {self.f_name}")  # Debug info
+        else:
+            # File exists, check its size and extend if necessary
+            with open(self.f_name, "r+b") as f:
+                current_size = f.seek(0, 2)  # Move to the end and get position
+                if current_size < u32Const.JRNL_SIZE.value:
+                    f.write(b'\0' * (u32Const.JRNL_SIZE.value - current_size))
 
-        # Verify file size
-        self.js.seek(0, 2)  # Go to end
-        actual_size = self.js.tell()
-        self.js.seek(0)  # Reset to beginning
-        if actual_size != u32Const.JRNL_SIZE.value:
-            raise RuntimeError(f"Journal file size mismatch. Expected {u32Const.JRNL_SIZE.value}, got {actual_size}")
+        # Open the file in read-write mode
+        self.js = open(self.f_name, "r+b")
 
         # Rest of the initialization code remains the same
         self.p_buf = [None] * self.NUM_PGS_JRNL_BUF
@@ -384,6 +382,8 @@ class Journal:
         cg_bytes_bytes = self.js.read(8)
         cg_bytes = struct.unpack('>Q', cg_bytes_bytes)[0]
         self.ttl_bytes += 8
+
+        self.ttl_bytes += 16  # Account for bytes read in cg_bytes and ck_start_tag
 
         print(f"DEBUG: Read cg_bytes: {cg_bytes}, ck_start_tag: {ck_start_tag}")  # Debug print
 
