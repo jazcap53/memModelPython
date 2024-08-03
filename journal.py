@@ -27,7 +27,7 @@ class Journal:
 
         # Initialize the file if it doesn't exist or is too small
         file_existed = os.path.exists(self.f_name)
-        self.js = open(self.f_name, "rb+" if file_existed else "wb+")
+        self.js = open(self.f_name, "r+b" if file_existed else "w+b")
         self.js.seek(0, 2)  # Go to end of file
         current_size = self.js.tell()
         if current_size < u32Const.JRNL_SIZE.value:
@@ -42,8 +42,6 @@ class Journal:
         self.js.seek(0)  # Reset to beginning
         if actual_size != u32Const.JRNL_SIZE.value:
             raise RuntimeError(f"Journal file size mismatch. Expected {u32Const.JRNL_SIZE.value}, got {actual_size}")
-
-        self.js.seek(self.META_LEN)
 
         # Rest of the initialization code remains the same
         self.p_buf = [None] * self.NUM_PGS_JRNL_BUF
@@ -128,13 +126,11 @@ class Journal:
             self.js.flush()
             os.fsync(self.js.fileno())
             self.js.close()
-            self.js = open(self.f_name, "rb+")
+            self.js = open(self.f_name, "r+b")
             _ = False
 
     def purge_jrnl(self, keep_going: bool, had_crash: bool):
         self.reset_file()  # Reset file state before purging
-
-        # self.js.seek(self.META_LEN, 0)
 
         print(f"{self.tabs(1, True)}Purging journal{'(after crash)' if had_crash else ''}")
 
@@ -225,17 +221,12 @@ class Journal:
         self.js.seek(new_pos)
 
     def wrt_cgs_to_jrnl(self, r_cg_log: ChangeLog, cg_bytes: int, cg_bytes_pos: int):
-        self.js.seek(self.META_LEN)
         self.ttl_bytes = 0
         self.orig_p_pos = self.js.tell()
 
         # Writing START_TAG
-        self.js.seek(self.META_LEN)
-        start_tag_bytes = self.START_TAG.to_bytes(8, byteorder='big')
-        bytes_written = self.js.write(start_tag_bytes)
-        self.ttl_bytes += bytes_written
-        print(
-            f"DEBUG: Wrote START_TAG: {self.START_TAG:X} ({bytes_written} bytes) at position {self.js.tell() - bytes_written}")
+        start_tag_bytes = struct.pack('>Q', self.START_TAG)
+        self.wrt_field(start_tag_bytes, 8, True)
 
         # Write placeholder for cg_bytes (which will be updated later)
         initial_cg_bytes = 0
@@ -321,9 +312,7 @@ class Journal:
 
     def wrt_metadata(self, new_g_pos: int, new_p_pos: int, u_ttl_bytes: int):
         self.js.seek(0)
-        metadata = struct.pack('qqq', new_g_pos, new_p_pos, u_ttl_bytes)
-        self.js.write(metadata)
-        print(f"DEBUG: Writing metadata: g_pos={new_g_pos}, p_pos={new_p_pos}, ttl_bytes={u_ttl_bytes}")
+        self.js.write(struct.pack('qqq', new_g_pos, new_p_pos, u_ttl_bytes))
 
     def rd_and_wrt_back(self, j_cg_log: ChangeLog, p_buf: List, ctr: int, prv_blk_num: bNum_t, cur_blk_num: bNum_t,
                         pg: Page):
@@ -368,8 +357,7 @@ class Journal:
             print(f"Error: Invalid metadata. meta_get={self.meta_get}")
             return
 
-        # self.js.seek(self.meta_get)
-        self.js.seek(self.META_LEN if self.meta_get == -1 else self.meta_get)
+        self.js.seek(self.meta_get)
         orig_g_pos = self.js.tell()
 
         try:
@@ -394,10 +382,7 @@ class Journal:
         self.ttl_bytes = 0
 
         start_tag_bytes = self.js.read(8)
-        if len(start_tag_bytes) != 8:
-            print(f"Error: Expected to read 8 bytes, but read {len(start_tag_bytes)} bytes")
-            return 0, 0, 0
-        ck_start_tag = int.from_bytes(start_tag_bytes, byteorder='big')
+        ck_start_tag = struct.unpack('>Q', start_tag_bytes)[0]
         self.ttl_bytes += 8
 
         if ck_start_tag != self.START_TAG:
@@ -546,7 +531,7 @@ class Journal:
     def reset_file(self):
         """Closes and re-opens the journal file, resetting its position."""
         self.js.close()
-        self.js = open(self.f_name, "rb+")
+        self.js = open(self.f_name, "r+b")
         self.js.seek(0)
 
 
@@ -554,7 +539,7 @@ if __name__ == "__main__":
     # Basic test setup
     class MockSimDisk:
         def __init__(self):
-            self.ds = open("mock_disk.bin", "wb+")
+            self.ds = open("mock_disk.bin", "w+b")
             self.ds.write(b'\0' * u32Const.JRNL_SIZE.value)
 
         def get_ds(self):
