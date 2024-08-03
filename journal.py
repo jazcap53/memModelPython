@@ -130,8 +130,6 @@ class Journal:
             _ = False
 
     def purge_jrnl(self, keep_going: bool, had_crash: bool):
-        self.reset_file()  # Reset file state before purging
-
         print(f"{self.tabs(1, True)}Purging journal{'(after crash)' if had_crash else ''}")
 
         if not any(self.blks_in_jrnl) and not had_crash:
@@ -229,10 +227,7 @@ class Journal:
         self.wrt_field(start_tag_bytes, 8, True)
 
         # Write placeholder for cg_bytes (which will be updated later)
-        initial_cg_bytes = 0
-        self.wrt_field(struct.pack('>Q', initial_cg_bytes), 8, True)  # Initially write 0, update later
-        print(
-            f"DEBUG: Writing initial cg_bytes: {initial_cg_bytes}, Actual bytes: {struct.pack('>Q', initial_cg_bytes).hex()}")
+        self.wrt_field(struct.pack('>Q', 0), 8, True)  # Initially write 0, update later
 
         for blk_num, changes in r_cg_log.the_log.items():
             for cg in changes:
@@ -257,9 +252,6 @@ class Journal:
         # Seek to the cg_bytes_pos without changing ttl_bytes
         self.js.seek(cg_bytes_pos)
         self.wrt_field(struct.pack('>Q', actual_cg_bytes), 8, False)
-
-        print(
-            f"DEBUG: Writing actual cg_bytes: {actual_cg_bytes}, Actual bytes: {struct.pack('>Q', actual_cg_bytes).hex()}")
 
         # Return to the end of the written data
         self.js.seek(current_pos)
@@ -527,12 +519,6 @@ class Journal:
             cg.arr_next = 0
 
         return lin_num
-
-    def reset_file(self):
-        """Closes and re-opens the journal file, resetting its position."""
-        self.js.close()
-        self.js = open(self.f_name, "r+b")
-        self.js.seek(0)
 
 
 if __name__ == "__main__":
