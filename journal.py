@@ -611,7 +611,6 @@ if __name__ == "__main__":
     # Test is_in_jrnl
     print(f"Is block 1 in journal? {journal.is_in_jrnl(1)}")
 
-
     # Test do_wipe_routine
     class MockFileMan:
         def do_store_inodes(self):
@@ -624,10 +623,11 @@ if __name__ == "__main__":
     mock_file_man = MockFileMan()
     journal.do_wipe_routine(1, mock_file_man)
 
-    # Clean up
-    import os
+    def debug_cleanup():
+        import os
+        os.remove("mock_disk.bin")
+        os.remove("mock_journal.bin")
 
-    os.remove("mock_disk.bin")
-    os.remove("mock_journal.bin")
+    # debug_cleanup()  # Comment in/out as needed
 
     print("Journal tests completed.")
