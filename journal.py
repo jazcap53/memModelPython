@@ -45,7 +45,7 @@ class Journal:
 
         self.js.seek(self.META_LEN)
 
-        # Rest of the initialization code remains the same
+        # Rest of the initialization code
         self.p_buf = [None] * self.NUM_PGS_JRNL_BUF
         self.meta_get = 0
         self.meta_put = 0
@@ -117,19 +117,18 @@ class Journal:
 
             # Write updated metadata to start of file
             self.wrt_metadata(self.meta_get, self.meta_put, self.meta_sz)
+            self.js.seek(self.meta_put)  # Position file pointer after writing metadata
             for s in cg.selectors:
                 self.wrt_field(s.to_bytearray(), self.sz, True)
-            print(f"DEBUG: Updated metadata - get: {self.meta_get}, put: {self.meta_put}, size: {self.meta_sz}")
+
+            self.js.flush()
+            os.fsync(self.js.fileno())
+
+            self.js.seek(0)  # Reset file position after writing
 
             print(f"\tChange log written to journal at time {get_cur_time()}")
             r_cg_log.cg_line_ct = 0
             self.p_stt.wrt("Change log written")
-
-            self.js.flush()
-            os.fsync(self.js.fileno())
-            self.js.close()
-            self.js = open(self.f_name, "rb+")
-            _ = False
 
     def purge_jrnl(self, keep_going: bool, had_crash: bool):
         self.reset_file()  # Reset file state before purging
@@ -234,14 +233,10 @@ class Journal:
         start_tag_bytes = self.START_TAG.to_bytes(8, byteorder='big')
         bytes_written = self.js.write(start_tag_bytes)
         self.ttl_bytes += bytes_written
-        print(
-            f"DEBUG: Wrote START_TAG: {self.START_TAG:X} ({bytes_written} bytes) at position {self.js.tell() - bytes_written}")
 
         # Write placeholder for cg_bytes (which will be updated later)
         initial_cg_bytes = 0
-        self.wrt_field(struct.pack('>Q', initial_cg_bytes), 8, True)  # Initially write 0, update later
-        print(
-            f"DEBUG: Writing initial cg_bytes: {initial_cg_bytes}, Actual bytes: {struct.pack('>Q', initial_cg_bytes).hex()}")
+        self.wrt_field(struct.pack('>Q', initial_cg_bytes), 8, True)
 
         for blk_num, changes in r_cg_log.the_log.items():
             for cg in changes:
@@ -251,13 +246,12 @@ class Journal:
                 for s in cg.selectors:
                     self.wrt_field(s.to_bytearray(), self.sz, True)
                 for d in cg.new_data:
-                    self.wrt_field(d if isinstance(d, bytes) else d.data, u32Const.BYTES_PER_LINE.value, True)
+                    self.wrt_field(d if isinstance(d, bytes) else bytes(d), u32Const.BYTES_PER_LINE.value, True)
 
         # Write END_TAG
         self.wrt_field(struct.pack('>Q', self.END_TAG), 8, True)
 
         # Calculate and write actual cg_bytes
-        # Calculate actual_cg_bytes (excluding START_TAG, initial cg_bytes placeholder, and END_TAG)
         actual_cg_bytes = self.ttl_bytes - 24
 
         # Store the current position
@@ -266,9 +260,6 @@ class Journal:
         # Seek to the cg_bytes_pos without changing ttl_bytes
         self.js.seek(cg_bytes_pos)
         self.wrt_field(struct.pack('>Q', actual_cg_bytes), 8, False)
-
-        print(
-            f"DEBUG: Writing actual cg_bytes: {actual_cg_bytes}, Actual bytes: {struct.pack('>Q', actual_cg_bytes).hex()}")
 
         # Return to the end of the written data
         self.js.seek(current_pos)
@@ -280,6 +271,7 @@ class Journal:
 
         self.js.flush()
         os.fsync(self.js.fileno())
+        self.js.seek(0)  # Reset file position to beginning
 
     def wrt_cgs_sz_to_jrnl(self, cg_bytes: int, cg_bytes_pos: int):
         try:
@@ -426,12 +418,18 @@ class Journal:
 
             r_j_cg_log.add_to_log(cg)
 
+        # Try to read end tag
         try:
-            ck_end_tag = struct.unpack('>Q', self.rd_field(8))[0]
-            self.ttl_bytes += 8  # Account for end tag
-        except struct.error:
-            print("WARNING: Failed to read END_TAG")
-            ck_end_tag = 0  # Use a safe default
+            end_tag_bytes = self.rd_field(8)
+            if len(end_tag_bytes) == 8:
+                ck_end_tag = struct.unpack('>Q', end_tag_bytes)[0]
+                self.ttl_bytes += 8
+            else:
+                print(f"Warning: Could only read {len(end_tag_bytes)} bytes for END_TAG")
+                ck_end_tag = 0
+        except Exception as e:
+            print(f"Error reading END_TAG: {e}")
+            ck_end_tag = 0
 
         print(f"DEBUG: Read END_TAG: {ck_end_tag}")
         print(f"DEBUG: Total bytes read: {self.ttl_bytes}, Expected: {cg_bytes + 24}")
@@ -567,13 +565,20 @@ if __name__ == "__main__":
             temp[:] = b'\0' * size
 
 
-    class MockChangeLog:
+    class MockChangeLog(ChangeLog):
         def __init__(self):
+            super().__init__()
             self.the_log = {}
             self.cg_line_ct = 0
 
         def print(self):
             print("Mock ChangeLog print")
+
+        def add_to_log(self, cg: Change):
+            if cg.block_num not in self.the_log:
+                self.the_log[cg.block_num] = []
+            self.the_log[cg.block_num].append(cg)
+            self.cg_line_ct += len(cg.new_data)
 
 
     class MockStatus:
