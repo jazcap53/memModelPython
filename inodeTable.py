@@ -110,13 +110,13 @@ class InodeTable:
                     for j in range(lNum_tConst.INODES_PER_BLOCK.value):
                         node = Inode()
                         node.b_nums = list(
-                            struct.unpack(f'{u32Const.CT_INODE_BNUMS.value}I',
+                            struct.unpack(f'<{u32Const.CT_INODE_BNUMS.value}I',
                                           f.read(4 * u32Const.CT_INODE_BNUMS.value)))
-                        node.lkd, = struct.unpack('I', f.read(4))
-                        node.cr_time, = struct.unpack('Q', f.read(8))
-                        node.indirect = list(struct.unpack(f'{u32Const.CT_INODE_INDIRECTS.value}I',
+                        node.lkd, = struct.unpack('<I', f.read(4))
+                        node.cr_time, = struct.unpack('<Q', f.read(8))
+                        node.indirect = list(struct.unpack(f'<{u32Const.CT_INODE_INDIRECTS.value}I',
                                                            f.read(4 * u32Const.CT_INODE_INDIRECTS.value)))
-                        node.i_num, = struct.unpack('I', f.read(4))
+                        node.i_num, = struct.unpack('<I', f.read(4))
                         self.tbl[i][j] = node
                         if node.i_num != SENTINEL_INUM:
                             self.avail.reset(i * lNum_tConst.INODES_PER_BLOCK.value + j)
@@ -129,11 +129,11 @@ class InodeTable:
             f.write(self.avail.to_bytes())
             for block in self.tbl:
                 for node in block:
-                    f.write(struct.pack(f'{u32Const.CT_INODE_BNUMS.value}I', *node.b_nums))
-                    f.write(struct.pack('I', node.lkd))
-                    f.write(struct.pack('Q', node.cr_time))
-                    f.write(struct.pack(f'{u32Const.CT_INODE_INDIRECTS.value}I', *node.indirect))
-                    f.write(struct.pack('I', node.i_num))
+                    f.write(struct.pack(f'<{u32Const.CT_INODE_BNUMS.value}I', *node.b_nums))
+                    f.write(struct.pack('<I', node.lkd))
+                    f.write(struct.pack('<Q', node.cr_time))
+                    f.write(struct.pack(f'<{u32Const.CT_INODE_INDIRECTS.value}I', *node.indirect))
+                    f.write(struct.pack('<I', node.i_num))
             print(f"\n{self.tabs(1)}Inode table stored.")
 
         self.shifter.shift_files(self.file_name, do_store_tbl, binary_mode=True)
@@ -156,12 +156,12 @@ if __name__ == '__main__':
         f.write(b'\x00' * (u32Const.NUM_INODE_TBL_BLOCKS.value * lNum_tConst.INODES_PER_BLOCK.value // 8))
         for _ in range(u32Const.NUM_INODE_TBL_BLOCKS.value * lNum_tConst.INODES_PER_BLOCK.value):
             f.write(
-                struct.pack(f'{u32Const.CT_INODE_BNUMS.value}I', *([SENTINEL_BNUM] * u32Const.CT_INODE_BNUMS.value)))
-            f.write(struct.pack('I', SENTINEL_INUM))
-            f.write(struct.pack('Q', 0))
-            f.write(struct.pack(f'{u32Const.CT_INODE_INDIRECTS.value}I',
+                struct.pack(f'<{u32Const.CT_INODE_BNUMS.value}I', *([SENTINEL_BNUM] * u32Const.CT_INODE_BNUMS.value)))
+            f.write(struct.pack('<I', SENTINEL_INUM))
+            f.write(struct.pack('<Q', 0))
+            f.write(struct.pack(f'<{u32Const.CT_INODE_INDIRECTS.value}I',
                                 *([SENTINEL_BNUM] * u32Const.CT_INODE_INDIRECTS.value)))
-            f.write(struct.pack('I', SENTINEL_INUM))
+            f.write(struct.pack('<I', SENTINEL_INUM))
 
     inode_table = InodeTable(temp_filename)
 

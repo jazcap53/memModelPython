@@ -11,8 +11,11 @@ import os
 
 
 class Journal:
+    # Note: the values of START_TAG and END_TAG were arbitrarily chosen
     START_TAG = 0xf19186770cf76d4f  # 17406841880640449871
     END_TAG = 0x3a5d27655ea00dae  # 4205560943366639022
+    # START_TAG = 0x4f6df70c778691f1
+    # END_TAG = 0xae0da05e65275d3a
     META_LEN = 24
     NUM_PGS_JRNL_BUF = 16
     CPP_SELECT_T_SZ = 8
@@ -77,7 +80,7 @@ class Journal:
         wrt_pt = 24
         bytes_stored = 0
         self.js.seek(0)
-        self.js.write(struct.pack('>qqq', rd_pt, wrt_pt, bytes_stored))
+        self.js.write(struct.pack('<qqq', rd_pt, wrt_pt, bytes_stored))
 
     def wrt_cg_log_to_jrnl(self, r_cg_log: ChangeLog):
         if r_cg_log.cg_line_ct:
@@ -231,26 +234,26 @@ class Journal:
 
         # Writing START_TAG
         self.js.seek(self.META_LEN)
-        start_tag_bytes = self.START_TAG.to_bytes(8, byteorder='big')
+        start_tag_bytes = self.START_TAG.to_bytes(8, byteorder='little')
         bytes_written = self.js.write(start_tag_bytes)
         self.ttl_bytes += bytes_written  # check self.js.tell(), bytes_written
 
         # Write placeholder for cg_bytes (which will be updated later)
         initial_cg_bytes = 0
-        self.wrt_field(struct.pack('>Q', initial_cg_bytes), 8, True)
+        self.wrt_field(struct.pack('<Q', initial_cg_bytes), 8, True)
 
         for blk_num, changes in r_cg_log.the_log.items():  # check self.js.tell(), self.ttl_bytes
             for cg in changes:
-                self.wrt_field(struct.pack('I', cg.block_num), 4, True)
+                self.wrt_field(struct.pack('<I', cg.block_num), 4, True)
                 self.blks_in_jrnl[cg.block_num] = True
-                self.wrt_field(struct.pack('>Q', cg.time_stamp), 8, True)
+                self.wrt_field(struct.pack('<Q', cg.time_stamp), 8, True)
                 for s in cg.selectors:
                     self.wrt_field(s.to_bytearray(), self.sz, True)
                 for d in cg.new_data:
                     self.wrt_field(d if isinstance(d, bytes) else bytes(d), u32Const.BYTES_PER_LINE.value, True)
 
         # Write END_TAG  # check self.js.tell(), self.ttl_bytes
-        self.wrt_field(struct.pack('>Q', self.END_TAG), 8, True)
+        self.wrt_field(struct.pack('<Q', self.END_TAG), 8, True)
 
         # Calculate and write actual cg_bytes
         actual_cg_bytes = self.ttl_bytes - 24  # check self.js.tell(), self.ttl_bytes, actual_cg_bytes
@@ -260,7 +263,7 @@ class Journal:
 
         # Seek to the cg_bytes_pos without changing ttl_bytes
         self.js.seek(cg_bytes_pos)
-        self.wrt_field(struct.pack('>Q', actual_cg_bytes), 8, False)
+        self.wrt_field(struct.pack('<Q', actual_cg_bytes), 8, False)
 
         # Return to the end of the written data
         self.js.seek(current_pos)
@@ -280,7 +283,7 @@ class Journal:
             cg_bytes = self.ttl_bytes - 16
 
             self.js.seek(cg_bytes_pos)
-            self.wrt_field(struct.pack('>Q', cg_bytes), 8, False)
+            self.wrt_field(struct.pack('<Q', cg_bytes), 8, False)
 
             self.js.seek(self.orig_p_pos + self.ttl_bytes)
             self.final_p_pos = self.js.tell()
@@ -310,11 +313,11 @@ class Journal:
 
     def rd_metadata(self):
         self.js.seek(0)
-        self.meta_get, self.meta_put, self.meta_sz = struct.unpack('qqq', self.js.read(24))
+        self.meta_get, self.meta_put, self.meta_sz = struct.unpack('<qqq', self.js.read(24))
 
     def wrt_metadata(self, new_g_pos: int, new_p_pos: int, u_ttl_bytes: int):
         self.js.seek(0)
-        metadata = struct.pack('qqq', new_g_pos, new_p_pos, u_ttl_bytes)
+        metadata = struct.pack('<qqq', new_g_pos, new_p_pos, u_ttl_bytes)
         self.js.write(metadata)
         print(f"DEBUG: Writing metadata: g_pos={new_g_pos}, p_pos={new_p_pos}, ttl_bytes={u_ttl_bytes}")
 
@@ -387,30 +390,34 @@ class Journal:
     def rd_jrnl(self, r_j_cg_log: ChangeLog) -> Tuple[int, int, int]:
         self.ttl_bytes = 0
 
-        start_tag_bytes = self.js.read(8)
+        start_tag_bytes = self.rd_field(8)
         if len(start_tag_bytes) != 8:
-            print(f"Error: Expected to read 8 bytes, but read {len(start_tag_bytes)} bytes")
+            print(f"Error: Expected to read 8 bytes for START_TAG, but read {len(start_tag_bytes)} bytes")
             return 0, 0, 0
-        ck_start_tag = int.from_bytes(start_tag_bytes, byteorder='big')
-        self.ttl_bytes += 8  # check: self.js.tell(), ck_start_tag, self.ttl_bytes
+        ck_start_tag = struct.unpack('<Q', start_tag_bytes)[0]
+        self.ttl_bytes += 8
 
         if ck_start_tag != self.START_TAG:
             print(f"Invalid journaled data. Start tag: {ck_start_tag:X} (expected: {self.START_TAG:X})")
-            return 0, 0, 0  # Return safe values if we have corrupt data
+            return 0, 0, 0
 
-        cg_bytes_bytes = self.js.read(8)
-        cg_bytes = struct.unpack('>Q', cg_bytes_bytes)[0]
-        self.ttl_bytes += 8  # check: self.js.tell(), cg_bytes
+        cg_bytes_bytes = self.rd_field(8)
+        cg_bytes = struct.unpack('<Q', cg_bytes_bytes)[0]
+        self.ttl_bytes += 8
 
-        print(f"DEBUG: Read cg_bytes: {cg_bytes}, ck_start_tag: {ck_start_tag}")  # Debug print
+        print(f"DEBUG: Read cg_bytes: {cg_bytes}, ck_start_tag: {ck_start_tag:X}")
 
-        while self.ttl_bytes < cg_bytes + 16:  # +16 for start tag and cg_bytes fields
-            b_num = struct.unpack('I', self.rd_field(4))[0]
-            if b_num == 0xFFFFFFFF:  # End of changes
+        while self.ttl_bytes < cg_bytes + 16:
+            b_num_bytes = self.rd_field(4)
+            if len(b_num_bytes) != 4:
+                print(f"Error: Unexpected end of data while reading block number.")
+                break
+            b_num = struct.unpack('<I', b_num_bytes)[0]
+            if b_num == 0xFFFFFFFF:
                 break
 
             cg = Change(b_num, False)
-            cg.time_stamp = struct.unpack('>Q', self.rd_field(8))[0]
+            cg.time_stamp = struct.unpack('<Q', self.rd_field(8))[0]
 
             num_data_lines = self.get_num_data_lines(cg)
 
@@ -420,20 +427,18 @@ class Journal:
 
             r_j_cg_log.add_to_log(cg)
 
-        # Try to read end tag
-        try:  # check: self.js.tell(), self.ttl_bytes, local variable 'cg' if it exists
-            end_tag_bytes = self.rd_field(8)
-            if len(end_tag_bytes) == 8:
-                ck_end_tag = struct.unpack('>Q', end_tag_bytes)[0]
-                self.ttl_bytes += 8
-            else:
-                print(f"Warning: Could only read {len(end_tag_bytes)} bytes for END_TAG")
-                ck_end_tag = 0
-        except Exception as e:
-            print(f"Error reading END_TAG: {e}")
+        end_tag_bytes = self.rd_field(8)
+        if len(end_tag_bytes) == 8:
+            ck_end_tag = struct.unpack('<Q', end_tag_bytes)[0]
+            self.ttl_bytes += 8
+        else:
+            print(f"Warning: Could only read {len(end_tag_bytes)} bytes for END_TAG")
             ck_end_tag = 0
 
-        print(f"DEBUG: Read END_TAG: {ck_end_tag}")  # check: self.js.tell(), ck_end_tag, self.ttl_bytes
+        if ck_end_tag != self.END_TAG:
+            print(f"Invalid journaled data. End tag: {ck_end_tag:X} (expected: {self.END_TAG:X})")
+
+        print(f"DEBUG: Read END_TAG: {ck_end_tag:X}")
         print(f"DEBUG: Total bytes read: {self.ttl_bytes}, Expected: {cg_bytes + 24}")
 
         return ck_start_tag, ck_end_tag, self.ttl_bytes

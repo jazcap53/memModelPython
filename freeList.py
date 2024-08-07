@@ -26,13 +26,13 @@ class FreeList:
         self.bitsFrm = ArrBit.from_bytes(bitsFrm_data, u32Const.NUM_FREE_LIST_BLOCKS.value,
                                          u32Const.BITS_PER_PAGE.value)
         self.bitsTo = ArrBit.from_bytes(bitsTo_data, u32Const.NUM_FREE_LIST_BLOCKS.value, u32Const.BITS_PER_PAGE.value)
-        self.fromPosn = struct.unpack('I', fromPosn_data)[0]
+        self.fromPosn = struct.unpack('<I', fromPosn_data)[0]
 
     def store_lst(self):
         self.frs.seek(0)
         self.frs.write(self.bitsFrm.to_bytes())
         self.frs.write(self.bitsTo.to_bytes())
-        self.frs.write(struct.pack('I', self.fromPosn))
+        self.frs.write(struct.pack('<I', self.fromPosn))
         print(f"\n{self.tabs(1)}Free list stored.")
 
     def get_blk(self) -> bNum_t:
