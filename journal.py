@@ -11,8 +11,8 @@ import os
 
 
 class Journal:
-    START_TAG = 17406841880640449871
-    END_TAG = 4205560943366639022
+    START_TAG = 0xf19186770cf76d4f  # 17406841880640449871
+    END_TAG = 0x3a5d27655ea00dae  # 4205560943366639022
     META_LEN = 24
     NUM_PGS_JRNL_BUF = 16
     CPP_SELECT_T_SZ = 8
@@ -77,7 +77,7 @@ class Journal:
         wrt_pt = 24
         bytes_stored = 0
         self.js.seek(0)
-        self.js.write(struct.pack('qqq', rd_pt, wrt_pt, bytes_stored))
+        self.js.write(struct.pack('>qqq', rd_pt, wrt_pt, bytes_stored))
 
     def wrt_cg_log_to_jrnl(self, r_cg_log: ChangeLog):
         if r_cg_log.cg_line_ct:
@@ -126,6 +126,7 @@ class Journal:
 
             self.js.seek(0)  # Reset file position after writing
 
+            # check: self.meta_get, self.meta_put, self.meta_sz
             print(f"\tChange log written to journal at time {get_cur_time()}")
             r_cg_log.cg_line_ct = 0
             self.p_stt.wrt("Change log written")
@@ -232,13 +233,13 @@ class Journal:
         self.js.seek(self.META_LEN)
         start_tag_bytes = self.START_TAG.to_bytes(8, byteorder='big')
         bytes_written = self.js.write(start_tag_bytes)
-        self.ttl_bytes += bytes_written
+        self.ttl_bytes += bytes_written  # check self.js.tell(), bytes_written
 
         # Write placeholder for cg_bytes (which will be updated later)
         initial_cg_bytes = 0
         self.wrt_field(struct.pack('>Q', initial_cg_bytes), 8, True)
 
-        for blk_num, changes in r_cg_log.the_log.items():
+        for blk_num, changes in r_cg_log.the_log.items():  # check self.js.tell(), self.ttl_bytes
             for cg in changes:
                 self.wrt_field(struct.pack('I', cg.block_num), 4, True)
                 self.blks_in_jrnl[cg.block_num] = True
@@ -248,11 +249,11 @@ class Journal:
                 for d in cg.new_data:
                     self.wrt_field(d if isinstance(d, bytes) else bytes(d), u32Const.BYTES_PER_LINE.value, True)
 
-        # Write END_TAG
+        # Write END_TAG  # check self.js.tell(), self.ttl_bytes
         self.wrt_field(struct.pack('>Q', self.END_TAG), 8, True)
 
         # Calculate and write actual cg_bytes
-        actual_cg_bytes = self.ttl_bytes - 24
+        actual_cg_bytes = self.ttl_bytes - 24  # check self.js.tell(), self.ttl_bytes, actual_cg_bytes
 
         # Store the current position
         current_pos = self.js.tell()
@@ -372,6 +373,7 @@ class Journal:
 
         ck_start_tag, ck_end_tag, ttl_bytes = self.rd_jrnl(r_j_cg_log)
 
+        # check: r_j_cg_log contents, ck_start_tag, ck_end_tag, ttl_bytes
         print(f"DEBUG: Read from journal - START_TAG: {ck_start_tag}, END_TAG: {ck_end_tag}, Total Bytes: {ttl_bytes}")
 
         if ck_start_tag != self.START_TAG:
@@ -390,7 +392,7 @@ class Journal:
             print(f"Error: Expected to read 8 bytes, but read {len(start_tag_bytes)} bytes")
             return 0, 0, 0
         ck_start_tag = int.from_bytes(start_tag_bytes, byteorder='big')
-        self.ttl_bytes += 8
+        self.ttl_bytes += 8  # check: self.js.tell(), ck_start_tag, self.ttl_bytes
 
         if ck_start_tag != self.START_TAG:
             print(f"Invalid journaled data. Start tag: {ck_start_tag:X} (expected: {self.START_TAG:X})")
@@ -398,7 +400,7 @@ class Journal:
 
         cg_bytes_bytes = self.js.read(8)
         cg_bytes = struct.unpack('>Q', cg_bytes_bytes)[0]
-        self.ttl_bytes += 8
+        self.ttl_bytes += 8  # check: self.js.tell(), cg_bytes
 
         print(f"DEBUG: Read cg_bytes: {cg_bytes}, ck_start_tag: {ck_start_tag}")  # Debug print
 
@@ -419,7 +421,7 @@ class Journal:
             r_j_cg_log.add_to_log(cg)
 
         # Try to read end tag
-        try:
+        try:  # check: self.js.tell(), self.ttl_bytes, local variable 'cg' if it exists
             end_tag_bytes = self.rd_field(8)
             if len(end_tag_bytes) == 8:
                 ck_end_tag = struct.unpack('>Q', end_tag_bytes)[0]
@@ -431,7 +433,7 @@ class Journal:
             print(f"Error reading END_TAG: {e}")
             ck_end_tag = 0
 
-        print(f"DEBUG: Read END_TAG: {ck_end_tag}")
+        print(f"DEBUG: Read END_TAG: {ck_end_tag}")  # check: self.js.tell(), ck_end_tag, self.ttl_bytes
         print(f"DEBUG: Total bytes read: {self.ttl_bytes}, Expected: {cg_bytes + 24}")
 
         return ck_start_tag, ck_end_tag, self.ttl_bytes
