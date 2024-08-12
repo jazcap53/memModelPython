@@ -519,10 +519,10 @@ class Journal:
     def crc_check_pg(self, p_pr: Tuple[bNum_t, Page]):
         p_uc_dat = bytearray(p_pr[1].dat)
 
-        BoostCRC.wrt_bytes_big_e(0x00000000, p_uc_dat[u32Const.BYTES_PER_PAGE.value - u32Const.CRC_BYTES.value:],
+        BoostCRC.wrt_bytes_little_e(0x00000000, p_uc_dat[u32Const.BYTES_PER_PAGE.value - u32Const.CRC_BYTES.value:],
                                  u32Const.CRC_BYTES.value)
         code = BoostCRC.get_code(p_uc_dat, u32Const.BYTES_PER_PAGE.value)
-        BoostCRC.wrt_bytes_big_e(code, p_uc_dat[u32Const.BYTES_PER_PAGE.value - u32Const.CRC_BYTES.value:],
+        BoostCRC.wrt_bytes_little_e(code, p_uc_dat[u32Const.BYTES_PER_PAGE.value - u32Const.CRC_BYTES.value:],
                                  u32Const.CRC_BYTES.value)
         code2 = BoostCRC.get_code(p_uc_dat, u32Const.BYTES_PER_PAGE.value)
 

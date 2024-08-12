@@ -10,16 +10,9 @@ class BoostCRC:
 
     @staticmethod
     def wrt_bytes_little_e(num: int, p: bytearray, byt: int) -> None:
-        if byt == num.bit_length() // 8 + (1 if num.bit_length() % 8 else 0):
-            # If writing to the end of the array, we need to write in reverse order
-            if p.startpos > 0:
-                for i in range(byt - 1, -1, -1):
-                    p[p.startpos + i] = num & 0xFF
-                    num >>= 8
-            else:
-                for i in range(byt):
-                    p[i] = num & 0xFF
-                    num >>= 8
+        for i in range(byt):
+            p[i] = num & 0xFF
+            num >>= 8
 
 
 if __name__ == '__main__':
