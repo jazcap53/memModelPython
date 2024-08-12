@@ -377,14 +377,14 @@ class Journal:
         ck_start_tag, ck_end_tag, ttl_bytes = self.rd_jrnl(r_j_cg_log)
 
         # check: r_j_cg_log contents, ck_start_tag, ck_end_tag, ttl_bytes
-        print(f"DEBUG: Read from journal - START_TAG: {ck_start_tag}, END_TAG: {ck_end_tag}, Total Bytes: {ttl_bytes}")
+        print(f"DEBUG: Read from journal - START_TAG: {hex(ck_start_tag)}, END_TAG: {hex(ck_end_tag)}, Total Bytes: {ttl_bytes}")
 
         if ck_start_tag != self.START_TAG:
-            print(f"Error in rd_last_jrnl: Start tag mismatch: expected {self.START_TAG}, got {ck_start_tag}")
+            print(f"Error in rd_last_jrnl: Start tag mismatch: expected {self.START_TAG}, got {hex(ck_start_tag)}")
             return
 
         if ck_end_tag != self.END_TAG:
-            print(f"Error in rd_last_jrnl: End tag mismatch: expected {self.END_TAG}, got {ck_end_tag}")
+            print(f"Error in rd_last_jrnl: End tag mismatch: expected {self.END_TAG}, got {hex(ck_end_tag)}")
             return
 
     def rd_jrnl(self, r_j_cg_log: ChangeLog) -> Tuple[int, int, int]:
