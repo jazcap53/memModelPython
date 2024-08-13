@@ -20,7 +20,8 @@ class Journal:
     NUM_PGS_JRNL_BUF = 16
     CPP_SELECT_T_SZ = 8
 
-    def __init__(self, f_name: str, sim_disk, change_log, status, crash_chk):
+    def __init__(self, f_name: str, sim_disk, change_log, status, crash_chk, debug=False):
+        self.debug = debug
         self.f_name = f_name
         self.p_d = sim_disk
         self.p_cL = change_log
@@ -135,6 +136,9 @@ class Journal:
             self.p_stt.wrt("Change log written")
 
     def purge_jrnl(self, keep_going: bool, had_crash: bool):
+        if self.debug:
+            return
+
         self.reset_file()  # Reset file state before purging
 
         # self.js.seek(self.META_LEN, 0)
@@ -557,6 +561,11 @@ class Journal:
 
 if __name__ == "__main__":
     # Basic test setup
+    DEBUG = True  # Set this to False to run normal operations
+
+    # Print both big-endian and little-endian representations
+    print(f"Journal.START_TAG (as in code, big-endian): 0x{Journal.START_TAG:016x}")
+    print(f"Journal.START_TAG (little-endian representation): 0x{Journal.START_TAG.to_bytes(8, 'little').hex()}")
     class MockSimDisk:
         def __init__(self):
             self.ds = open("mock_disk.bin", "wb+")
@@ -617,29 +626,32 @@ if __name__ == "__main__":
     journal.wrt_cg_log_to_jrnl(change_log)
     print("wrt_cg_log_to_jrnl completed successfully!")
 
-    # Test purge_jrnl
-    journal.purge_jrnl(True, False)
+    if not DEBUG:
+        # Test purge_jrnl
+        journal.purge_jrnl(True, False)
 
-    # Test is_in_jrnl
-    print(f"Is block 1 in journal? {journal.is_in_jrnl(1)}")
+        # Test is_in_jrnl
+        print(f"Is block 1 in journal? {journal.is_in_jrnl(1)}")
 
-    # Test do_wipe_routine
-    class MockFileMan:
-        def do_store_inodes(self):
-            print("Storing inodes")
+        # Test do_wipe_routine
+        class MockFileMan:
+            def do_store_inodes(self):
+                print("Storing inodes")
 
-        def do_store_free_list(self):
-            print("Storing free list")
+            def do_store_free_list(self):
+                print("Storing free list")
 
 
-    mock_file_man = MockFileMan()
-    journal.do_wipe_routine(1, mock_file_man)
+        mock_file_man = MockFileMan()
+        journal.do_wipe_routine(1, mock_file_man)
 
-    def debug_cleanup():
-        import os
-        os.remove("mock_disk.bin")
-        os.remove("mock_journal.bin")
+        def output_file_cleanup():
+            import os
+            os.remove("mock_disk.bin")
+            os.remove("mock_journal.bin")
 
-    # debug_cleanup()  # Comment in/out as needed
+        # output_file_cleanup()  # Comment in/out as needed
+
+    journal.js.close()
 
     print("Journal tests completed.")
