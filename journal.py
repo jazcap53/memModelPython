@@ -237,10 +237,18 @@ class Journal:
         self.orig_p_pos = self.js.tell()
 
         # Writing START_TAG
+
+        # self.js.seek(self.META_LEN)
+        # start_tag_bytes = self.START_TAG.to_bytes(8, byteorder='little')
+        # bytes_written = self.js.write(start_tag_bytes)
+        # self.ttl_bytes += bytes_written  # check self.js.tell(), bytes_written
+
         self.js.seek(self.META_LEN)
         start_tag_bytes = self.START_TAG.to_bytes(8, byteorder='little')
-        bytes_written = self.js.write(start_tag_bytes)
-        self.ttl_bytes += bytes_written  # check self.js.tell(), bytes_written
+        print(f"DEBUG: start_tag_bytes created as: {start_tag_bytes.hex()}")
+        for byte in start_tag_bytes:
+            self.js.write(bytes([byte]))
+        self.ttl_bytes += 8
 
         # Write placeholder for cg_bytes (which will be updated later)
         initial_cg_bytes = 0
