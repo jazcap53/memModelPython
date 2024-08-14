@@ -1,3 +1,4 @@
+from ajTypes import write_64bit, read_64bit, write_32bit, read_32bit, to_bytes_64bit, from_bytes_64bit
 import struct
 from typing import List, Dict, Tuple
 from collections import deque
@@ -95,45 +96,68 @@ class Journal:
             try:
                 assert self.orig_p_pos >= self.META_LEN, "Original position is less than META_LEN"
             except AssertionError as e:
-                print(f"Error in Journal.__init__: {str(e)}")
+                print(f"Error in wrt_cg_log_to_jrnl: {str(e)}")
+                return
 
             self.ttl_bytes = 0
             cg_bytes = 0
             cg_bytes_pos = self.js.tell() + 8  # Position after START_TAG
 
-            self.wrt_cgs_to_jrnl(r_cg_log, cg_bytes, cg_bytes_pos)
-            self.wrt_cgs_sz_to_jrnl(cg_bytes, cg_bytes_pos)
+            # Write START_TAG
+            self.wrt_field(to_bytes_64bit(self.START_TAG), 8, True)
 
+            # Write placeholder for cg_bytes
+            self.wrt_field(to_bytes_64bit(0), 8, True)
+
+            # Write change log data
+            for blk_num, changes in r_cg_log.the_log.items():
+                for cg in changes:
+                    cg_bytes += self.write_change(cg)
+
+            # Write END_TAG
+            self.wrt_field(to_bytes_64bit(self.END_TAG), 8, True)
+
+            # Update cg_bytes
             current_pos = self.js.tell()
-            new_g_pos = self.orig_p_pos  # Where this chunk of data starts
-            new_p_pos = current_pos  # Where the NEXT chunk should start
+            self.js.seek(cg_bytes_pos)
+            self.wrt_field(to_bytes_64bit(cg_bytes), 8, False)
+            self.js.seek(current_pos)
 
-            # Handle journal wraparound
+            # Update metadata
+            new_g_pos = self.orig_p_pos
+            new_p_pos = current_pos
             if new_p_pos >= u32Const.JRNL_SIZE.value - self.META_LEN:
-                new_p_pos = self.META_LEN  # Reset to start, after metadata
+                new_p_pos = self.META_LEN
 
-            bytes_written = current_pos - self.orig_p_pos  # How much we wrote this time
-
-            # Update total metadata
+            bytes_written = current_pos - self.orig_p_pos
             self.meta_get = new_g_pos
             self.meta_put = new_p_pos
             self.meta_sz += bytes_written
 
-            # Write updated metadata to start of file
             self.wrt_metadata(self.meta_get, self.meta_put, self.meta_sz)
-            self.js.seek(self.meta_put)  # Position file pointer after writing metadata
-            for s in cg.selectors:
-                self.wrt_field(s.to_bytearray(), self.sz, True)
+            self.js.seek(self.meta_put)
+
+            # Perform consistency tests
+            self.do_test1()
 
             self.js.flush()
             os.fsync(self.js.fileno())
+            self.js.seek(0)  # Reset file position to beginning
 
-            self.js.seek(0)  # Reset file position after writing
-
-            # check: self.meta_get, self.meta_put, self.meta_sz
             print(f"\tChange log written to journal at time {get_cur_time()}")
             r_cg_log.cg_line_ct = 0
             self.p_stt.wrt("Change log written")
+
+    def write_change(self, cg: Change) -> int:
+        bytes_written = 0
+        bytes_written += self.wrt_field(to_bytes_64bit(cg.block_num), 8, True)
+        bytes_written += self.wrt_field(to_bytes_64bit(cg.time_stamp), 8, True)
+        for s in cg.selectors:
+            bytes_written += self.wrt_field(s.to_bytearray(), self.sz, True)
+        for d in cg.new_data:
+            bytes_written += self.wrt_field(d if isinstance(d, bytes) else bytes(d), u32Const.BYTES_PER_LINE.value,
+                                            True)
+        return bytes_written
 
     def purge_jrnl(self, keep_going: bool, had_crash: bool):
         if self.debug:
@@ -198,7 +222,8 @@ class Journal:
             self.purge_jrnl()
             self.wipers.clear_array()
 
-    def wrt_field(self, data: bytes, dat_len: int, do_ct: bool):
+    def wrt_field(self, data: bytes, dat_len: int, do_ct: bool) -> int:
+        bytes_written = 0
         p_pos = self.js.tell()
         buf_sz = u32Const.JRNL_SIZE.value
         end_pt = p_pos + dat_len
@@ -206,23 +231,49 @@ class Journal:
         if end_pt > buf_sz:
             over = end_pt - buf_sz
             under = dat_len - over
-            self.js.write(data[:under])
-            if do_ct:
-                self.ttl_bytes += under
-            self.js.seek(self.META_LEN)
-            self.js.write(data[under:])
+
+            if dat_len == 8:  # 64-bit value
+                value = from_bytes_64bit(data)
+                write_64bit(self.js, value & ((1 << (under * 8)) - 1))
+                bytes_written += under
+                if do_ct:
+                    self.ttl_bytes += under
+                self.js.seek(self.META_LEN)
+                write_64bit(self.js, value >> (under * 8))
+                bytes_written += over
+            elif dat_len == 4:  # 32-bit value
+                value = int.from_bytes(data, byteorder='little')
+                write_32bit(self.js, value & ((1 << (under * 8)) - 1))
+                bytes_written += under
+                if do_ct:
+                    self.ttl_bytes += under
+                self.js.seek(self.META_LEN)
+                write_32bit(self.js, value >> (under * 8))
+                bytes_written += over
+            else:
+                self.js.write(data[:under])
+                bytes_written += under
+                if do_ct:
+                    self.ttl_bytes += under
+                self.js.seek(self.META_LEN)
+                self.js.write(data[under:])
+                bytes_written += over
+
             if do_ct:
                 self.ttl_bytes += over
-        elif end_pt == buf_sz:
-            self.js.write(data)
-            if do_ct:
-                self.ttl_bytes += dat_len
-            self.js.seek(self.META_LEN)
         else:
-            self.js.write(data)
+            if dat_len == 8:
+                write_64bit(self.js, from_bytes_64bit(data))
+            elif dat_len == 4:
+                write_32bit(self.js, int.from_bytes(data, byteorder='little'))
+            else:
+                self.js.write(data)
+            bytes_written = dat_len
             if do_ct:
                 self.ttl_bytes += dat_len
+
         self.final_p_pos = self.js.tell()
+        return bytes_written
 
     def advance_strm(self, length: int):
         new_pos = self.js.tell() + length
@@ -307,8 +358,7 @@ class Journal:
 
     def do_test1(self):
         try:
-            assert 0 < self.ttl_bytes < u32Const.JRNL_SIZE.value - self.META_LEN, f"Total bytes out of expected "
-            "range: {self.ttl_bytes}"
+            assert 0 < self.ttl_bytes < u32Const.JRNL_SIZE.value - self.META_LEN, f"Total bytes out of expected range: {self.ttl_bytes}"
 
             expected_bytes = self.final_p_pos - self.orig_p_pos
             if expected_bytes < 0:  # Handle wraparound
@@ -376,7 +426,6 @@ class Journal:
             print(f"Error: Invalid metadata. meta_get={self.meta_get}")
             return
 
-        # self.js.seek(self.meta_get)
         self.js.seek(self.META_LEN if self.meta_get == -1 else self.meta_get)
         orig_g_pos = self.js.tell()
 
@@ -386,18 +435,24 @@ class Journal:
             print(f"Error in rd_last_jrnl: {str(e)}")
             return
 
-        ck_start_tag, ck_end_tag, ttl_bytes = self.rd_jrnl(r_j_cg_log)
+        ck_start_tag = from_bytes_64bit(self.rd_field(8))
+        cg_bytes = from_bytes_64bit(self.rd_field(8))
 
-        # check: r_j_cg_log contents, ck_start_tag, ck_end_tag, ttl_bytes
-        print(f"DEBUG: Read from journal - START_TAG: {hex(ck_start_tag)}, END_TAG: {hex(ck_end_tag)}, Total Bytes: {ttl_bytes}")
+        print(f"DEBUG: Read cg_bytes: {cg_bytes}, ck_start_tag: {ck_start_tag:X}")
 
         if ck_start_tag != self.START_TAG:
             print(f"Error in rd_last_jrnl: Start tag mismatch: expected {self.START_TAG}, got {hex(ck_start_tag)}")
             return
 
+        # Continue with reading the journal data
+        ck_end_tag, ttl_bytes = self.rd_jrnl(r_j_cg_log, cg_bytes)
+
         if ck_end_tag != self.END_TAG:
             print(f"Error in rd_last_jrnl: End tag mismatch: expected {self.END_TAG}, got {hex(ck_end_tag)}")
             return
+
+        print(
+            f"DEBUG: Read from journal - START_TAG: {hex(ck_start_tag)}, END_TAG: {hex(ck_end_tag)}, Total Bytes: {ttl_bytes}")
 
     def rd_jrnl(self, r_j_cg_log: ChangeLog) -> Tuple[int, int, int]:
         self.ttl_bytes = 0
@@ -486,17 +541,44 @@ class Journal:
         if end_pt > buf_sz:
             over = end_pt - buf_sz
             under = dat_len - over
-            data = self.js.read(under)
-            self.ttl_bytes += under
-            self.js.seek(self.META_LEN)
-            data += self.js.read(over)
+
+            if dat_len == 8:  # 64-bit value
+                low_bits = read_64bit(self.js)
+                self.ttl_bytes += under
+                self.js.seek(self.META_LEN)
+                high_bits = read_64bit(self.js)
+                value = (high_bits << (under * 8)) | low_bits
+                data = to_bytes_64bit(value)
+            elif dat_len == 4:  # 32-bit value
+                low_bits = read_32bit(self.js)
+                self.ttl_bytes += under
+                self.js.seek(self.META_LEN)
+                high_bits = read_32bit(self.js)
+                value = (high_bits << (under * 8)) | low_bits
+                data = value.to_bytes(4, byteorder='little')
+            else:
+                data = self.js.read(under)
+                self.ttl_bytes += under
+                self.js.seek(self.META_LEN)
+                data += self.js.read(over)
+
             self.ttl_bytes += over
         elif end_pt == buf_sz:
-            data = self.js.read(dat_len)
+            if dat_len == 8:
+                data = to_bytes_64bit(read_64bit(self.js))
+            elif dat_len == 4:
+                data = read_32bit(self.js).to_bytes(4, byteorder='little')
+            else:
+                data = self.js.read(dat_len)
             self.ttl_bytes += dat_len
             self.js.seek(self.META_LEN)
         else:
-            data = self.js.read(dat_len)
+            if dat_len == 8:
+                data = to_bytes_64bit(read_64bit(self.js))
+            elif dat_len == 4:
+                data = read_32bit(self.js).to_bytes(4, byteorder='little')
+            else:
+                data = self.js.read(dat_len)
             self.ttl_bytes += dat_len
 
         return data
@@ -569,7 +651,7 @@ class Journal:
 
 if __name__ == "__main__":
     # Basic test setup
-    DEBUG = True  # Set this to False to run normal operations
+    DEBUG = False  # Set this to False to run normal operations
 
     # Print both big-endian and little-endian representations
     print(f"Journal.START_TAG (as in code, big-endian): 0x{Journal.START_TAG:016x}")

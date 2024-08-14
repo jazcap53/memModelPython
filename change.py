@@ -26,6 +26,8 @@ class Select:
 
 class Change:
     def __init__(self, block_num: int, push_selects: bool = True):
+        if block_num is None or block_num < 0:
+            raise ValueError("Invalid block number provided")
         self.block_num = block_num
         self.time_stamp = 0
         self.arr_next = 0
