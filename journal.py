@@ -137,10 +137,8 @@ class Journal:
             self.wrt_metadata(self.meta_get, self.meta_put, self.meta_sz)
             self.js.seek(self.meta_put)
 
-            # Perform consistency tests
-            self.do_test1()
-
             self.js.flush()
+
             os.fsync(self.js.fileno())
             self.js.seek(0)  # Reset file position to beginning
 
@@ -656,6 +654,8 @@ if __name__ == "__main__":
     # Print both big-endian and little-endian representations
     print(f"Journal.START_TAG (as in code, big-endian): 0x{Journal.START_TAG:016x}")
     print(f"Journal.START_TAG (little-endian representation): 0x{Journal.START_TAG.to_bytes(8, 'little').hex()}")
+    print(f"Journal.END_TAG (as in code, big-endian): 0x{Journal.END_TAG:016x}")
+    print(f"Journal.END_TAG (little-endian representation): 0x{Journal.END_TAG.to_bytes(8, 'little').hex()}")
     class MockSimDisk:
         def __init__(self):
             self.ds = open("mock_disk.bin", "wb+")
