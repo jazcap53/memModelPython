@@ -13,8 +13,10 @@ import os
 
 class Journal:
     # Note: the values of START_TAG and END_TAG were arbitrarily chosen
-    START_TAG = 0xf19186770cf76d4f  # 17406841880640449871
-    END_TAG = 0x3a5d27655ea00dae  # 4205560943366639022
+    # START_TAG = 0xf19186770cf76d4f  # 17406841880640449871
+    # END_TAG = 0x3a5d27655ea00dae  # 4205560943366639022
+    START_TAG = 0x4f6df70c778691f1
+    END_TAG = 0xae0da05e65275d3a
     # START_TAG = 0x4f6df70c778691f1
     # END_TAG = 0xae0da05e65275d3a
     META_LEN = 24
@@ -85,68 +87,70 @@ class Journal:
         self.js.write(struct.pack('<qqq', rd_pt, wrt_pt, bytes_stored))
 
     def wrt_cg_log_to_jrnl(self, r_cg_log: ChangeLog):
-        if r_cg_log.cg_line_ct:
-            print("\n\tSaving change log:\n")
-            r_cg_log.print()
+        if not r_cg_log.cg_line_ct:
+            return
 
-            self.rd_metadata()
+        print("\n\tSaving change log:\n")
+        r_cg_log.print()
 
-            self.js.seek(self.meta_put)
-            self.orig_p_pos = self.js.tell()
-            try:
-                assert self.orig_p_pos >= self.META_LEN, "Original position is less than META_LEN"
-            except AssertionError as e:
-                print(f"Error in wrt_cg_log_to_jrnl: {str(e)}")
-                return
+        self.rd_metadata()
 
-            self.ttl_bytes = 0
-            cg_bytes = 0
-            cg_bytes_pos = self.js.tell() + 8  # Position after START_TAG
+        self.js.seek(self.meta_put)
+        self.orig_p_pos = self.js.tell()
+        try:
+            assert self.orig_p_pos >= self.META_LEN, "Original position is less than META_LEN"
+        except AssertionError as e:
+            print(f"Error in wrt_cg_log_to_jrnl: {str(e)}")
+            return
 
-            # Write START_TAG
-            self.wrt_field(to_bytes_64bit(self.START_TAG), 8, True)
+        self.ttl_bytes = 0
+        cg_bytes = 0
+        cg_bytes_pos = self.js.tell() + 8  # Position after START_TAG
 
-            # Write placeholder for cg_bytes
-            self.wrt_field(to_bytes_64bit(0), 8, True)
+        # Call to wrt_cgs_to_jrnl
+        self.wrt_cgs_to_jrnl(r_cg_log, cg_bytes, cg_bytes_pos)
 
-            # Write change log data
-            for blk_num, changes in r_cg_log.the_log.items():
-                for cg in changes:
-                    cg_bytes += self.write_change(cg)
+        # Write START_TAG
+        self.wrt_field(to_bytes_64bit(self.START_TAG), 8, True)
 
-            # Write END_TAG
-            self.wrt_field(to_bytes_64bit(self.END_TAG), 8, True)
+        # Write placeholder for cg_bytes
+        self.wrt_field(to_bytes_64bit(0), 8, True)
 
-            # Update cg_bytes
-            current_pos = self.js.tell()
-            self.js.seek(cg_bytes_pos)
-            self.wrt_field(to_bytes_64bit(cg_bytes), 8, False)
-            self.js.seek(current_pos)
+        # Write change log data
+        for blk_num, changes in r_cg_log.the_log.items():
+            for cg in changes:
+                cg_bytes += self.write_change(cg)
 
-            # Update metadata
-            new_g_pos = self.orig_p_pos
-            new_p_pos = current_pos
-            if new_p_pos >= u32Const.JRNL_SIZE.value - self.META_LEN:
-                new_p_pos = self.META_LEN
+        # Write END_TAG
+        self.wrt_field(to_bytes_64bit(self.END_TAG), 8, True)
 
-            bytes_written = current_pos - self.orig_p_pos
-            self.meta_get = new_g_pos
-            self.meta_put = new_p_pos
-            self.meta_sz += bytes_written
+        # Update cg_bytes
+        current_pos = self.js.tell()
+        self.js.seek(cg_bytes_pos)
+        self.wrt_field(to_bytes_64bit(cg_bytes), 8, False)
+        self.js.seek(current_pos)
 
-            self.wrt_metadata(self.meta_get, self.meta_put, self.meta_sz)
-            self.js.seek(self.meta_put)
+        # Update metadata
+        new_g_pos = self.orig_p_pos
+        new_p_pos = current_pos
+        if new_p_pos >= u32Const.JRNL_SIZE.value - self.META_LEN:
+            new_p_pos = self.META_LEN
 
-            # Perform consistency tests
-            # self.do_test1()
+        bytes_written = current_pos - self.orig_p_pos
+        self.meta_get = new_g_pos
+        self.meta_put = new_p_pos
+        self.meta_sz += bytes_written
 
-            self.js.flush()
-            os.fsync(self.js.fileno())
-            self.js.seek(0)  # Reset file position to beginning
+        self.wrt_metadata(self.meta_get, self.meta_put, self.meta_sz)
+        self.js.seek(self.meta_put)
 
-            print(f"\tChange log written to journal at time {get_cur_time()}")
-            r_cg_log.cg_line_ct = 0
-            self.p_stt.wrt("Change log written")
+        self.js.flush()
+        os.fsync(self.js.fileno())
+        self.js.seek(0)  # Reset file position to beginning
+
+        print(f"\tChange log written to journal at time {get_cur_time()}")
+        r_cg_log.cg_line_ct = 0
+        self.p_stt.wrt("Change log written")
 
     def write_change(self, cg: Change) -> int:
         bytes_written = 0
@@ -287,25 +291,13 @@ class Journal:
         self.ttl_bytes = 0
         self.orig_p_pos = self.js.tell()
 
-        # Writing START_TAG
-
-        # self.js.seek(self.META_LEN)
-        # start_tag_bytes = self.START_TAG.to_bytes(8, byteorder='little')
-        # bytes_written = self.js.write(start_tag_bytes)
-        # self.ttl_bytes += bytes_written  # check self.js.tell(), bytes_written
-
-        self.js.seek(self.META_LEN)
-        start_tag_bytes = self.START_TAG.to_bytes(8, byteorder='little')
-        print(f"DEBUG: start_tag_bytes created as: {start_tag_bytes.hex()}")
-        for byte in start_tag_bytes:
-            self.js.write(bytes([byte]))
+        write_64bit(self.js, self.START_TAG)
         self.ttl_bytes += 8
 
         # Write placeholder for cg_bytes (which will be updated later)
-        initial_cg_bytes = 0
-        self.wrt_field(struct.pack('<Q', initial_cg_bytes), 8, True)
+        self.wrt_field(struct.pack('<Q', 0), 8, True)
 
-        for blk_num, changes in r_cg_log.the_log.items():  # check self.js.tell(), self.ttl_bytes
+        for blk_num, changes in r_cg_log.the_log.items():
             for cg in changes:
                 self.wrt_field(struct.pack('<I', cg.block_num), 4, True)
                 self.blks_in_jrnl[cg.block_num] = True
@@ -315,11 +307,10 @@ class Journal:
                 for d in cg.new_data:
                     self.wrt_field(d if isinstance(d, bytes) else bytes(d), u32Const.BYTES_PER_LINE.value, True)
 
-        # Write END_TAG  # check self.js.tell(), self.ttl_bytes
-        self.wrt_field(struct.pack('<Q', self.END_TAG), 8, True)
+        write_64bit(self.js, self.END_TAG)
+        self.ttl_bytes += 8
 
-        # Calculate and write actual cg_bytes
-        actual_cg_bytes = self.ttl_bytes - 24  # check self.js.tell(), self.ttl_bytes, actual_cg_bytes
+        actual_cg_bytes = self.ttl_bytes - 24
 
         # Store the current position
         current_pos = self.js.tell()
@@ -563,15 +554,6 @@ class Journal:
                 data += self.js.read(over)
 
             self.ttl_bytes += over
-        elif end_pt == buf_sz:
-            if dat_len == 8:
-                data = to_bytes_64bit(read_64bit(self.js))
-            elif dat_len == 4:
-                data = read_32bit(self.js).to_bytes(4, byteorder='little')
-            else:
-                data = self.js.read(dat_len)
-            self.ttl_bytes += dat_len
-            self.js.seek(self.META_LEN)
         else:
             if dat_len == 8:
                 data = to_bytes_64bit(read_64bit(self.js))
