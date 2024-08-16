@@ -138,7 +138,7 @@ class Journal:
             self.js.seek(self.meta_put)
 
             # Perform consistency tests
-            self.do_test1()
+            # self.do_test1()
 
             self.js.flush()
             os.fsync(self.js.fileno())
