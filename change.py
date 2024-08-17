@@ -16,12 +16,33 @@ class Line:
     data: bytearray
 
 
-@dataclass
-class Select:
-    data: List[int]
+# @dataclass
+# class Select:
+#     data: List[int]
+#
+#     def to_bytearray(self) -> bytearray:
+#         return bytearray(self.data)
 
-    def to_bytearray(self) -> bytearray:
-        return bytearray(self.data)
+
+class Select:
+    def __init__(self):
+        self.bits = (1 << 128) - 1  # All bits set to 1
+
+    def to_bytes(self):
+        return self.bits.to_bytes(16, 'little')
+
+    def __getitem__(self, index):
+        return (self.bits >> index) & 1
+
+    def __setitem__(self, index, value):
+        if value:
+            self.bits |= (1 << index)
+        else:
+            self.bits &= ~(1 << index)
+
+    @staticmethod
+    def is_sentinel(byte_data):
+        return byte_data == b'\xFF' * 16
 
 
 class Change:
