@@ -313,18 +313,13 @@ class Journal:
                 self.ttl_bytes += 8
 
                 for s in cg.selectors:
-                    selector_bytes = s.to_bytes()
-                    self.js.write(selector_bytes)  # Write the full 16 bytes
-                    self.ttl_bytes += 16
-
-                # Write sentinel selector
-                self.js.write(b'\xFF' * 16)
-                self.ttl_bytes += 16
+                    self.js.write(s.to_bytes())
+                    self.ttl_bytes += 8
 
                 for d in cg.new_data:
                     self.wrt_field(d if isinstance(d, bytes) else bytes(d), u32Const.BYTES_PER_LINE.value, True)
 
-        # self.do_test1()  # Commented out until test logic is fixed
+        # No need to write sentinel selector
 
     def wrt_cgs_sz_to_jrnl(self, cg_bytes: int, cg_bytes_pos: int):
         try:
@@ -431,7 +426,8 @@ class Journal:
             return
 
         # Continue with reading the journal data
-        ck_end_tag, ttl_bytes = self.rd_jrnl(r_j_cg_log, cg_bytes)
+        ck_start_tag, ck_end_tag, ttl_bytes = self.rd_jrnl(r_j_cg_log, cg_bytes)
+
 
         if ck_end_tag != self.END_TAG:
             print(f"Error in rd_last_jrnl: End tag mismatch: expected {self.END_TAG}, got {hex(ck_end_tag)}")
@@ -481,12 +477,11 @@ class Journal:
             self.ttl_bytes += 8
 
             while True:
-                selector_data = self.js.read(16)
-                self.ttl_bytes += 16
+                selector_data = self.js.read(8)
+                self.ttl_bytes += 8
                 if Select.is_sentinel(selector_data):
                     break
-                selector = Select()
-                selector.bits = int.from_bytes(selector_data, 'little')
+                selector = Select.from_bytes(selector_data)
                 cg.selectors.append(selector)
 
             num_data_lines = self.get_num_data_lines(cg)
@@ -513,23 +508,18 @@ class Journal:
         temp_sel = bytearray(b'\xff' * 8)
         setback = 1
         sz_ul = 8
-        sz = 8
 
-        temp_sel = self.rd_field(sz)
-        r_cg.selectors.append(temp_sel)
-        num_data_lines += sz_ul - 1
+        for selector in r_cg.selectors:
+            temp_sel = selector.to_bytes()
+            num_data_lines += sz_ul - 1
 
-        while temp_sel[sz_ul - setback] != 0xFF:
-            temp_sel = self.rd_field(sz)
-            r_cg.selectors.append(temp_sel)
-            num_data_lines += sz_ul
+            if temp_sel[sz_ul - setback] == 0xFF:
+                setback += 1
+                while setback <= sz_ul and temp_sel[sz_ul - setback] == 0xFF:
+                    setback += 1
+                    num_data_lines -= 1
 
-        setback += 1
-        while setback <= sz_ul and temp_sel[sz_ul - setback] == 0xFF:
-            setback += 1
-            num_data_lines -= 1
-
-        return num_data_lines
+        return min(num_data_lines, 63)  # Ensure we don't exceed 63 lines
 
     def rd_field(self, dat_len: int) -> bytes:
         g_pos = self.js.tell()
@@ -697,6 +687,9 @@ if __name__ == "__main__":
 
     # Test wrt_cg_log_to_jrnl
     cg = Change(1, True)
+    selector = Select()
+    selector.set(0)  # Set the first bit
+    cg.selectors = [selector]  # Replace the default selector with our new one
     cg.new_data.append(b'A' * u32Const.BYTES_PER_LINE.value)
     change_log.the_log[1] = [cg]
     change_log.cg_line_ct = 1

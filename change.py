@@ -6,58 +6,53 @@ import time
 from ajTypes import bNum_t, lNum_t, Line, lNum_tConst
 from ajUtils import get_cur_time
 
-# Constants
-# lNum_tConst.LINES_PER_PAGE.value = 63
-BYTES_PER_LINE = 64
-
 
 @dataclass
 class Line:
     data: bytearray
 
 
-# @dataclass
-# class Select:
-#     data: List[int]
-#
-#     def to_bytearray(self) -> bytearray:
-#         return bytearray(self.data)
-
-
 class Select:
     def __init__(self):
-        self.bits = (1 << 128) - 1  # All bits set to 1
+        self.bits = 0
 
-    def to_bytes(self):
-        return self.bits.to_bytes(16, 'little')
+    def set(self, line_num: int):
+        if 0 <= line_num < 63:
+            self.bits |= (1 << line_num)
 
-    def __getitem__(self, index):
-        return (self.bits >> index) & 1
+    def test(self, line_num: int) -> bool:
+        if 0 <= line_num < 63:
+            return bool(self.bits & (1 << line_num))
+        return False
 
-    def __setitem__(self, index, value):
-        if value:
-            self.bits |= (1 << index)
-        else:
-            self.bits &= ~(1 << index)
+    def to_bytes(self) -> bytes:
+        return self.bits.to_bytes(8, byteorder='little')
 
     @staticmethod
-    def is_sentinel(byte_data):
-        return byte_data == b'\xFF' * 16
+    def from_bytes(data: bytes) -> 'Select':
+        s = Select()
+        s.bits = int.from_bytes(data, byteorder='little')
+        return s
+
+    @staticmethod
+    def is_sentinel(data: bytes) -> bool:
+        return int.from_bytes(data, byteorder='little') == 0xFFFFFFFFFFFFFFFF
+
+    def __getitem__(self, index):
+        return self.test(index)
 
 
 class Change:
-    def __init__(self, block_num: int, push_selects: bool = True):
-        if block_num is None or block_num < 0:
-            raise ValueError("Invalid block number provided")
-        self.block_num = block_num
-        self.time_stamp = 0
+    def __init__(self, b_num: bNum_t, use_default: bool):
+        self.block_num = b_num
+        self.time_stamp = get_cur_time()
+        self.selectors = []
+        self.new_data = deque()
         self.arr_next = 0
-        self.push_selects = push_selects
-        self.selectors: Deque[Select] = deque()
-        self.new_data: Deque[Line] = deque()
-
-        if push_selects:
-            self.selectors.append(Select([0xFF] * 8))
+        if use_default:
+            selector = Select()
+            selector.bits = 0xFFFFFFFFFFFFFFFF  # Set all bits to 1
+            self.selectors.append(selector)
 
     def add_line(self, block_num: int, line_num: int, line: Line):
         assert self.block_num == block_num
