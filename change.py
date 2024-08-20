@@ -14,76 +14,65 @@ class Line:
 
 class Select:
     def __init__(self):
-        self.bits = 0
+        self.value = 0
 
     def set(self, line_num: int):
         if 0 <= line_num < 63:
-            self.bits |= (1 << line_num)
+            self.value |= (1 << (62 - line_num))
+        elif line_num == 63:
+            self.value |= (1 << 63)  # Set the MSB for last block flag
+        else:
+            raise ValueError("Invalid line number")
 
-    def test(self, line_num: int) -> bool:
-        if 0 <= line_num < 63:
-            return bool(self.bits & (1 << line_num))
-        return False
+    def is_set(self, line_num: int) -> bool:
+        if 0 <= line_num < 64:
+            return bool(self.value & (1 << (63 - line_num)))
+        else:
+            raise ValueError("Invalid line number")
+
+    def is_last_block(self) -> bool:
+        return bool(self.value & (1 << 63))
+
+    def set_last_block(self):
+        self.value |= (1 << 63)
 
     def to_bytes(self) -> bytes:
-        return self.bits.to_bytes(8, byteorder='little')
+        return self.value.to_bytes(8, byteorder='big')
 
-    @staticmethod
-    def from_bytes(data: bytes) -> 'Select':
-        s = Select()
-        s.bits = int.from_bytes(data, byteorder='little')
-        return s
-
-    @staticmethod
-    def is_sentinel(data: bytes) -> bool:
-        return int.from_bytes(data, byteorder='little') == 0xFFFFFFFFFFFFFFFF
-
-    def __getitem__(self, index):
-        return self.test(index)
+    @classmethod
+    def from_bytes(cls, b: bytes):
+        selector = cls()
+        selector.value = int.from_bytes(b, byteorder='big')
+        return selector
 
 
 class Change:
-    def __init__(self, b_num: bNum_t, use_default: bool):
-        self.block_num = b_num
+    def __init__(self, block_num: bNum_t, is_last: bool):
+        self.block_num = block_num
         self.time_stamp = get_cur_time()
-        self.selectors = []
+        self.selectors = deque()
         self.new_data = deque()
         self.arr_next = 0
-        if use_default:
-            selector = Select()
-            selector.bits = 0xFFFFFFFFFFFFFFFF  # Set all bits to 1
-            self.selectors.append(selector)
+        self.add_selector(is_last)
 
-    def add_line(self, block_num: int, line_num: int, line: Line):
-        assert self.block_num == block_num
-        assert line_num <= lNum_tConst.LINES_PER_PAGE.value - 1
+    def add_selector(self, is_last: bool):
+        selector = Select()
+        if is_last:
+            selector.set_last_block()
+        self.selectors.append(selector)
 
-        self.selectors[-1].data[self.arr_next] = line_num
-        self.arr_next += 1
-        if self.arr_next == 8:
-            self.selectors.append(Select([0xFF] * 8))
-            self.arr_next = 0
-        self.new_data.append(line)
+    def add_line(self, line_num: int, data: bytes):
+        if not self.selectors or self.selectors[-1].is_set(line_num % 63):
+            self.add_selector(False)
+        self.selectors[-1].set(line_num % 63)
+        self.new_data.append(data)
 
-    def lines_altered(self) -> bool:
-        return bool(self.selectors) and self.selectors[0].data[0] != 0xFF
-
-    def print(self):
-        if self.new_data:
-            for line in self.new_data:
-                print("\t\t", end="")
-                for byte in line.data:
-                    if 32 <= byte <= 126:  # printable ASCII range
-                        print(chr(byte), end="")
-                    else:
-                        print(".", end="")
-                print()
-        print()
+    def is_last_block(self) -> bool:
+        return any(selector.is_last_block() for selector in self.selectors)
 
     def __lt__(self, other):
-        if self.block_num == other.block_num:
-            return self.time_stamp < other.time_stamp
-        return self.block_num < other.block_num
+        return self.time_stamp < other.time_stamp
+
 
 class ChangeLog:
     def __init__(self, test_sw: bool = False):

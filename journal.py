@@ -304,22 +304,27 @@ class Journal:
                     self.js.write(b'\0' * padding)
                     self.ttl_bytes += padding
 
-                write_32bit(self.js, cg.block_num)
-                write_32bit(self.js, 0)  # 4 bytes of padding to ensure 8-byte alignment
+                write_64bit(self.js, cg.block_num)
                 self.ttl_bytes += 8
                 self.blks_in_jrnl[cg.block_num] = True
 
                 write_64bit(self.js, cg.time_stamp)
                 self.ttl_bytes += 8
 
-                for s in cg.selectors:
-                    self.js.write(s.to_bytes())
+                for selector in cg.selectors:
+                    self.js.write(selector.to_bytes())
                     self.ttl_bytes += 8
 
                 for d in cg.new_data:
                     self.wrt_field(d if isinstance(d, bytes) else bytes(d), u32Const.BYTES_PER_LINE.value, True)
 
-        # No need to write sentinel selector
+                # Write placeholder CRC
+                self.js.write(b'\xcc' * 4)
+                self.ttl_bytes += 4
+
+                # Write zero padding
+                self.js.write(b'\0' * 4)
+                self.ttl_bytes += 4
 
     def wrt_cgs_sz_to_jrnl(self, cg_bytes: int, cg_bytes_pos: int):
         try:
@@ -425,9 +430,8 @@ class Journal:
             print(f"Error in rd_last_jrnl: Start tag mismatch: expected {self.START_TAG}, got {hex(ck_start_tag)}")
             return
 
-        # Continue with reading the journal data
-        ck_start_tag, ck_end_tag, ttl_bytes = self.rd_jrnl(r_j_cg_log, cg_bytes)
-
+        # Call rd_jrnl without passing cg_bytes
+        ck_start_tag, ck_end_tag, ttl_bytes = self.rd_jrnl(r_j_cg_log)
 
         if ck_end_tag != self.END_TAG:
             print(f"Error in rd_last_jrnl: End tag mismatch: expected {self.END_TAG}, got {hex(ck_end_tag)}")
@@ -436,7 +440,7 @@ class Journal:
         print(
             f"DEBUG: Read from journal - START_TAG: {hex(ck_start_tag)}, END_TAG: {hex(ck_end_tag)}, Total Bytes: {ttl_bytes}")
 
-    def rd_jrnl(self, r_j_cg_log: ChangeLog, expected_cg_bytes: int = -1) -> Tuple[int, int, int]:
+    def rd_jrnl(self, r_j_cg_log: ChangeLog) -> Tuple[int, int, int]:
         self.ttl_bytes = 0
 
         ck_start_tag = read_64bit(self.js)
@@ -448,9 +452,6 @@ class Journal:
 
         cg_bytes = read_64bit(self.js)
         self.ttl_bytes += 8
-
-        if expected_cg_bytes != -1 and cg_bytes != expected_cg_bytes:
-            print(f"Warning: Expected {expected_cg_bytes} bytes but journal indicates {cg_bytes} bytes")
 
         print(f"DEBUG: Read cg_bytes: {cg_bytes}, ck_start_tag: {ck_start_tag:X}")
 
@@ -466,11 +467,8 @@ class Journal:
                 self.js.read(padding)
                 self.ttl_bytes += padding
 
-            b_num = read_32bit(self.js)
-            self.js.read(4)  # Read padding
+            b_num = read_64bit(self.js)
             self.ttl_bytes += 8
-            if b_num == 0xFFFFFFFF:
-                break
 
             cg = Change(b_num, False)
             cg.time_stamp = read_64bit(self.js)
@@ -479,16 +477,20 @@ class Journal:
             while True:
                 selector_data = self.js.read(8)
                 self.ttl_bytes += 8
-                if Select.is_sentinel(selector_data):
-                    break
                 selector = Select.from_bytes(selector_data)
                 cg.selectors.append(selector)
 
-            num_data_lines = self.get_num_data_lines(cg)
+                for i in range(63):
+                    if selector.is_set(i):
+                        line_data = self.rd_field(u32Const.BYTES_PER_LINE.value)
+                        cg.new_data.append(line_data)
 
-            for _ in range(num_data_lines):
-                line_data = self.rd_field(u32Const.BYTES_PER_LINE.value)
-                cg.new_data.append(line_data)
+                if selector.is_last_block():
+                    break
+
+            # Read CRC placeholder and padding
+            self.js.read(8)
+            self.ttl_bytes += 8
 
             r_j_cg_log.add_to_log(cg)
 
