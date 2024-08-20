@@ -86,6 +86,34 @@ class Journal:
         self.js.seek(0)
         self.js.write(struct.pack('<qqq', rd_pt, wrt_pt, bytes_stored))
 
+    def calculate_cg_bytes(self, r_cg_log: ChangeLog) -> int:
+        total_bytes = 0
+        for blk_num, changes in r_cg_log.the_log.items():
+            for cg in changes:
+                # Block number (8 bytes)
+                total_bytes += 8
+
+                # Timestamp (8 bytes)
+                total_bytes += 8
+
+                # Selectors and actual data
+                for selector in cg.selectors:
+                    # Selector (8 bytes)
+                    total_bytes += 8
+
+                    # Actual data (16 bytes * number of set bits in the selector, excluding MSB)
+                    set_bits = bin(selector.value & 0x7FFFFFFFFFFFFFFF).count('1')
+                    total_bytes += set_bits * u32Const.BYTES_PER_LINE.value
+
+                    # Break after processing the last selector (MSB set)
+                    if selector.is_last_block():
+                        break
+
+                # CRC value (4 bytes) and Zero padding (4 bytes)
+                total_bytes += 8
+
+        return total_bytes
+
     def wrt_cg_log_to_jrnl(self, r_cg_log: ChangeLog):
         if not r_cg_log.cg_line_ct:
             return
@@ -109,9 +137,11 @@ class Journal:
         write_64bit(self.js, self.START_TAG)
         self.ttl_bytes += 8
 
-        # Write placeholder for cg_bytes
-        cg_bytes_pos = self.js.tell()
-        write_64bit(self.js, 0)
+        # Calculate cg_bytes
+        cg_bytes = self.calculate_cg_bytes(r_cg_log)
+
+        # Write cg_bytes
+        write_64bit(self.js, cg_bytes)
         self.ttl_bytes += 8
 
         # Call to wrt_cgs_to_jrnl
@@ -125,32 +155,24 @@ class Journal:
         write_64bit(self.js, self.END_TAG)
         self.ttl_bytes += 8
 
-        # Update cg_bytes
-        actual_cg_bytes = self.ttl_bytes - 24  # Subtract START_TAG, cg_bytes placeholder, and END_TAG
-        current_pos = self.js.tell()
-        self.js.seek(cg_bytes_pos)
-        write_64bit(self.js, actual_cg_bytes)
-        self.js.seek(current_pos)
-
         # Update metadata
         new_g_pos = self.orig_p_pos
-        new_p_pos = self.js.tell()
+        new_p_pos = current_pos + 8  # Add 8 to account for END_TAG
         if new_p_pos >= u32Const.JRNL_SIZE.value:
             new_p_pos = self.META_LEN + (new_p_pos % (u32Const.JRNL_SIZE.value - self.META_LEN))
 
         bytes_written = new_p_pos - self.orig_p_pos
         if bytes_written < 0:  # Handle wrap-around
             bytes_written += u32Const.JRNL_SIZE.value - self.META_LEN
+
         self.meta_get = new_g_pos
         self.meta_put = new_p_pos
         self.meta_sz += bytes_written
 
         self.wrt_metadata(self.meta_get, self.meta_put, self.meta_sz)
-        self.js.seek(self.meta_put)
 
         self.js.flush()
         os.fsync(self.js.fileno())
-        self.js.seek(0)  # Reset file position to beginning
 
         print(f"\tChange log written to journal at time {get_cur_time()}")
         r_cg_log.cg_line_ct = 0

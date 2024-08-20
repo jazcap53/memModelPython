@@ -45,7 +45,6 @@ class Select:
         selector.value = int.from_bytes(b, byteorder='big')
         return selector
 
-
 class Change:
     def __init__(self, block_num: bNum_t, is_last: bool):
         self.block_num = block_num
@@ -72,7 +71,6 @@ class Change:
 
     def __lt__(self, other):
         return self.time_stamp < other.time_stamp
-
 
 class ChangeLog:
     def __init__(self, test_sw: bool = False):
