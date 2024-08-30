@@ -364,12 +364,6 @@ class Journal:
                     current_pos = self.META_LEN + (current_pos % (u32Const.JRNL_SIZE.value - self.META_LEN))
                     self.js.seek(current_pos)
 
-                if current_pos % 8 != 0:
-                    # Pad to 8-byte alignment
-                    padding = 8 - (current_pos % 8)
-                    self.js.write(b'\0' * padding)
-                    self.ttl_bytes += padding
-
                 write_64bit(self.js, cg.block_num)
                 self.ttl_bytes += 8
                 self.blks_in_jrnl[cg.block_num] = True
@@ -381,8 +375,10 @@ class Journal:
                     self.js.write(selector.to_bytes())
                     self.ttl_bytes += 8
 
-                for d in cg.new_data:
-                    self.wrt_field(d if isinstance(d, bytes) else bytes(d), u32Const.BYTES_PER_LINE.value, True)
+                # Iterate through selector bits and write data only for set bits
+                for i in range(63):
+                    if selector.is_set(i):
+                        self.wrt_field(cg.new_data[i], u32Const.BYTES_PER_LINE.value, True)
 
                 # Write placeholder CRC
                 self.js.write(b'\xcc' * 4)
@@ -391,8 +387,6 @@ class Journal:
                 # Write zero padding
                 self.js.write(b'\0' * 4)
                 self.ttl_bytes += 4
-
-        self.js.flush()
 
     def wrt_cgs_sz_to_jrnl(self, cg_bytes: int, cg_bytes_pos: int):
         try:
