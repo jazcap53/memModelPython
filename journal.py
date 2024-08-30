@@ -4,7 +4,7 @@ from typing import List, Dict, Tuple
 from collections import deque
 from ajTypes import bNum_t, lNum_t, u32Const, bNum_tConst, SENTINEL_BNUM, SENTINEL_INUM
 from ajCrc import BoostCRC
-from ajUtils import get_cur_time, Tabber
+from ajUtils import get_cur_time, Tabber, format_hex_like_hexdump
 from wipeList import WipeList
 from change import Change, ChangeLog, Select
 from myMemory import Page
@@ -133,8 +133,10 @@ class Journal:
 
         self.ttl_bytes = 0
 
+        print(f"DEBUG [wrt_cg_log_to_jrnl]: Writing START_TAG at position: {self.js.tell()}")
         # Write START_TAG
         write_64bit(self.js, self.START_TAG)
+        print(f"DEBUG [wrt_cg_log_to_jrnl]: START_TAG bytes written: {to_bytes_64bit(self.START_TAG).hex()}")
         self.ttl_bytes += 8
 
         # Calculate cg_bytes
@@ -152,7 +154,9 @@ class Journal:
         if current_pos >= u32Const.JRNL_SIZE.value:
             current_pos = self.META_LEN + (current_pos % (u32Const.JRNL_SIZE.value - self.META_LEN))
         self.js.seek(current_pos)
+        print(f"DEBUG [wrt_cg_log_to_jrnl]: Writing END_TAG at position: {self.js.tell()}")
         write_64bit(self.js, self.END_TAG)
+        print(f"DEBUG [wrt_cg_log_to_jrnl]: END_TAG bytes written: {to_bytes_64bit(self.END_TAG).hex()}")
         self.ttl_bytes += 8
 
         # Update metadata
@@ -312,50 +316,6 @@ class Journal:
             new_pos += self.META_LEN
         self.js.seek(new_pos)
 
-    # def wrt_cgs_to_jrnl(self, r_cg_log: ChangeLog):
-    #     for blk_num, changes in r_cg_log.the_log.items():
-    #         for cg in changes:
-    #             current_pos = self.js.tell()
-    #             if current_pos >= u32Const.JRNL_SIZE.value:
-    #                 current_pos = self.META_LEN + (current_pos % (u32Const.JRNL_SIZE.value - self.META_LEN))
-    #                 self.js.seek(current_pos)
-    #
-    #             if current_pos % 8 != 0:
-    #                 # Pad to 8-byte alignment
-    #                 padding = 8 - (current_pos % 8)
-    #                 self.js.write(b'\0' * padding)
-    #                 self.ttl_bytes += padding
-    #
-    #             write_64bit(self.js, cg.block_num)
-    #             self.ttl_bytes += 8
-    #             self.blks_in_jrnl[cg.block_num] = True
-    #
-    #             write_64bit(self.js, cg.time_stamp)
-    #             self.ttl_bytes += 8
-    #
-    #             for selector in cg.selectors:
-    #                 write_64bit(self.js, selector.value)
-    #                 self.ttl_bytes += 8
-    #
-    #                 for i in range(63):  # Exclude the MSb
-    #                     if selector.is_set(i):
-    #                         if cg.new_data:
-    #                             data = cg.new_data.popleft()
-    #                             self.wrt_field(data if isinstance(data, bytes) else bytes(data),
-    #                                            u32Const.BYTES_PER_LINE.value, True)
-    #                         else:
-    #                             print(f"Warning: No data available for set bit {i} in selector")
-    #
-    #             # Write placeholder CRC
-    #             write_32bit(self.js, 0xCCCCCCCC)
-    #             self.ttl_bytes += 4
-    #
-    #             # Write zero padding
-    #             write_32bit(self.js, 0)
-    #             self.ttl_bytes += 4
-    #
-    #     self.js.flush()
-
     def wrt_cgs_to_jrnl(self, r_cg_log: ChangeLog):
         for blk_num, changes in r_cg_log.the_log.items():
             for cg in changes:
@@ -375,18 +335,28 @@ class Journal:
                     self.js.write(selector.to_bytes())
                     self.ttl_bytes += 8
 
-                # Iterate through selector bits and write data only for set bits
-                for i in range(63):
-                    if selector.is_set(i):
-                        self.wrt_field(cg.new_data[i], u32Const.BYTES_PER_LINE.value, True)
+                    # Iterate through selector bits and write data only for set bits
+                    for i in range(63):  # Exclude the MSb
+                        if selector.is_set(i):
+                            if cg.new_data:
+                                data = cg.new_data.popleft()
+                                self.wrt_field(data if isinstance(data, bytes) else bytes(data),
+                                               u32Const.BYTES_PER_LINE.value, True)
+                            else:
+                                print(f"Warning: No data available for set bit {i} in selector")
+
+                    if selector.is_last_block():
+                        break
 
                 # Write placeholder CRC
-                self.js.write(b'\xcc' * 4)
+                write_32bit(self.js, 0xCCCCCCCC)
                 self.ttl_bytes += 4
 
                 # Write zero padding
-                self.js.write(b'\0' * 4)
+                write_32bit(self.js, 0)
                 self.ttl_bytes += 4
+
+        self.js.flush()
 
     def wrt_cgs_sz_to_jrnl(self, cg_bytes: int, cg_bytes_pos: int):
         try:
@@ -467,6 +437,9 @@ class Journal:
 
     def rd_last_jrnl(self, r_j_cg_log: ChangeLog):
         self.rd_metadata()
+        print(
+            f"DEBUG [rd_last_jrnl]: After rd_metadata - meta_get: {self.meta_get}, meta_put: {self.meta_put}, meta_sz: {self.meta_sz}")
+
         if self.meta_get == -1:
             print("Warning: No metadata available. Journal might be empty.")
             return
@@ -474,39 +447,33 @@ class Journal:
             print(f"Error: Invalid metadata. meta_get={self.meta_get}")
             return
 
-        self.js.seek(self.META_LEN if self.meta_get == -1 else self.meta_get)
-        orig_g_pos = self.js.tell()
+        start_pos = self.META_LEN if self.meta_get == -1 else self.meta_get
+        print(f"DEBUG [rd_last_jrnl]: Starting read from position: {start_pos}")
 
-        try:
-            assert orig_g_pos >= self.META_LEN, "Original get position is less than META_LEN"
-        except AssertionError as e:
-            print(f"Error in rd_last_jrnl: {str(e)}")
-            return
-
-        ck_start_tag = from_bytes_64bit(self.rd_field(8))
-        cg_bytes = from_bytes_64bit(self.rd_field(8))
-
-        print(f"DEBUG: Read cg_bytes: {cg_bytes}, ck_start_tag: {ck_start_tag:X}")
+        # Call rd_jrnl with the correct starting position
+        ck_start_tag, ck_end_tag, ttl_bytes = self.rd_jrnl(r_j_cg_log, start_pos)
 
         if ck_start_tag != self.START_TAG:
-            print(f"Error in rd_last_jrnl: Start tag mismatch: expected {self.START_TAG}, got {hex(ck_start_tag)}")
+            print(f"Error in rd_last_jrnl: Start tag mismatch: expected {self.START_TAG:X}, got {ck_start_tag:X}")
             return
 
-        # Call rd_jrnl without passing cg_bytes
-        ck_start_tag, ck_end_tag, ttl_bytes = self.rd_jrnl(r_j_cg_log)
-
         if ck_end_tag != self.END_TAG:
-            print(f"Error in rd_last_jrnl: End tag mismatch: expected {self.END_TAG}, got {hex(ck_end_tag)}")
+            print(f"Error in rd_last_jrnl: End tag mismatch: expected {self.END_TAG:X}, got {ck_end_tag:X}")
             return
 
         print(
-            f"DEBUG: Read from journal - START_TAG: {hex(ck_start_tag)}, END_TAG: {hex(ck_end_tag)}, Total Bytes: {ttl_bytes}")
+            f"DEBUG [rd_last_jrnl]: Read from journal - START_TAG: {ck_start_tag:X}, END_TAG: {ck_end_tag:X}, Total Bytes: {ttl_bytes}")
 
-    def rd_jrnl(self, r_j_cg_log: ChangeLog) -> Tuple[int, int, int]:
+    def rd_jrnl(self, r_j_cg_log: ChangeLog, start_pos: int) -> Tuple[int, int, int]:
+        self.js.seek(start_pos)
+        print(f"DEBUG [rd_jrnl]: rd_jrnl starting at position: {self.js.tell()}")
         self.ttl_bytes = 0
 
         ck_start_tag = read_64bit(self.js)
         self.ttl_bytes += 8
+
+        print(f"DEBUG [rd_jrnl]: Raw bytes for start tag: {format_hex_like_hexdump(self.js.read(8))}")
+        self.js.seek(-8, 1)
 
         if ck_start_tag != self.START_TAG:
             print(f"Invalid journaled data. Start tag: {ck_start_tag:X} (expected: {self.START_TAG:X})")
@@ -515,7 +482,11 @@ class Journal:
         cg_bytes = read_64bit(self.js)
         self.ttl_bytes += 8
 
-        print(f"DEBUG: Read cg_bytes: {cg_bytes}, ck_start_tag: {ck_start_tag:X}")
+        print(f"DEBUG [rd_jrnl]: Raw bytes for cg_bytes: {format_hex_like_hexdump(self.js.read(8))}")
+        self.js.seek(-8, 1)
+
+        print(f"DEBUG [rd_jrnl]: Read cg_bytes: {cg_bytes}, ck_start_tag: {ck_start_tag:X}")
+        print(f"DEBUG [rd_jrnl]: File position after reading START_TAG and cg_bytes: {self.js.tell()}")
 
         while self.ttl_bytes < cg_bytes + 16:
             current_pos = self.js.tell()
@@ -529,6 +500,7 @@ class Journal:
                 self.js.read(padding)
                 self.ttl_bytes += padding
 
+            print(f"DEBUG [rd_jrnl]: About to read b_num at position: {self.js.tell()}")
             b_num = read_64bit(self.js)
             self.ttl_bytes += 8
 
@@ -541,6 +513,7 @@ class Journal:
                 self.ttl_bytes += 8
                 selector = Select.from_bytes(selector_data)
                 cg.selectors.append(selector)
+                print(f"DEBUG [rd_jrnl]: Read selector: {selector.value:X} at position: {self.js.tell()}")
 
                 for i in range(63):
                     if selector.is_set(i):
@@ -556,14 +529,18 @@ class Journal:
 
             r_j_cg_log.add_to_log(cg)
 
+        print(f"DEBUG [rd_jrnl]: About to read end tag at position: {self.js.tell()}")
         ck_end_tag = read_64bit(self.js)
         self.ttl_bytes += 8
+
+        print(f"DEBUG [rd_jrnl]: Raw bytes for end tag: {format_hex_like_hexdump(self.js.read(8))}")
+        self.js.seek(-8, 1)
 
         if ck_end_tag != self.END_TAG:
             print(f"Invalid journaled data. End tag: {ck_end_tag:X} (expected: {self.END_TAG:X})")
 
-        print(f"DEBUG: Read END_TAG: {ck_end_tag:X}")
-        print(f"DEBUG: Total bytes read: {self.ttl_bytes}, Expected: {cg_bytes + 24}")
+        print(f"DEBUG [rd_jrnl]: Read END_TAG: {ck_end_tag:X}")
+        print(f"DEBUG [rd_jrnl]: Total bytes read: {self.ttl_bytes}, Expected: {cg_bytes + 24}")
 
         return ck_start_tag, ck_end_tag, self.ttl_bytes
 
@@ -674,16 +651,22 @@ class Journal:
             assert cg.selectors, "No selectors available"
         except AssertionError as e:
             print(f"Error in get_next_lin_num: {str(e)}")
-            # Add additional error handling or logging as needed
+            return 0xFF  # Return an invalid line number
 
-        lin_num = cg.selectors[0][cg.arr_next]
-        cg.arr_next += 1
+        current_selector = cg.selectors[0]
+        for i in range(64):
+            if current_selector.is_set(i):
+                if i == cg.arr_next:
+                    cg.arr_next += 1
+                    if cg.arr_next == 64:
+                        cg.selectors.popleft()
+                        cg.arr_next = 0
+                    return i
 
-        if cg.arr_next == self.sz:
-            cg.selectors.popleft()
-            cg.arr_next = 0
-
-        return lin_num
+        # If we've gone through all bits and found nothing, move to the next selector
+        cg.selectors.popleft()
+        cg.arr_next = 0
+        return self.get_next_lin_num(cg)  # Recursive call to check next selector
 
     def reset_file(self):
         """Closes and re-opens the journal file, resetting its position."""
@@ -748,19 +731,6 @@ if __name__ == "__main__":
 
     # Create Journal instance
     journal = Journal("mock_journal.bin", sim_disk, change_log, status, crash_chk)
-
-    # # Test wrt_cg_log_to_jrnl
-    # cg = Change(1, True)
-    # selector = Select()
-    # selector.set(0)  # Set the first bit
-    # cg.selectors = [selector]  # Replace the default selector with our new one
-    # cg.new_data.append(b'A' * u32Const.BYTES_PER_LINE.value)
-    # change_log.the_log[1] = [cg]
-    # change_log.cg_line_ct = 1
-    #
-    # print("Testing wrt_cg_log_to_jrnl...")
-    # journal.wrt_cg_log_to_jrnl(change_log)
-    # print("wrt_cg_log_to_jrnl completed successfully!")
 
     # Test wrt_cg_log_to_jrnl
     cg = Change(1, True)  # Block 1, and it's the last block

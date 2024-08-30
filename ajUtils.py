@@ -40,3 +40,8 @@ tabber = Tabber()
 def print_with_tabs(*args, **kwargs):
     print(tabber(Tabber.num_tabs), end="")
     print(*args, **kwargs)
+
+
+def format_hex_like_hexdump(data: bytes) -> str:
+    hex_pairs = [data[i:i+2].hex() for i in range(0, len(data), 2)]
+    return ' '.join(reversed(hex_pairs))
