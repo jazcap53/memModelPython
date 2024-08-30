@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import time
 
 from ajTypes import bNum_t, lNum_t, Line, lNum_tConst
+from ajTypes import to_bytes_64bit, from_bytes_64bit
 from ajUtils import get_cur_time
 
 
@@ -18,15 +19,15 @@ class Select:
 
     def set(self, line_num: int):
         if 0 <= line_num < 63:
-            self.value |= (1 << (62 - line_num))
+            self.value |= (1 << line_num)
         elif line_num == 63:
-            self.value |= (1 << 63)  # Set the MSB for last block flag
+            self.value |= (1 << 63)  # Set the MSb for last block flag
         else:
             raise ValueError("Invalid line number")
 
     def is_set(self, line_num: int) -> bool:
         if 0 <= line_num < 64:
-            return bool(self.value & (1 << (63 - line_num)))
+            return bool(self.value & (1 << line_num))
         else:
             raise ValueError("Invalid line number")
 
@@ -37,12 +38,12 @@ class Select:
         self.value |= (1 << 63)
 
     def to_bytes(self) -> bytes:
-        return self.value.to_bytes(8, byteorder='big')
+        return to_bytes_64bit(self.value)
 
     @classmethod
     def from_bytes(cls, b: bytes):
         selector = cls()
-        selector.value = int.from_bytes(b, byteorder='big')
+        selector.value = from_bytes_64bit(b)
         return selector
 
 class Change:

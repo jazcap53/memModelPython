@@ -312,6 +312,50 @@ class Journal:
             new_pos += self.META_LEN
         self.js.seek(new_pos)
 
+    # def wrt_cgs_to_jrnl(self, r_cg_log: ChangeLog):
+    #     for blk_num, changes in r_cg_log.the_log.items():
+    #         for cg in changes:
+    #             current_pos = self.js.tell()
+    #             if current_pos >= u32Const.JRNL_SIZE.value:
+    #                 current_pos = self.META_LEN + (current_pos % (u32Const.JRNL_SIZE.value - self.META_LEN))
+    #                 self.js.seek(current_pos)
+    #
+    #             if current_pos % 8 != 0:
+    #                 # Pad to 8-byte alignment
+    #                 padding = 8 - (current_pos % 8)
+    #                 self.js.write(b'\0' * padding)
+    #                 self.ttl_bytes += padding
+    #
+    #             write_64bit(self.js, cg.block_num)
+    #             self.ttl_bytes += 8
+    #             self.blks_in_jrnl[cg.block_num] = True
+    #
+    #             write_64bit(self.js, cg.time_stamp)
+    #             self.ttl_bytes += 8
+    #
+    #             for selector in cg.selectors:
+    #                 write_64bit(self.js, selector.value)
+    #                 self.ttl_bytes += 8
+    #
+    #                 for i in range(63):  # Exclude the MSb
+    #                     if selector.is_set(i):
+    #                         if cg.new_data:
+    #                             data = cg.new_data.popleft()
+    #                             self.wrt_field(data if isinstance(data, bytes) else bytes(data),
+    #                                            u32Const.BYTES_PER_LINE.value, True)
+    #                         else:
+    #                             print(f"Warning: No data available for set bit {i} in selector")
+    #
+    #             # Write placeholder CRC
+    #             write_32bit(self.js, 0xCCCCCCCC)
+    #             self.ttl_bytes += 4
+    #
+    #             # Write zero padding
+    #             write_32bit(self.js, 0)
+    #             self.ttl_bytes += 4
+    #
+    #     self.js.flush()
+
     def wrt_cgs_to_jrnl(self, r_cg_log: ChangeLog):
         for blk_num, changes in r_cg_log.the_log.items():
             for cg in changes:
@@ -347,6 +391,8 @@ class Journal:
                 # Write zero padding
                 self.js.write(b'\0' * 4)
                 self.ttl_bytes += 4
+
+        self.js.flush()
 
     def wrt_cgs_sz_to_jrnl(self, cg_bytes: int, cg_bytes_pos: int):
         try:
@@ -709,14 +755,24 @@ if __name__ == "__main__":
     # Create Journal instance
     journal = Journal("mock_journal.bin", sim_disk, change_log, status, crash_chk)
 
+    # # Test wrt_cg_log_to_jrnl
+    # cg = Change(1, True)
+    # selector = Select()
+    # selector.set(0)  # Set the first bit
+    # cg.selectors = [selector]  # Replace the default selector with our new one
+    # cg.new_data.append(b'A' * u32Const.BYTES_PER_LINE.value)
+    # change_log.the_log[1] = [cg]
+    # change_log.cg_line_ct = 1
+    #
+    # print("Testing wrt_cg_log_to_jrnl...")
+    # journal.wrt_cg_log_to_jrnl(change_log)
+    # print("wrt_cg_log_to_jrnl completed successfully!")
+
     # Test wrt_cg_log_to_jrnl
-    cg = Change(1, True)
-    selector = Select()
-    selector.set(0)  # Set the first bit
-    cg.selectors = [selector]  # Replace the default selector with our new one
-    cg.new_data.append(b'A' * u32Const.BYTES_PER_LINE.value)
-    change_log.the_log[1] = [cg]
-    change_log.cg_line_ct = 1
+    cg = Change(1, True)  # Block 1, and it's the last block
+    for i in range(4):  # Set 4 lines as dirty
+        cg.add_line(i, b'A' * u32Const.BYTES_PER_LINE.value)
+    change_log.add_to_log(cg)  # Use the add_to_log method instead of directly modifying the_log
 
     print("Testing wrt_cg_log_to_jrnl...")
     journal.wrt_cg_log_to_jrnl(change_log)
