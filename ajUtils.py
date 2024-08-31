@@ -42,6 +42,9 @@ def print_with_tabs(*args, **kwargs):
     print(*args, **kwargs)
 
 
+# def format_hex_like_hexdump(data: bytes) -> str:
+#     hex_pairs = [data[i:i+2].hex() for i in range(0, len(data), 2)]
+#     return ' '.join(reversed(hex_pairs))
+
 def format_hex_like_hexdump(data: bytes) -> str:
-    hex_pairs = [data[i:i+2].hex() for i in range(0, len(data), 2)]
-    return ' '.join(reversed(hex_pairs))
+    return ' '.join(f"{data[i+1:i+2].hex()}{data[i:i+1].hex()}" for i in range(0, len(data), 2))

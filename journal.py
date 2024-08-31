@@ -19,9 +19,13 @@ class Journal:
     END_TAG = 0xae0da05e65275d3a
     # START_TAG = 0x4f6df70c778691f1
     # END_TAG = 0xae0da05e65275d3a
-    META_LEN = 24
+    START_TAG_SIZE = 8
+    CG_BYTES_SIZE = 8
+    END_TAG_SIZE = 8
+    META_LEN = START_TAG_SIZE + CG_BYTES_SIZE + END_TAG_SIZE
     NUM_PGS_JRNL_BUF = 16
     CPP_SELECT_T_SZ = 8
+
 
     def __init__(self, f_name: str, sim_disk, change_log, status, crash_chk, debug=False):
         self.debug = debug
@@ -134,16 +138,20 @@ class Journal:
         self.ttl_bytes = 0
 
         print(f"DEBUG [wrt_cg_log_to_jrnl]: Writing START_TAG at position: {self.js.tell()}")
+        start_tag_bytes = to_bytes_64bit(self.START_TAG)
         # Write START_TAG
         write_64bit(self.js, self.START_TAG)
-        print(f"DEBUG [wrt_cg_log_to_jrnl]: START_TAG bytes written: {to_bytes_64bit(self.START_TAG).hex()}")
+        print(
+            f"DEBUG [wrt_cg_log_to_jrnl]: START_TAG appears in hex dump as: {format_hex_like_hexdump(start_tag_bytes)}")
         self.ttl_bytes += 8
 
         # Calculate cg_bytes
         cg_bytes = self.calculate_cg_bytes(r_cg_log)
 
         # Write cg_bytes
+        cg_bytes_raw = to_bytes_64bit(cg_bytes)
         write_64bit(self.js, cg_bytes)
+        print(f"DEBUG [wrt_cg_log_to_jrnl]: cg_bytes appears in hex dump as: {format_hex_like_hexdump(cg_bytes_raw)}")
         self.ttl_bytes += 8
 
         # Call to wrt_cgs_to_jrnl
@@ -155,8 +163,9 @@ class Journal:
             current_pos = self.META_LEN + (current_pos % (u32Const.JRNL_SIZE.value - self.META_LEN))
         self.js.seek(current_pos)
         print(f"DEBUG [wrt_cg_log_to_jrnl]: Writing END_TAG at position: {self.js.tell()}")
+        end_tag_bytes = to_bytes_64bit(self.END_TAG)
         write_64bit(self.js, self.END_TAG)
-        print(f"DEBUG [wrt_cg_log_to_jrnl]: END_TAG bytes written: {to_bytes_64bit(self.END_TAG).hex()}")
+        print(f"DEBUG [wrt_cg_log_to_jrnl]: END_TAG appears in hex dump as: {format_hex_like_hexdump(end_tag_bytes)}")
         self.ttl_bytes += 8
 
         # Update metadata
@@ -173,6 +182,8 @@ class Journal:
         self.meta_put = new_p_pos
         self.meta_sz += bytes_written
 
+        print(
+            f"DEBUG [wrt_cg_log_to_jrnl]: Writing metadata - g_pos: {self.meta_get}, p_pos: {self.meta_put}, sz: {self.meta_sz}")
         self.wrt_metadata(self.meta_get, self.meta_put, self.meta_sz)
 
         self.js.flush()
@@ -324,15 +335,24 @@ class Journal:
                     current_pos = self.META_LEN + (current_pos % (u32Const.JRNL_SIZE.value - self.META_LEN))
                     self.js.seek(current_pos)
 
+                b_num_bytes = to_bytes_64bit(cg.block_num)
                 write_64bit(self.js, cg.block_num)
+                print(
+                    f"DEBUG [wrt_cgs_to_jrnl]: Writing block number at {current_pos}, appears in hex dump as: {format_hex_like_hexdump(b_num_bytes)}")
                 self.ttl_bytes += 8
                 self.blks_in_jrnl[cg.block_num] = True
 
+                ts_bytes = to_bytes_64bit(cg.time_stamp)
                 write_64bit(self.js, cg.time_stamp)
+                print(
+                    f"DEBUG [wrt_cgs_to_jrnl]: Writing timestamp, appears in hex dump as: {format_hex_like_hexdump(ts_bytes)}")
                 self.ttl_bytes += 8
 
                 for selector in cg.selectors:
-                    self.js.write(selector.to_bytes())
+                    selector_bytes = selector.to_bytes()
+                    self.js.write(selector_bytes)
+                    print(
+                        f"DEBUG [wrt_cgs_to_jrnl]: Writing selector at {self.js.tell()}, appears in hex dump as: {format_hex_like_hexdump(selector_bytes)}")
                     self.ttl_bytes += 8
 
                     # Iterate through selector bits and write data only for set bits
@@ -340,8 +360,10 @@ class Journal:
                         if selector.is_set(i):
                             if cg.new_data:
                                 data = cg.new_data.popleft()
-                                self.wrt_field(data if isinstance(data, bytes) else bytes(data),
-                                               u32Const.BYTES_PER_LINE.value, True)
+                                data_bytes = data if isinstance(data, bytes) else bytes(data)
+                                print(
+                                    f"DEBUG [wrt_cgs_to_jrnl]: Writing data for bit {i}, first 16 bytes appear as: {format_hex_like_hexdump(data_bytes[:16])}")
+                                self.wrt_field(data_bytes, u32Const.BYTES_PER_LINE.value, True)
                             else:
                                 print(f"Warning: No data available for set bit {i} in selector")
 
@@ -349,7 +371,10 @@ class Journal:
                         break
 
                 # Write placeholder CRC
+                crc_bytes = to_bytes_64bit(0xCCCCCCCC)[:4]
                 write_32bit(self.js, 0xCCCCCCCC)
+                print(
+                    f"DEBUG [wrt_cgs_to_jrnl]: Writing CRC placeholder, appears in hex dump as: {format_hex_like_hexdump(crc_bytes)}")
                 self.ttl_bytes += 4
 
                 # Write zero padding
@@ -470,25 +495,23 @@ class Journal:
         self.ttl_bytes = 0
 
         ck_start_tag = read_64bit(self.js)
-        self.ttl_bytes += 8
+        self.ttl_bytes += self.START_TAG_SIZE
+        print(
+            f"DEBUG [rd_jrnl]: Start tag appears in hex dump as: {format_hex_like_hexdump(to_bytes_64bit(ck_start_tag))}")
 
-        print(f"DEBUG [rd_jrnl]: Raw bytes for start tag: {format_hex_like_hexdump(self.js.read(8))}")
-        self.js.seek(-8, 1)
+        cg_bytes = read_64bit(self.js)
+        self.ttl_bytes += self.CG_BYTES_SIZE
+        print(f"DEBUG [rd_jrnl]: cg_bytes appears in hex dump as: {format_hex_like_hexdump(to_bytes_64bit(cg_bytes))}")
 
         if ck_start_tag != self.START_TAG:
             print(f"Invalid journaled data. Start tag: {ck_start_tag:X} (expected: {self.START_TAG:X})")
             return 0, 0, 0
 
-        cg_bytes = read_64bit(self.js)
-        self.ttl_bytes += 8
-
-        print(f"DEBUG [rd_jrnl]: Raw bytes for cg_bytes: {format_hex_like_hexdump(self.js.read(8))}")
-        self.js.seek(-8, 1)
-
-        print(f"DEBUG [rd_jrnl]: Read cg_bytes: {cg_bytes}, ck_start_tag: {ck_start_tag:X}")
+        print(
+            f"DEBUG [rd_jrnl]: Read cg_bytes: {cg_bytes}, ck_start_tag appears in hex dump as: {format_hex_like_hexdump(to_bytes_64bit(ck_start_tag))}")
         print(f"DEBUG [rd_jrnl]: File position after reading START_TAG and cg_bytes: {self.js.tell()}")
 
-        while self.ttl_bytes < cg_bytes + 16:
+        while self.ttl_bytes < cg_bytes + self.META_LEN:
             current_pos = self.js.tell()
             if current_pos >= u32Const.JRNL_SIZE.value:
                 current_pos = self.META_LEN + (current_pos % (u32Const.JRNL_SIZE.value - self.META_LEN))
@@ -503,17 +526,32 @@ class Journal:
             print(f"DEBUG [rd_jrnl]: About to read b_num at position: {self.js.tell()}")
             b_num = read_64bit(self.js)
             self.ttl_bytes += 8
+            print(
+                f"DEBUG [rd_jrnl]: Read block number: {b_num}, appears in hex dump as: {format_hex_like_hexdump(to_bytes_64bit(b_num))}")
+
+            timestamp = read_64bit(self.js)
+            self.ttl_bytes += 8
+            print(
+                f"DEBUG [rd_jrnl]: Read timestamp: {timestamp}, appears in hex dump as: {format_hex_like_hexdump(to_bytes_64bit(timestamp))}")
 
             cg = Change(b_num, False)
-            cg.time_stamp = read_64bit(self.js)
-            self.ttl_bytes += 8
+            cg.time_stamp = timestamp
 
             while True:
+                if self.js.tell() + 8 > u32Const.JRNL_SIZE.value:
+                    print("DEBUG [rd_jrnl]: Reached end of journal file while reading selectors")
+                    break
+
                 selector_data = self.js.read(8)
+                if len(selector_data) < 8:
+                    print(f"DEBUG [rd_jrnl]: Not enough data to read selector at position {self.js.tell()}")
+                    break
+
                 self.ttl_bytes += 8
                 selector = Select.from_bytes(selector_data)
                 cg.selectors.append(selector)
-                print(f"DEBUG [rd_jrnl]: Read selector: {selector.value:X} at position: {self.js.tell()}")
+                print(
+                    f"DEBUG [rd_jrnl]: Read selector appears in hex dump as: {format_hex_like_hexdump(selector_data)} at position: {self.js.tell()}")
 
                 for i in range(63):
                     if selector.is_set(i):
@@ -521,6 +559,7 @@ class Journal:
                         cg.new_data.append(line_data)
 
                 if selector.is_last_block():
+                    print("DEBUG [rd_jrnl]: Found last block selector, breaking loop")
                     break
 
             # Read CRC placeholder and padding
@@ -529,18 +568,28 @@ class Journal:
 
             r_j_cg_log.add_to_log(cg)
 
+            if self.ttl_bytes >= cg_bytes + self.START_TAG_SIZE + self.CG_BYTES_SIZE:  # We've read all the data, now just need to read END_TAG
+                break
+
+        expected_end_pos = start_pos + cg_bytes + self.CG_BYTES_SIZE + self.END_TAG_SIZE
+        actual_end_pos = self.js.tell()
+        if actual_end_pos != expected_end_pos:
+            print(
+                f"WARNING: Unexpected position before reading END_TAG. Expected: {expected_end_pos}, Actual: {actual_end_pos}")
+            self.js.seek(expected_end_pos - self.END_TAG_SIZE)  # Position to read END_TAG
+
         print(f"DEBUG [rd_jrnl]: About to read end tag at position: {self.js.tell()}")
         ck_end_tag = read_64bit(self.js)
-        self.ttl_bytes += 8
+        self.ttl_bytes += self.END_TAG_SIZE
 
-        print(f"DEBUG [rd_jrnl]: Raw bytes for end tag: {format_hex_like_hexdump(self.js.read(8))}")
-        self.js.seek(-8, 1)
+        print(f"DEBUG [rd_jrnl]: End tag appears in hex dump as: {format_hex_like_hexdump(to_bytes_64bit(ck_end_tag))}")
 
         if ck_end_tag != self.END_TAG:
             print(f"Invalid journaled data. End tag: {ck_end_tag:X} (expected: {self.END_TAG:X})")
 
-        print(f"DEBUG [rd_jrnl]: Read END_TAG: {ck_end_tag:X}")
-        print(f"DEBUG [rd_jrnl]: Total bytes read: {self.ttl_bytes}, Expected: {cg_bytes + 24}")
+        print(
+            f"DEBUG [rd_jrnl]: Read END_TAG appears in hex dump as: {format_hex_like_hexdump(to_bytes_64bit(ck_end_tag))}")
+        print(f"DEBUG [rd_jrnl]: Total bytes read: {self.ttl_bytes}, Expected: {cg_bytes + self.META_LEN}")
 
         return ck_start_tag, ck_end_tag, self.ttl_bytes
 
