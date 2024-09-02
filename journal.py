@@ -11,6 +11,11 @@ from myMemory import Page
 import os
 
 
+class NoSelectorsAvailableError(Exception):
+    """Raised when there are no selectors available in a Change object."""
+    pass
+
+
 class Journal:
     # Note: the values of START_TAG and END_TAG were arbitrarily chosen
     # START_TAG = 0xf19186770cf76d4f  # 17406841880640449871
@@ -210,8 +215,6 @@ class Journal:
 
         self.reset_file()  # Reset file state before purging
 
-        # self.js.seek(self.META_LEN, 0)
-
         print(f"{self.tabs(1, True)}Purging journal{'(after crash)' if had_crash else ''}")
 
         if not any(self.blks_in_jrnl) and not had_crash:
@@ -229,15 +232,41 @@ class Journal:
                 curr_blk_num = SENTINEL_BNUM
                 pg = Page()
 
-                self.rd_and_wrt_back(j_cg_log, self.p_buf, ctr, prev_blk_num, curr_blk_num, pg)
+                for blk_num, changes in j_cg_log.the_log.items():
+                    for cg in changes:
+                        curr_blk_num = cg.block_num
+                        if curr_blk_num != prev_blk_num:
+                            if prev_blk_num != SENTINEL_BNUM:
+                                if ctr == self.NUM_PGS_JRNL_BUF:
+                                    self.empty_purge_jrnl_buf(self.p_buf, ctr)
+                                    ctr = 0
 
-                if curr_blk_num in j_cg_log.the_log and j_cg_log.the_log[curr_blk_num]:
-                    cg = j_cg_log.the_log[curr_blk_num][-1]
-                    self.r_and_wb_last(cg, self.p_buf, ctr, curr_blk_num, pg)
-                else:
-                    print(f"Warning: No changes found for block {curr_blk_num}")
+                                self.p_buf[ctr] = (prev_blk_num, pg)
+                                ctr += 1
 
-                assert ctr == 0
+                            pg = Page()
+                            self.p_d.get_ds().seek(curr_blk_num * u32Const.BLOCK_BYTES.value)
+                            pg.dat = bytearray(self.p_d.get_ds().read(u32Const.BLOCK_BYTES.value))
+
+                        prev_blk_num = curr_blk_num
+
+                        try:
+                            self.wrt_cg_to_pg(cg, pg)
+                        except NoSelectorsAvailableError:
+                            print(f"Warning: No changes found for block {curr_blk_num}")
+                        except Exception as e:
+                            print(f"Error processing changes for block {curr_blk_num}: {str(e)}")
+
+                # Handle the last block
+                if curr_blk_num != SENTINEL_BNUM:
+                    if ctr == self.NUM_PGS_JRNL_BUF:
+                        self.empty_purge_jrnl_buf(self.p_buf, ctr)
+                        ctr = 0
+
+                    self.p_buf[ctr] = (curr_blk_num, pg)
+                    ctr += 1
+
+                self.empty_purge_jrnl_buf(self.p_buf, ctr, True)
 
             self.blks_in_jrnl = [False] * bNum_tConst.NUM_DISK_BLOCKS.value
             self.p_cL.the_log.clear()
@@ -247,13 +276,22 @@ class Journal:
     def wrt_cg_to_pg(self, cg: Change, pg: Page):
         cg.arr_next = 0
 
-        lin_num = self.get_next_lin_num(cg)
-        while lin_num != 0xFF:
-            temp = cg.new_data.popleft()
-            start = lin_num * u32Const.BYTES_PER_LINE.value
-            end = (lin_num + 1) * u32Const.BYTES_PER_LINE.value
-            pg.dat[start:end] = temp
-            lin_num = self.get_next_lin_num(cg)
+        try:
+            while True:
+                try:
+                    lin_num = self.get_next_lin_num(cg)
+                    if not cg.new_data:
+                        print(f"Warning: No data available for line {lin_num}")
+                        break
+                    temp = cg.new_data.popleft()
+                    start = lin_num * u32Const.BYTES_PER_LINE.value
+                    end = (lin_num + 1) * u32Const.BYTES_PER_LINE.value
+                    pg.dat[start:end] = temp
+                except NoSelectorsAvailableError:
+                    # All lines processed or no more selectors available
+                    break
+        except Exception as e:
+            print(f"An error occurred while writing change to page: {str(e)}")
 
     def is_in_jrnl(self, b_num: bNum_t) -> bool:
         return self.blks_in_jrnl[b_num]
@@ -659,10 +697,13 @@ class Journal:
         while p_ctr:
             p_ctr -= 1
             cursor = p_pg_pr[p_ctr]
-            self.crc_check_pg(cursor)
+            crc_ok = self.crc_check_pg(cursor)
             self.p_d.get_ds().seek(cursor[0] * u32Const.BLOCK_BYTES.value)
 
-            if self.wipers.is_dirty(cursor[0]):
+            if not crc_ok:
+                print(f"{self.tabs(3, True)}CRC check failed for block {cursor[0]}, using empty block")
+                self.p_d.get_ds().write(temp)
+            elif self.wipers.is_dirty(cursor[0]):
                 self.p_d.get_ds().write(temp)
                 print(f"{self.tabs(3, True)}Overwriting dirty block {cursor[0]}")
             else:
@@ -682,25 +723,65 @@ class Journal:
     def crc_check_pg(self, p_pr: Tuple[bNum_t, Page]):
         p_uc_dat = bytearray(p_pr[1].dat)
 
-        BoostCRC.wrt_bytes_little_e(0x00000000, p_uc_dat[u32Const.BYTES_PER_PAGE.value - u32Const.CRC_BYTES.value:],
-                                 u32Const.CRC_BYTES.value)
-        code = BoostCRC.get_code(p_uc_dat, u32Const.BYTES_PER_PAGE.value)
-        BoostCRC.wrt_bytes_little_e(code, p_uc_dat[u32Const.BYTES_PER_PAGE.value - u32Const.CRC_BYTES.value:],
-                                 u32Const.CRC_BYTES.value)
-        code2 = BoostCRC.get_code(p_uc_dat, u32Const.BYTES_PER_PAGE.value)
+        # Calculate the CRC of the entire page (including the existing CRC value)
+        original_crc = BoostCRC.get_code(p_uc_dat, u32Const.BYTES_PER_PAGE.value)
+        print(f"DEBUG [crc_check_pg]: Original CRC: {original_crc:08x}")
 
-        try:
-            assert code2 == 0, "CRC check failed"
-        except AssertionError as e:
-            print(f"Error in crc_check_pg: {str(e)}")
-            # Add additional error handling or logging as needed
+        # Extract the stored CRC value
+        stored_crc = int.from_bytes(p_uc_dat[-u32Const.CRC_BYTES.value:], 'little')
+        print(f"DEBUG [crc_check_pg]: Stored CRC: {stored_crc:08x}")
+
+        # Zero out the CRC field
+        BoostCRC.wrt_bytes_little_e(0, p_uc_dat[-u32Const.CRC_BYTES.value:], u32Const.CRC_BYTES.value)
+
+        # Calculate the new CRC
+        calculated_crc = BoostCRC.get_code(p_uc_dat, u32Const.BYTES_PER_PAGE.value)
+        print(f"DEBUG [crc_check_pg]: Calculated CRC: {calculated_crc:08x}")
+
+        # Write the calculated CRC back
+        BoostCRC.wrt_bytes_little_e(calculated_crc, p_uc_dat[-u32Const.CRC_BYTES.value:], u32Const.CRC_BYTES.value)
+
+        # Verify
+        final_crc = BoostCRC.get_code(p_uc_dat, u32Const.BYTES_PER_PAGE.value)
+        print(f"DEBUG [crc_check_pg]: Final CRC: {final_crc:08x}")
+
+        if final_crc != 0:
+            print(f"DEBUG [crc_check_pg]: CRC check failed for block {p_pr[0]}")
+            return False
+
+        print(f"DEBUG [crc_check_pg]: CRC check passed for block {p_pr[0]}")
+        return True
+
+    # def get_next_lin_num(self, cg: Change) -> lNum_t:
+    #     if not cg.selectors:
+    #         print("DEBUG: No selectors available in get_next_lin_num")
+    #         return 0xFF  # Return sentinel value immediately if no selectors
+    #
+    #     current_selector = cg.selectors[0]
+    #     print(f"DEBUG: Current selector value: {current_selector.value:016x}, arr_next: {cg.arr_next}")
+    #
+    #     for i in range(64):
+    #         if current_selector.is_set(i):
+    #             if i == cg.arr_next:
+    #                 cg.arr_next += 1
+    #                 if cg.arr_next == 64:
+    #                     cg.selectors.popleft()
+    #                     cg.arr_next = 0
+    #                 print(f"DEBUG: Returning line number {i}")
+    #                 return i
+    #
+    #     # If we've gone through all bits and found nothing, move to the next selector
+    #     cg.selectors.popleft()
+    #     cg.arr_next = 0
+    #     print("DEBUG: Moving to next selector")
+    #     if not cg.selectors:
+    #         print("DEBUG: No more selectors after moving to next")
+    #         return 0xFF  # Return sentinel value if no more selectors
+    #     return self.get_next_lin_num(cg)  # Recursive call to check next selector
 
     def get_next_lin_num(self, cg: Change) -> lNum_t:
-        try:
-            assert cg.selectors, "No selectors available"
-        except AssertionError as e:
-            print(f"Error in get_next_lin_num: {str(e)}")
-            return 0xFF  # Return an invalid line number
+        if not cg.selectors:
+            raise NoSelectorsAvailableError("No selectors available in the Change object")
 
         current_selector = cg.selectors[0]
         for i in range(64):
