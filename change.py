@@ -47,13 +47,12 @@ class Select:
         return selector
 
 class Change:
-    def __init__(self, block_num: bNum_t, is_last: bool):
+    def __init__(self, block_num: bNum_t):
         self.block_num = block_num
         self.time_stamp = get_cur_time()
         self.selectors = deque()
         self.new_data = deque()
         self.arr_next = 0
-        self.add_selector(is_last)
 
     def add_selector(self, is_last: bool):
         selector = Select()
@@ -63,7 +62,10 @@ class Change:
 
     def add_line(self, line_num: int, data: bytes):
         if not self.selectors or self.selectors[-1].is_set(line_num % 63):
-            self.add_selector(False)
+            new_selector = Select()
+            if not self.selectors:
+                new_selector.set_last_block()  # Set last block flag for the first (and only) selector
+            self.selectors.append(new_selector)
         self.selectors[-1].set(line_num % 63)
         self.new_data.append(data)
 

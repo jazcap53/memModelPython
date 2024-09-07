@@ -381,6 +381,7 @@ class Journal:
                 self.ttl_bytes += 8
 
                 page_data = bytearray(u32Const.BYTES_PER_PAGE.value)
+
                 for selector in cg.selectors:
                     selector_bytes = selector.to_bytes()
                     self.js.write(selector_bytes)
@@ -401,9 +402,6 @@ class Journal:
                                 page_data[start:end] = data_bytes
                             else:
                                 print(f"Warning: No data available for set bit {i} in selector")
-
-                    if selector.is_last_block():
-                        break
 
                 # Calculate and write CRC
                 crc = BoostCRC.get_code(page_data, u32Const.BYTES_PER_PAGE.value)
@@ -548,6 +546,139 @@ class Journal:
         print(
             f"DEBUG [rd_last_jrnl]: Read from journal - START_TAG: {ck_start_tag:X}, END_TAG: {ck_end_tag:X}, Total Bytes: {ttl_bytes}")
 
+    # def rd_jrnl(self, r_j_cg_log: ChangeLog, start_pos: int) -> Tuple[int, int, int]:
+    #     self.js.seek(start_pos)
+    #     print(f"DEBUG [rd_jrnl]: rd_jrnl starting at position: {self.js.tell()}")
+    #     self.ttl_bytes = 0
+    #
+    #     ck_start_tag = read_64bit(self.js)
+    #     self.ttl_bytes += self.START_TAG_SIZE
+    #     print(
+    #         f"DEBUG [rd_jrnl]: Start tag appears in hex dump as: {format_hex_like_hexdump(to_bytes_64bit(ck_start_tag))}")
+    #
+    #     cg_bytes = read_64bit(self.js)
+    #     self.ttl_bytes += self.CG_BYTES_SIZE
+    #     print(f"DEBUG [rd_jrnl]: cg_bytes appears in hex dump as: {format_hex_like_hexdump(to_bytes_64bit(cg_bytes))}")
+    #
+    #     if ck_start_tag != self.START_TAG:
+    #         print(f"Invalid journaled data. Start tag: {ck_start_tag:X} (expected: {self.START_TAG:X})")
+    #         return 0, 0, 0
+    #
+    #     print(
+    #         f"DEBUG [rd_jrnl]: Read cg_bytes: {cg_bytes}, ck_start_tag appears in hex dump as: {format_hex_like_hexdump(to_bytes_64bit(ck_start_tag))}")
+    #     print(f"DEBUG [rd_jrnl]: File position after reading START_TAG and cg_bytes: {self.js.tell()}")
+    #
+    #     while self.ttl_bytes < cg_bytes + self.META_LEN:
+    #         current_pos = self.js.tell()
+    #         if current_pos >= u32Const.JRNL_SIZE.value:
+    #             current_pos = self.META_LEN + (current_pos % (u32Const.JRNL_SIZE.value - self.META_LEN))
+    #             self.js.seek(current_pos)
+    #
+    #         # Ensure 8-byte alignment
+    #         if current_pos % 8 != 0:
+    #             padding = 8 - (current_pos % 8)
+    #             self.js.read(padding)
+    #             self.ttl_bytes += padding
+    #
+    #         print(f"DEBUG [rd_jrnl]: About to read b_num at position: {self.js.tell()}")
+    #         b_num = read_64bit(self.js)
+    #         self.ttl_bytes += 8
+    #         print(
+    #             f"DEBUG [rd_jrnl]: Read block number: {b_num}, appears in hex dump as: {format_hex_like_hexdump(to_bytes_64bit(b_num))}")
+    #
+    #         timestamp = read_64bit(self.js)
+    #         self.ttl_bytes += 8
+    #         print(
+    #             f"DEBUG [rd_jrnl]: Read timestamp: {timestamp}, appears in hex dump as: {format_hex_like_hexdump(to_bytes_64bit(timestamp))}")
+    #
+    #         cg = Change(b_num, False)
+    #         cg.time_stamp = timestamp
+    #         print(f"DEBUG [rd_jrnl]: Created Change object for block {b_num}")
+    #
+    #         page_data = bytearray(u32Const.BYTES_PER_PAGE.value)
+    #
+    #         while True:
+    #             if self.js.tell() + 8 > u32Const.JRNL_SIZE.value:
+    #                 print("DEBUG [rd_jrnl]: Reached end of journal file while reading selectors")
+    #                 break
+    #
+    #             selector_data = self.js.read(8)
+    #             if len(selector_data) < 8:
+    #                 print(f"DEBUG [rd_jrnl]: Not enough data to read selector at position {self.js.tell()}")
+    #                 break
+    #
+    #             self.ttl_bytes += 8
+    #             selector = Select.from_bytes(selector_data)
+    #             if selector.value != 0:  # Only add non-zero selectors
+    #                 cg.selectors.append(selector)
+    #                 print(f"DEBUG [rd_jrnl]: Added selector to Change, now has {len(cg.selectors)} selectors")
+    #                 print(
+    #                     f"DEBUG [rd_jrnl]: Read selector appears in hex dump as: {format_hex_like_hexdump(selector_data)} at position: {self.js.tell()}")
+    #             else:
+    #                 print(f"DEBUG [rd_jrnl]: Skipped zero-value selector at position: {self.js.tell()}")
+    #
+    #             for i in range(63):
+    #                 if selector.is_set(i):
+    #                     line_data = self.rd_field(u32Const.BYTES_PER_LINE.value)
+    #                     cg.new_data.append(line_data)
+    #                     print(f"DEBUG [rd_jrnl]: Added data item to Change, now has {len(cg.new_data)} data items")
+    #                     start = i * u32Const.BYTES_PER_LINE.value
+    #                     end = start + u32Const.BYTES_PER_LINE.value
+    #                     page_data[start:end] = line_data
+    #
+    #             if selector.is_last_block():
+    #                 print("DEBUG [rd_jrnl]: Found last block selector, breaking loop")
+    #                 break
+    #
+    #         # Read CRC
+    #         stored_crc = read_32bit(self.js)
+    #         self.ttl_bytes += 4
+    #         print(f"DEBUG [rd_jrnl]: Read CRC: {stored_crc:08x}")
+    #
+    #         # Calculate CRC
+    #         calculated_crc = BoostCRC.get_code(page_data, u32Const.BYTES_PER_PAGE.value)
+    #         print(f"DEBUG [rd_jrnl]: Calculated CRC: {calculated_crc:08x}")
+    #
+    #         if stored_crc != calculated_crc:
+    #             print(
+    #                 f"WARNING: CRC mismatch for block {b_num}. Stored: {stored_crc:08x}, Calculated: {calculated_crc:08x}")
+    #
+    #         # Read padding
+    #         self.js.read(4)
+    #         self.ttl_bytes += 4
+    #
+    #         r_j_cg_log.add_to_log(cg)
+    #         print(f"DEBUG [rd_jrnl]: Added change for block {b_num} to log")
+    #
+    #         if self.ttl_bytes >= cg_bytes + self.START_TAG_SIZE + self.CG_BYTES_SIZE:  # We've read all the data, now just need to read END_TAG
+    #             break
+    #
+    #     print(f"DEBUG [rd_jrnl]: Total changes processed: {len(r_j_cg_log.the_log)}")
+    #     for block, changes in r_j_cg_log.the_log.items():
+    #         print(f"DEBUG [rd_jrnl]: Block {block} has {len(changes)} changes")
+    #
+    #     expected_end_pos = start_pos + cg_bytes + self.CG_BYTES_SIZE + self.END_TAG_SIZE
+    #     actual_end_pos = self.js.tell()
+    #     if actual_end_pos != expected_end_pos:
+    #         print(
+    #             f"WARNING: Unexpected position before reading END_TAG. Expected: {expected_end_pos}, Actual: {actual_end_pos}")
+    #         self.js.seek(expected_end_pos - self.END_TAG_SIZE)  # Position to read END_TAG
+    #
+    #     print(f"DEBUG [rd_jrnl]: About to read end tag at position: {self.js.tell()}")
+    #     ck_end_tag = read_64bit(self.js)
+    #     self.ttl_bytes += self.END_TAG_SIZE
+    #
+    #     print(f"DEBUG [rd_jrnl]: End tag appears in hex dump as: {format_hex_like_hexdump(to_bytes_64bit(ck_end_tag))}")
+    #
+    #     if ck_end_tag != self.END_TAG:
+    #         print(f"Invalid journaled data. End tag: {ck_end_tag:X} (expected: {self.END_TAG:X})")
+    #
+    #     print(
+    #         f"DEBUG [rd_jrnl]: Read END_TAG appears in hex dump as: {format_hex_like_hexdump(to_bytes_64bit(ck_end_tag))}")
+    #     print(f"DEBUG [rd_jrnl]: Total bytes read: {self.ttl_bytes}, Expected: {cg_bytes + self.META_LEN}")
+    #
+    #     return ck_start_tag, ck_end_tag, self.ttl_bytes
+
     def rd_jrnl(self, r_j_cg_log: ChangeLog, start_pos: int) -> Tuple[int, int, int]:
         self.js.seek(start_pos)
         print(f"DEBUG [rd_jrnl]: rd_jrnl starting at position: {self.js.tell()}")
@@ -571,18 +702,6 @@ class Journal:
         print(f"DEBUG [rd_jrnl]: File position after reading START_TAG and cg_bytes: {self.js.tell()}")
 
         while self.ttl_bytes < cg_bytes + self.META_LEN:
-            current_pos = self.js.tell()
-            if current_pos >= u32Const.JRNL_SIZE.value:
-                current_pos = self.META_LEN + (current_pos % (u32Const.JRNL_SIZE.value - self.META_LEN))
-                self.js.seek(current_pos)
-
-            # Ensure 8-byte alignment
-            if current_pos % 8 != 0:
-                padding = 8 - (current_pos % 8)
-                self.js.read(padding)
-                self.ttl_bytes += padding
-
-            print(f"DEBUG [rd_jrnl]: About to read b_num at position: {self.js.tell()}")
             b_num = read_64bit(self.js)
             self.ttl_bytes += 8
             print(
@@ -593,44 +712,27 @@ class Journal:
             print(
                 f"DEBUG [rd_jrnl]: Read timestamp: {timestamp}, appears in hex dump as: {format_hex_like_hexdump(to_bytes_64bit(timestamp))}")
 
-            cg = Change(b_num, False)
+            cg = Change(b_num)
             cg.time_stamp = timestamp
             print(f"DEBUG [rd_jrnl]: Created Change object for block {b_num}")
 
             page_data = bytearray(u32Const.BYTES_PER_PAGE.value)
 
-            while True:
-                if self.js.tell() + 8 > u32Const.JRNL_SIZE.value:
-                    print("DEBUG [rd_jrnl]: Reached end of journal file while reading selectors")
-                    break
+            selector_data = self.js.read(8)
+            self.ttl_bytes += 8
+            selector = Select.from_bytes(selector_data)
+            cg.selectors.append(selector)
+            print(
+                f"DEBUG [rd_jrnl]: Read selector: {format_hex_like_hexdump(selector_data)} at position: {self.js.tell()}")
 
-                selector_data = self.js.read(8)
-                if len(selector_data) < 8:
-                    print(f"DEBUG [rd_jrnl]: Not enough data to read selector at position {self.js.tell()}")
-                    break
-
-                self.ttl_bytes += 8
-                selector = Select.from_bytes(selector_data)
-                if selector.value != 0:  # Only add non-zero selectors
-                    cg.selectors.append(selector)
-                    print(f"DEBUG [rd_jrnl]: Added selector to Change, now has {len(cg.selectors)} selectors")
-                    print(
-                        f"DEBUG [rd_jrnl]: Read selector appears in hex dump as: {format_hex_like_hexdump(selector_data)} at position: {self.js.tell()}")
-                else:
-                    print(f"DEBUG [rd_jrnl]: Skipped zero-value selector at position: {self.js.tell()}")
-
-                for i in range(63):
-                    if selector.is_set(i):
-                        line_data = self.rd_field(u32Const.BYTES_PER_LINE.value)
-                        cg.new_data.append(line_data)
-                        print(f"DEBUG [rd_jrnl]: Added data item to Change, now has {len(cg.new_data)} data items")
-                        start = i * u32Const.BYTES_PER_LINE.value
-                        end = start + u32Const.BYTES_PER_LINE.value
-                        page_data[start:end] = line_data
-
-                if selector.is_last_block():
-                    print("DEBUG [rd_jrnl]: Found last block selector, breaking loop")
-                    break
+            for i in range(63):  # Process up to 63 lines
+                if selector.is_set(i):
+                    line_data = self.rd_field(u32Const.BYTES_PER_LINE.value)
+                    cg.new_data.append(line_data)
+                    print(f"DEBUG [rd_jrnl]: Added data item to Change, now has {len(cg.new_data)} data items")
+                    start = i * u32Const.BYTES_PER_LINE.value
+                    end = start + u32Const.BYTES_PER_LINE.value
+                    page_data[start:end] = line_data
 
             # Read CRC
             stored_crc = read_32bit(self.js)
@@ -652,7 +754,7 @@ class Journal:
             r_j_cg_log.add_to_log(cg)
             print(f"DEBUG [rd_jrnl]: Added change for block {b_num} to log")
 
-            if self.ttl_bytes >= cg_bytes + self.START_TAG_SIZE + self.CG_BYTES_SIZE:  # We've read all the data, now just need to read END_TAG
+            if self.ttl_bytes >= cg_bytes + self.START_TAG_SIZE + self.CG_BYTES_SIZE:
                 break
 
         print(f"DEBUG [rd_jrnl]: Total changes processed: {len(r_j_cg_log.the_log)}")
@@ -871,6 +973,7 @@ if __name__ == "__main__":
     # Print both big-endian and little-endian representations
     print(f"Journal.START_TAG (as in code, big-endian): 0x{Journal.START_TAG:016x}")
     print(f"Journal.START_TAG (little-endian representation): 0x{Journal.START_TAG.to_bytes(8, 'little').hex()}")
+
     class MockSimDisk:
         def __init__(self):
             self.ds = open("mock_disk.bin", "wb+")
@@ -922,10 +1025,10 @@ if __name__ == "__main__":
     journal = Journal("mock_journal.bin", sim_disk, change_log, status, crash_chk)
 
     # Test wrt_cg_log_to_jrnl
-    cg = Change(1, True)  # Block 1, and it's the last block
+    cg = Change(1)  # Block 1
     for i in range(4):  # Set 4 lines as dirty
         cg.add_line(i, b'A' * u32Const.BYTES_PER_LINE.value)
-    change_log.add_to_log(cg)  # Use the add_to_log method instead of directly modifying the_log
+    change_log.add_to_log(cg)
 
     print("Testing wrt_cg_log_to_jrnl...")
     journal.wrt_cg_log_to_jrnl(change_log)
@@ -946,17 +1049,16 @@ if __name__ == "__main__":
             def do_store_free_list(self):
                 print("Storing free list")
 
-
         mock_file_man = MockFileMan()
         journal.do_wipe_routine(1, mock_file_man)
-
-        def output_file_cleanup():
-            import os
-            os.remove("mock_disk.bin")
-            os.remove("mock_journal.bin")
-
-        # output_file_cleanup()  # Comment in/out as needed
 
     journal.js.close()
 
     print("Journal tests completed.")
+
+    def output_file_cleanup():
+        import os
+        os.remove("mock_disk.bin")
+        os.remove("mock_journal.bin")
+
+    # output_file_cleanup()  # Comment in/out as needed
