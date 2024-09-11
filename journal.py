@@ -2,7 +2,7 @@ from ajTypes import write_64bit, read_64bit, write_32bit, read_32bit, to_bytes_6
 import struct
 from typing import List, Dict, Tuple
 from collections import deque
-from ajTypes import bNum_t, lNum_t, u32Const, bNum_tConst, SENTINEL_BNUM, SENTINEL_INUM
+from ajTypes import bNum_t, lNum_t, u32Const, bNum_tConst, SENTINEL_INUM
 from ajCrc import BoostCRC
 from ajUtils import get_cur_time, Tabber, format_hex_like_hexdump
 from wipeList import WipeList
@@ -235,11 +235,16 @@ class Journal:
                 print("\tNo changes found in the journal")
             else:
                 ctr = 0
-                prev_blk_num = SENTINEL_BNUM
-                curr_blk_num = SENTINEL_BNUM
+                if j_cg_log.the_log:
+                    curr_blk_num = next(iter(j_cg_log.the_log))
+                    prev_blk_num = None
+                else:
+                    curr_blk_num = prev_blk_num = None
                 pg = Page()
 
                 print("DEBUG [purge_jrnl]: Before calling rd_and_wrt_back")
+                print(
+                    f"DEBUG [purge_jrnl]: Initial values - ctr: {ctr}, prev_blk_num: {prev_blk_num}, curr_blk_num: {curr_blk_num}")
                 ctr, prev_blk_num, curr_blk_num, pg = self.rd_and_wrt_back(j_cg_log, self.p_buf, ctr, prev_blk_num,
                                                                            curr_blk_num, pg)
                 print(
@@ -502,7 +507,7 @@ class Journal:
                 print(f"DEBUG [rd_and_wrt_back]: Processing change {idx + 1} for block {blk_num}")
                 cur_blk_num = cg.block_num
                 if cur_blk_num != prv_blk_num:
-                    if prv_blk_num != SENTINEL_BNUM:
+                    if prv_blk_num is not None:
                         if ctr == self.NUM_PGS_JRNL_BUF:
                             self.empty_purge_jrnl_buf(p_buf, ctr)
 
@@ -578,139 +583,6 @@ class Journal:
 
         print(
             f"DEBUG [rd_last_jrnl]: Read from journal - START_TAG: {ck_start_tag:X}, END_TAG: {ck_end_tag:X}, Total Bytes: {ttl_bytes}")
-
-    # def rd_jrnl(self, r_j_cg_log: ChangeLog, start_pos: int) -> Tuple[int, int, int]:
-    #     self.js.seek(start_pos)
-    #     print(f"DEBUG [rd_jrnl]: rd_jrnl starting at position: {self.js.tell()}")
-    #     self.ttl_bytes = 0
-    #
-    #     ck_start_tag = read_64bit(self.js)
-    #     self.ttl_bytes += self.START_TAG_SIZE
-    #     print(
-    #         f"DEBUG [rd_jrnl]: Start tag appears in hex dump as: {format_hex_like_hexdump(to_bytes_64bit(ck_start_tag))}")
-    #
-    #     cg_bytes = read_64bit(self.js)
-    #     self.ttl_bytes += self.CG_BYTES_SIZE
-    #     print(f"DEBUG [rd_jrnl]: cg_bytes appears in hex dump as: {format_hex_like_hexdump(to_bytes_64bit(cg_bytes))}")
-    #
-    #     if ck_start_tag != self.START_TAG:
-    #         print(f"Invalid journaled data. Start tag: {ck_start_tag:X} (expected: {self.START_TAG:X})")
-    #         return 0, 0, 0
-    #
-    #     print(
-    #         f"DEBUG [rd_jrnl]: Read cg_bytes: {cg_bytes}, ck_start_tag appears in hex dump as: {format_hex_like_hexdump(to_bytes_64bit(ck_start_tag))}")
-    #     print(f"DEBUG [rd_jrnl]: File position after reading START_TAG and cg_bytes: {self.js.tell()}")
-    #
-    #     while self.ttl_bytes < cg_bytes + self.META_LEN:
-    #         current_pos = self.js.tell()
-    #         if current_pos >= u32Const.JRNL_SIZE.value:
-    #             current_pos = self.META_LEN + (current_pos % (u32Const.JRNL_SIZE.value - self.META_LEN))
-    #             self.js.seek(current_pos)
-    #
-    #         # Ensure 8-byte alignment
-    #         if current_pos % 8 != 0:
-    #             padding = 8 - (current_pos % 8)
-    #             self.js.read(padding)
-    #             self.ttl_bytes += padding
-    #
-    #         print(f"DEBUG [rd_jrnl]: About to read b_num at position: {self.js.tell()}")
-    #         b_num = read_64bit(self.js)
-    #         self.ttl_bytes += 8
-    #         print(
-    #             f"DEBUG [rd_jrnl]: Read block number: {b_num}, appears in hex dump as: {format_hex_like_hexdump(to_bytes_64bit(b_num))}")
-    #
-    #         timestamp = read_64bit(self.js)
-    #         self.ttl_bytes += 8
-    #         print(
-    #             f"DEBUG [rd_jrnl]: Read timestamp: {timestamp}, appears in hex dump as: {format_hex_like_hexdump(to_bytes_64bit(timestamp))}")
-    #
-    #         cg = Change(b_num, False)
-    #         cg.time_stamp = timestamp
-    #         print(f"DEBUG [rd_jrnl]: Created Change object for block {b_num}")
-    #
-    #         page_data = bytearray(u32Const.BYTES_PER_PAGE.value)
-    #
-    #         while True:
-    #             if self.js.tell() + 8 > u32Const.JRNL_SIZE.value:
-    #                 print("DEBUG [rd_jrnl]: Reached end of journal file while reading selectors")
-    #                 break
-    #
-    #             selector_data = self.js.read(8)
-    #             if len(selector_data) < 8:
-    #                 print(f"DEBUG [rd_jrnl]: Not enough data to read selector at position {self.js.tell()}")
-    #                 break
-    #
-    #             self.ttl_bytes += 8
-    #             selector = Select.from_bytes(selector_data)
-    #             if selector.value != 0:  # Only add non-zero selectors
-    #                 cg.selectors.append(selector)
-    #                 print(f"DEBUG [rd_jrnl]: Added selector to Change, now has {len(cg.selectors)} selectors")
-    #                 print(
-    #                     f"DEBUG [rd_jrnl]: Read selector appears in hex dump as: {format_hex_like_hexdump(selector_data)} at position: {self.js.tell()}")
-    #             else:
-    #                 print(f"DEBUG [rd_jrnl]: Skipped zero-value selector at position: {self.js.tell()}")
-    #
-    #             for i in range(63):
-    #                 if selector.is_set(i):
-    #                     line_data = self.rd_field(u32Const.BYTES_PER_LINE.value)
-    #                     cg.new_data.append(line_data)
-    #                     print(f"DEBUG [rd_jrnl]: Added data item to Change, now has {len(cg.new_data)} data items")
-    #                     start = i * u32Const.BYTES_PER_LINE.value
-    #                     end = start + u32Const.BYTES_PER_LINE.value
-    #                     page_data[start:end] = line_data
-    #
-    #             if selector.is_last_block():
-    #                 print("DEBUG [rd_jrnl]: Found last block selector, breaking loop")
-    #                 break
-    #
-    #         # Read CRC
-    #         stored_crc = read_32bit(self.js)
-    #         self.ttl_bytes += 4
-    #         print(f"DEBUG [rd_jrnl]: Read CRC: {stored_crc:08x}")
-    #
-    #         # Calculate CRC
-    #         calculated_crc = BoostCRC.get_code(page_data, u32Const.BYTES_PER_PAGE.value)
-    #         print(f"DEBUG [rd_jrnl]: Calculated CRC: {calculated_crc:08x}")
-    #
-    #         if stored_crc != calculated_crc:
-    #             print(
-    #                 f"WARNING: CRC mismatch for block {b_num}. Stored: {stored_crc:08x}, Calculated: {calculated_crc:08x}")
-    #
-    #         # Read padding
-    #         self.js.read(4)
-    #         self.ttl_bytes += 4
-    #
-    #         r_j_cg_log.add_to_log(cg)
-    #         print(f"DEBUG [rd_jrnl]: Added change for block {b_num} to log")
-    #
-    #         if self.ttl_bytes >= cg_bytes + self.START_TAG_SIZE + self.CG_BYTES_SIZE:  # We've read all the data, now just need to read END_TAG
-    #             break
-    #
-    #     print(f"DEBUG [rd_jrnl]: Total changes processed: {len(r_j_cg_log.the_log)}")
-    #     for block, changes in r_j_cg_log.the_log.items():
-    #         print(f"DEBUG [rd_jrnl]: Block {block} has {len(changes)} changes")
-    #
-    #     expected_end_pos = start_pos + cg_bytes + self.CG_BYTES_SIZE + self.END_TAG_SIZE
-    #     actual_end_pos = self.js.tell()
-    #     if actual_end_pos != expected_end_pos:
-    #         print(
-    #             f"WARNING: Unexpected position before reading END_TAG. Expected: {expected_end_pos}, Actual: {actual_end_pos}")
-    #         self.js.seek(expected_end_pos - self.END_TAG_SIZE)  # Position to read END_TAG
-    #
-    #     print(f"DEBUG [rd_jrnl]: About to read end tag at position: {self.js.tell()}")
-    #     ck_end_tag = read_64bit(self.js)
-    #     self.ttl_bytes += self.END_TAG_SIZE
-    #
-    #     print(f"DEBUG [rd_jrnl]: End tag appears in hex dump as: {format_hex_like_hexdump(to_bytes_64bit(ck_end_tag))}")
-    #
-    #     if ck_end_tag != self.END_TAG:
-    #         print(f"Invalid journaled data. End tag: {ck_end_tag:X} (expected: {self.END_TAG:X})")
-    #
-    #     print(
-    #         f"DEBUG [rd_jrnl]: Read END_TAG appears in hex dump as: {format_hex_like_hexdump(to_bytes_64bit(ck_end_tag))}")
-    #     print(f"DEBUG [rd_jrnl]: Total bytes read: {self.ttl_bytes}, Expected: {cg_bytes + self.META_LEN}")
-    #
-    #     return ck_start_tag, ck_end_tag, self.ttl_bytes
 
     def rd_jrnl(self, r_j_cg_log: ChangeLog, start_pos: int) -> Tuple[int, int, int]:
         self.js.seek(start_pos)
@@ -953,33 +825,6 @@ class Journal:
             return False
 
         return True
-
-    # def get_next_lin_num(self, cg: Change) -> lNum_t:
-    #     if not cg.selectors:
-    #         print("DEBUG: No selectors available in get_next_lin_num")
-    #         return 0xFF  # Return sentinel value immediately if no selectors
-    #
-    #     current_selector = cg.selectors[0]
-    #     print(f"DEBUG: Current selector value: {current_selector.value:016x}, arr_next: {cg.arr_next}")
-    #
-    #     for i in range(64):
-    #         if current_selector.is_set(i):
-    #             if i == cg.arr_next:
-    #                 cg.arr_next += 1
-    #                 if cg.arr_next == 64:
-    #                     cg.selectors.popleft()
-    #                     cg.arr_next = 0
-    #                 print(f"DEBUG: Returning line number {i}")
-    #                 return i
-    #
-    #     # If we've gone through all bits and found nothing, move to the next selector
-    #     cg.selectors.popleft()
-    #     cg.arr_next = 0
-    #     print("DEBUG: Moving to next selector")
-    #     if not cg.selectors:
-    #         print("DEBUG: No more selectors after moving to next")
-    #         return 0xFF  # Return sentinel value if no more selectors
-    #     return self.get_next_lin_num(cg)  # Recursive call to check next selector
 
     def get_next_lin_num(self, cg: Change) -> lNum_t:
         if not cg.selectors:
