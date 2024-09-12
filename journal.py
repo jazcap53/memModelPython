@@ -586,121 +586,100 @@ class Journal:
 
     def rd_jrnl(self, r_j_cg_log: ChangeLog, start_pos: int) -> Tuple[int, int, int]:
         self.js.seek(start_pos)
-        print(f"DEBUG [rd_jrnl]: rd_jrnl starting at position: {self.js.tell()}")
         self.ttl_bytes = 0
 
-        # Read START_TAG
-        ck_start_tag = read_64bit(self.js)
-        print(
-            f"DEBUG [rd_jrnl]: Start tag appears in hex dump as: {format_hex_like_hexdump(to_bytes_64bit(ck_start_tag))}")
-
+        ck_start_tag = self._read_start_tag()
         if ck_start_tag != self.START_TAG:
-            print(f"Invalid journaled data. Start tag: {ck_start_tag:X} (expected: {self.START_TAG:X})")
             return 0, 0, 0
 
-        # Read cg_bytes
         cg_bytes = read_64bit(self.js)
-        print(
-            f"DEBUG [rd_jrnl]: Read cg_bytes: {cg_bytes}, appears in hex dump as: {format_hex_like_hexdump(to_bytes_64bit(cg_bytes))}")
+        bytes_read = self._read_changes(r_j_cg_log, cg_bytes)
 
-        # Initialize bytes read counter (excluding START_TAG and cg_bytes)
-        bytes_read = 0
-
-        while bytes_read < cg_bytes:
-            # Ensure we don't read past the end of the journal
-            if self.js.tell() + 16 > u32Const.JRNL_SIZE.value:  # At least need block num and timestamp
-                print("WARNING: Reached end of journal before reading all data")
-                break
-
-            # Read block number
-            b_num = read_64bit(self.js)
-            bytes_read += 8
-            if bytes_read > cg_bytes:
-                print("WARNING: Overran cg_bytes while reading block number")
-                break
-            print(
-                f"DEBUG [rd_jrnl]: Read block number: {b_num}, appears in hex dump as: {format_hex_like_hexdump(to_bytes_64bit(b_num))}")
-
-            # Read timestamp
-            timestamp = read_64bit(self.js)
-            bytes_read += 8
-            if bytes_read > cg_bytes:
-                print("WARNING: Overran cg_bytes while reading timestamp")
-                break
-            print(
-                f"DEBUG [rd_jrnl]: Read timestamp: {timestamp}, appears in hex dump as: {format_hex_like_hexdump(to_bytes_64bit(timestamp))}")
-
-            cg = Change(b_num)
-            cg.time_stamp = timestamp
-            print(f"DEBUG [rd_jrnl]: Created Change object for block {b_num}")
-
-            # Read selectors and data
-            while bytes_read < cg_bytes:
-                # Read selector
-                if self.js.tell() + 8 > u32Const.JRNL_SIZE.value:
-                    print("WARNING: Reached end of journal while reading selector")
-                    break
-
-                selector_data = self.js.read(8)
-                bytes_read += 8
-                if bytes_read > cg_bytes:
-                    print("WARNING: Overran cg_bytes while reading selector")
-                    break
-
-                selector = Select.from_bytes(selector_data)
-                cg.selectors.append(selector)
-                print(
-                    f"DEBUG [rd_jrnl]: Read selector: {format_hex_like_hexdump(selector_data)} at position: {self.js.tell() - 8}")
-
-                # Read corresponding data
-                for i in range(63):  # Process up to 63 lines (excluding MSB)
-                    if selector.is_set(i):
-                        if bytes_read + u32Const.BYTES_PER_LINE.value > cg_bytes:
-                            print("WARNING: Would overrun cg_bytes while reading data line")
-                            break
-
-                        if self.js.tell() + u32Const.BYTES_PER_LINE.value > u32Const.JRNL_SIZE.value:
-                            print("WARNING: Would reach end of journal while reading data line")
-                            break
-
-                        line_data = self.js.read(u32Const.BYTES_PER_LINE.value)
-                        bytes_read += u32Const.BYTES_PER_LINE.value
-                        cg.new_data.append(line_data)
-                        print(f"DEBUG [rd_jrnl]: Added data item to Change, now has {len(cg.new_data)} data items")
-
-                # Check if this was the last selector
-                if selector.is_last_block():
-                    break
-
-            # Add the change to the log
-            r_j_cg_log.add_to_log(cg)
-            print(f"DEBUG [rd_jrnl]: Added change for block {b_num} to log")
-
-            # Read CRC (4 bytes) and padding (4 bytes)
-            if bytes_read + 8 <= cg_bytes:
-                self.js.read(8)
-                bytes_read += 8
-
-            # Break if we've read all the data
-            if bytes_read >= cg_bytes:
-                break
-
-        print(f"DEBUG [rd_jrnl]: Total bytes read: {bytes_read}, Expected: {cg_bytes}")
-
-        # Position to read END_TAG (it should be right after the data)
-        expected_end_pos = start_pos + self.START_TAG_SIZE + self.CG_BYTES_SIZE + cg_bytes
-        self.js.seek(expected_end_pos)
-
-        print(f"DEBUG [rd_jrnl]: About to read end tag at position: {self.js.tell()}")
-        ck_end_tag = read_64bit(self.js)
-
-        print(f"DEBUG [rd_jrnl]: End tag appears in hex dump as: {format_hex_like_hexdump(to_bytes_64bit(ck_end_tag))}")
-
-        print(f"DEBUG [rd_jrnl]: Total changes processed: {len(r_j_cg_log.the_log)}")
-        for block, changes in r_j_cg_log.the_log.items():
-            print(f"DEBUG [rd_jrnl]: Block {block} has {len(changes)} changes")
+        ck_end_tag = self._read_end_tag(start_pos, cg_bytes)
 
         return ck_start_tag, ck_end_tag, bytes_read
+
+    def _read_start_tag(self) -> int:
+        return read_64bit(self.js)
+
+    def _read_changes(self, r_j_cg_log: ChangeLog, cg_bytes: int) -> int:
+        bytes_read = 0
+        while bytes_read < cg_bytes:
+            if self._check_journal_end(bytes_read, cg_bytes):
+                break
+
+            cg, bytes_read = self._read_single_change(bytes_read, cg_bytes)
+            if cg:
+                r_j_cg_log.add_to_log(cg)
+
+            if bytes_read + 8 <= cg_bytes:
+                self.js.read(8)  # Read CRC (4 bytes) and padding (4 bytes)
+                bytes_read += 8
+
+        return bytes_read
+
+    def _check_journal_end(self, bytes_read: int, cg_bytes: int) -> bool:
+        return (self.js.tell() + 16 > u32Const.JRNL_SIZE.value) or (bytes_read >= cg_bytes)
+
+    def _read_single_change(self, bytes_read: int, cg_bytes: int) -> Tuple[Optional[Change], int]:
+        b_num = read_64bit(self.js)
+        bytes_read += 8
+        if bytes_read > cg_bytes:
+            return None, bytes_read
+
+        timestamp = read_64bit(self.js)
+        bytes_read += 8
+        if bytes_read > cg_bytes:
+            return None, bytes_read
+
+        cg = Change(b_num)
+        cg.time_stamp = timestamp
+
+        while bytes_read < cg_bytes:
+            selector, selector_bytes_read = self._read_selector(bytes_read, cg_bytes)
+            if not selector:
+                break
+            bytes_read += selector_bytes_read
+            cg.selectors.append(selector)
+
+            data_bytes_read = self._read_data_for_selector(selector, cg, bytes_read, cg_bytes)
+            bytes_read += data_bytes_read
+
+            if selector.is_last_block():
+                break
+
+        return cg, bytes_read
+
+    def _read_selector(self, bytes_read: int, cg_bytes: int) -> Tuple[Optional[Select], int]:
+        if self.js.tell() + 8 > u32Const.JRNL_SIZE.value:
+            return None, 0
+
+        selector_data = self.js.read(8)
+        if bytes_read + 8 > cg_bytes:
+            return None, 8
+
+        return Select.from_bytes(selector_data), 8
+
+    def _read_data_for_selector(self, selector: Select, cg: Change, bytes_read: int, cg_bytes: int) -> int:
+        data_bytes_read = 0
+        for i in range(63):  # Process up to 63 lines (excluding MSB)
+            if not selector.is_set(i):
+                continue
+            if bytes_read + data_bytes_read + u32Const.BYTES_PER_LINE.value > cg_bytes:
+                break
+            if self.js.tell() + u32Const.BYTES_PER_LINE.value > u32Const.JRNL_SIZE.value:
+                break
+
+            line_data = self.js.read(u32Const.BYTES_PER_LINE.value)
+            data_bytes_read += u32Const.BYTES_PER_LINE.value
+            cg.new_data.append(line_data)
+
+        return data_bytes_read
+
+    def _read_end_tag(self, start_pos: int, cg_bytes: int) -> int:
+        expected_end_pos = start_pos + self.START_TAG_SIZE + self.CG_BYTES_SIZE + cg_bytes
+        self.js.seek(expected_end_pos)
+        return read_64bit(self.js)
 
     def get_num_data_lines(self, r_cg: Change) -> int:
         num_data_lines = 0
