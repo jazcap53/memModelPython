@@ -1,6 +1,6 @@
 from ajTypes import write_64bit, read_64bit, write_32bit, read_32bit, to_bytes_64bit, from_bytes_64bit
 import struct
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 from collections import deque
 from ajTypes import bNum_t, lNum_t, u32Const, bNum_tConst, SENTINEL_INUM
 from ajCrc import BoostCRC
@@ -31,7 +31,6 @@ class Journal:
     NUM_PGS_JRNL_BUF = 16
     CPP_SELECT_T_SZ = 8
 
-
     def __init__(self, f_name: str, sim_disk, change_log, status, crash_chk, debug=False):
         self.debug = debug
         self.f_name = f_name
@@ -40,6 +39,7 @@ class Journal:
         self.p_stt = status
         self.p_cck = crash_chk
         self.sz = Journal.CPP_SELECT_T_SZ
+        self.end_tag_posn = None  # New data member
 
         # Initialize the file if it doesn't exist or is too small
         file_existed = os.path.exists(self.f_name)
@@ -144,19 +144,12 @@ class Journal:
 
         # Calculate cg_bytes before writing anything
         cg_bytes = self.calculate_cg_bytes(r_cg_log)
-        print(f"DEBUG [wrt_cg_log_to_jrnl]: Calculated cg_bytes: {cg_bytes}")
 
-        print(f"DEBUG [wrt_cg_log_to_jrnl]: Writing START_TAG at position: {self.js.tell()}")
-        start_tag_bytes = to_bytes_64bit(self.START_TAG)
         # Write START_TAG
         write_64bit(self.js, self.START_TAG)
-        print(
-            f"DEBUG [wrt_cg_log_to_jrnl]: START_TAG appears in hex dump as: {format_hex_like_hexdump(start_tag_bytes)}")
 
         # Write cg_bytes
-        cg_bytes_raw = to_bytes_64bit(cg_bytes)
         write_64bit(self.js, cg_bytes)
-        print(f"DEBUG [wrt_cg_log_to_jrnl]: cg_bytes appears in hex dump as: {format_hex_like_hexdump(cg_bytes_raw)}")
 
         # Call to wrt_cgs_to_jrnl with byte limit
         self.wrt_cgs_to_jrnl(r_cg_log, cg_bytes)
@@ -175,10 +168,8 @@ class Journal:
         if current_pos >= u32Const.JRNL_SIZE.value:
             current_pos = self.META_LEN + (current_pos % (u32Const.JRNL_SIZE.value - self.META_LEN))
         self.js.seek(current_pos)
-        print(f"DEBUG [wrt_cg_log_to_jrnl]: Writing END_TAG at position: {self.js.tell()}")
-        end_tag_bytes = to_bytes_64bit(self.END_TAG)
         write_64bit(self.js, self.END_TAG)
-        print(f"DEBUG [wrt_cg_log_to_jrnl]: END_TAG appears in hex dump as: {format_hex_like_hexdump(end_tag_bytes)}")
+        self.end_tag_posn = self.js.tell()  # Save the position after writing END_TAG
 
         # Update metadata
         new_g_pos = self.orig_p_pos
@@ -190,8 +181,6 @@ class Journal:
         self.meta_put = new_p_pos
         self.meta_sz = cg_bytes + self.META_LEN  # META_LEN includes START_TAG, cg_bytes, and END_TAG
 
-        print(
-            f"DEBUG [wrt_cg_log_to_jrnl]: Writing metadata - g_pos: {self.meta_get}, p_pos: {self.meta_put}, sz: {self.meta_sz}")
         self.wrt_metadata(self.meta_get, self.meta_put, self.meta_sz)
 
         self.js.flush()
@@ -595,7 +584,7 @@ class Journal:
         cg_bytes = read_64bit(self.js)
         bytes_read = self._read_changes(r_j_cg_log, cg_bytes)
 
-        ck_end_tag = self._read_end_tag(start_pos, cg_bytes)
+        ck_end_tag = self._read_end_tag()
 
         return ck_start_tag, ck_end_tag, bytes_read
 
@@ -676,10 +665,13 @@ class Journal:
 
         return data_bytes_read
 
-    def _read_end_tag(self, start_pos: int, cg_bytes: int) -> int:
-        expected_end_pos = start_pos + self.START_TAG_SIZE + self.CG_BYTES_SIZE + cg_bytes
-        self.js.seek(expected_end_pos)
-        return read_64bit(self.js)
+    def _read_end_tag(self) -> int:
+        current_pos = self.js.tell()
+        if self.end_tag_posn is not None and current_pos != self.end_tag_posn:
+            print(f"DEBUG [_read_end_tag]: Position mismatch at END_TAG. Expected: {self.end_tag_posn}, Actual: {current_pos}")
+
+        ck_end_tag = read_64bit(self.js)
+        return ck_end_tag
 
     def get_num_data_lines(self, r_cg: Change) -> int:
         num_data_lines = 0
