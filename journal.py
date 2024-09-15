@@ -255,6 +255,37 @@ class Journal:
 
         self.p_stt.wrt("Purged journal" if keep_going else "Finishing")
 
+    # def wrt_cg_to_pg(self, cg: Change, pg: Page):
+    #     print(f"DEBUG [wrt_cg_to_pg]: Starting to write change for block {cg.block_num}")
+    #     print(f"DEBUG [wrt_cg_to_pg]: Change has {len(cg.selectors)} selectors and {len(cg.new_data)} data items")
+    #
+    #     cg.arr_next = 0
+    #
+    #     try:
+    #         while True:
+    #             lin_num = self.get_next_lin_num(cg)
+    #             if lin_num == 0xFF:
+    #                 print("DEBUG [wrt_cg_to_pg]: Reached end of selectors")
+    #                 break
+    #             if not cg.new_data:
+    #                 print("WARNING [wrt_cg_to_pg]: Ran out of data while processing selectors")
+    #                 break
+    #             temp = cg.new_data.popleft()
+    #             start = lin_num * u32Const.BYTES_PER_LINE.value
+    #             end = (lin_num + 1) * u32Const.BYTES_PER_LINE.value
+    #             pg.dat[start:end] = temp
+    #     except NoSelectorsAvailableError:
+    #         print("DEBUG [wrt_cg_to_pg]: No more selectors available")
+    #
+    #     # Calculate and write CRC
+    #     crc = BoostCRC.get_code(pg.dat[:-4], u32Const.BYTES_PER_PAGE.value - 4)
+    #     BoostCRC.wrt_bytes_little_e(crc, pg.dat[-4:], 4)
+    #
+    #     print(
+    #         f"DEBUG [wrt_cg_to_pg]: Wrote CRC {format_hex_like_hexdump(pg.dat[-4:])} to page for block {cg.block_num}")
+    #     print(f"DEBUG [wrt_cg_to_pg]: Wrote CRC {crc:08x} to page for block {cg.block_num}")
+    #     print(f"DEBUG [wrt_cg_to_pg]: Last 16 bytes of page: {format_hex_like_hexdump(pg.dat[-16:])}")
+
     def wrt_cg_to_pg(self, cg: Change, pg: Page):
         print(f"DEBUG [wrt_cg_to_pg]: Starting to write change for block {cg.block_num}")
         print(f"DEBUG [wrt_cg_to_pg]: Change has {len(cg.selectors)} selectors and {len(cg.new_data)} data items")
@@ -281,7 +312,8 @@ class Journal:
         crc = BoostCRC.get_code(pg.dat[:-4], u32Const.BYTES_PER_PAGE.value - 4)
         BoostCRC.wrt_bytes_little_e(crc, pg.dat[-4:], 4)
 
-        print(f"DEBUG [wrt_cg_to_pg]: Wrote CRC {crc:08x} to page for block {cg.block_num}")
+        print(
+            f"DEBUG [wrt_cg_to_pg]: Wrote CRC {format_hex_like_hexdump(pg.dat[-4:])} to page for block {cg.block_num}")
         print(f"DEBUG [wrt_cg_to_pg]: Last 16 bytes of page: {format_hex_like_hexdump(pg.dat[-16:])}")
 
     def is_in_jrnl(self, b_num: bNum_t) -> bool:
@@ -372,8 +404,7 @@ class Journal:
                 # Write block number
                 b_num_bytes = to_bytes_64bit(cg.block_num)
                 write_64bit(self.js, cg.block_num)
-                print(
-                    f"DEBUG [wrt_cgs_to_jrnl]: Writing block number at {current_pos}, appears in hex dump as: {format_hex_like_hexdump(b_num_bytes)}")
+                print(f"DEBUG [wrt_cgs_to_jrnl]: Writing block number at {current_pos}, appears in hex dump as: {format_hex_like_hexdump(b_num_bytes)}")
                 bytes_written += 8
                 self.ttl_bytes += 8
                 self.blks_in_jrnl[cg.block_num] = True
@@ -381,8 +412,7 @@ class Journal:
                 # Write timestamp
                 ts_bytes = to_bytes_64bit(cg.time_stamp)
                 write_64bit(self.js, cg.time_stamp)
-                print(
-                    f"DEBUG [wrt_cgs_to_jrnl]: Writing timestamp, appears in hex dump as: {format_hex_like_hexdump(ts_bytes)}")
+                print(f"DEBUG [wrt_cgs_to_jrnl]: Writing timestamp, appears in hex dump as: {format_hex_like_hexdump(ts_bytes)}")
                 bytes_written += 8
                 self.ttl_bytes += 8
 
@@ -396,8 +426,7 @@ class Journal:
 
                     selector_bytes = selector.to_bytes()
                     self.js.write(selector_bytes)
-                    print(
-                        f"DEBUG [wrt_cgs_to_jrnl]: Writing selector at {self.js.tell()}, appears in hex dump as: {format_hex_like_hexdump(selector_bytes)}")
+                    print(f"DEBUG [wrt_cgs_to_jrnl]: Writing selector at {self.js.tell()}, appears in hex dump as: {format_hex_like_hexdump(selector_bytes)}")
                     bytes_written += 8
                     self.ttl_bytes += 8
 
@@ -426,8 +455,7 @@ class Journal:
                     crc = BoostCRC.get_code(page_data, u32Const.BYTES_PER_PAGE.value)
                     crc_bytes = to_bytes_64bit(crc)[:4]
                     write_32bit(self.js, crc)
-                    print(
-                        f"DEBUG [wrt_cgs_to_jrnl]: Writing CRC, appears in hex dump as: {format_hex_like_hexdump(crc_bytes)}")
+                    print(f"DEBUG [wrt_cgs_to_jrnl]: Writing CRC, appears in hex dump as: {format_hex_like_hexdump(crc_bytes)}")
                     self.ttl_bytes += 4
                     bytes_written += 4
 
@@ -540,7 +568,10 @@ class Journal:
         crc = BoostCRC.get_code(pg.dat, u32Const.BYTES_PER_PAGE.value)
         print(f"Calculated CRC: {crc:08x}")
         stored_crc = int.from_bytes(pg.dat[-4:], 'little')
-        print(f"Stored CRC: {stored_crc:08x}")
+        # print(f"Stored CRC: {stored_crc:08x}")
+
+        print(f"Calculated CRC: {format_hex_like_hexdump(to_bytes_64bit(crc)[:4])}")
+        print(f"Stored CRC: {format_hex_like_hexdump(pg.dat[-4:])}")
 
         self.empty_purge_jrnl_buf(p_buf, ctr, True)
 
@@ -570,8 +601,7 @@ class Journal:
             print(f"Error in rd_last_jrnl: End tag mismatch: expected {self.END_TAG:X}, got {ck_end_tag:X}")
             return
 
-        print(
-            f"DEBUG [rd_last_jrnl]: Read from journal - START_TAG: {ck_start_tag:X}, END_TAG: {ck_end_tag:X}, Total Bytes: {ttl_bytes}")
+        print(f"DEBUG [rd_last_jrnl]: Read from journal - START_TAG: {format_hex_like_hexdump(to_bytes_64bit(ck_start_tag))}, END_TAG: {format_hex_like_hexdump(to_bytes_64bit(ck_end_tag))}, Total Bytes: {ttl_bytes}")
 
     def rd_jrnl(self, r_j_cg_log: ChangeLog, start_pos: int) -> Tuple[int, int, int]:
         self.js.seek(start_pos)
@@ -665,12 +695,25 @@ class Journal:
 
         return data_bytes_read
 
+    # def _read_end_tag(self) -> int:
+    #     current_pos = self.js.tell()
+    #     if self.end_tag_posn is not None and current_pos != self.end_tag_posn:
+    #         print(f"DEBUG [_read_end_tag]: Position mismatch at END_TAG. Expected: {self.end_tag_posn}, Actual: {current_pos}")
+    #
+    #     ck_end_tag = read_64bit(self.js)
+    #     return ck_end_tag
+
     def _read_end_tag(self) -> int:
         current_pos = self.js.tell()
         if self.end_tag_posn is not None and current_pos != self.end_tag_posn:
-            print(f"DEBUG [_read_end_tag]: Position mismatch at END_TAG. Expected: {self.end_tag_posn}, Actual: {current_pos}")
+            print(
+                f"DEBUG [_read_end_tag]: Position mismatch at END_TAG. Expected: {self.end_tag_posn}, Actual: {current_pos}")
 
         ck_end_tag = read_64bit(self.js)
+
+        after_read_pos = self.js.tell()
+        print(f"DEBUG [_read_end_tag]: Position before reading END_TAG: {current_pos}, after reading: {after_read_pos}")
+
         return ck_end_tag
 
     def get_num_data_lines(self, r_cg: Change) -> int:
@@ -803,8 +846,7 @@ class Journal:
             return 0xFF  # Return sentinel value immediately if no selectors
 
         current_selector = cg.selectors[0]
-        print(
-            f"DEBUG [get_next_lin_num]: Current selector value: {format_hex_like_hexdump(to_bytes_64bit(current_selector.value))}, arr_next: {cg.arr_next}")
+        print(f"DEBUG [get_next_lin_num]: Current selector value: {format_hex_like_hexdump(to_bytes_64bit(current_selector.value))}, arr_next: {cg.arr_next}")
 
         for i in range(64):
             if current_selector.is_set(i):
@@ -833,9 +875,8 @@ if __name__ == "__main__":
     # Basic test setup
     DEBUG = False  # Set this to False to run normal operations
 
-    # Print both big-endian and little-endian representations
-    print(f"Journal.START_TAG (as in code, big-endian): 0x{Journal.START_TAG:016x}")
-    print(f"Journal.START_TAG (little-endian representation): 0x{Journal.START_TAG.to_bytes(8, 'little').hex()}")
+    print(f"Journal.START_TAG: {format_hex_like_hexdump(to_bytes_64bit(Journal.START_TAG))}")
+    print(f"Journal.END_TAG: {format_hex_like_hexdump(to_bytes_64bit(Journal.END_TAG))}")
 
     class MockSimDisk:
         def __init__(self):
