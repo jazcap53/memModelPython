@@ -581,24 +581,24 @@ class Journal:
     def _read_start_tag(self) -> int:
         return read_64bit(self.js)
 
-    def _read_changes(self, r_j_cg_log: ChangeLog) -> int:
+    def _read_changes(self, r_j_cg_log: ChangeLog, ct_bytes_to_write: int) -> int:
         bytes_read = 0
-        while bytes_read < self.ct_bytes_to_write:
-            if self._check_journal_end(bytes_read):
+        while bytes_read < ct_bytes_to_write:
+            if self._check_journal_end(bytes_read, ct_bytes_to_write):
                 break
 
             cg, bytes_read = self._read_single_change(bytes_read)
             if cg:
                 r_j_cg_log.add_to_log(cg)
 
-            if bytes_read + 8 <= self.ct_bytes_to_write:
+            if bytes_read + 8 <= ct_bytes_to_write:
                 self.js.read(8)  # Read CRC (4 bytes) and padding (4 bytes)
                 bytes_read += 8
 
         return bytes_read
 
-    def _check_journal_end(self, bytes_read: int) -> bool:
-        return (self.js.tell() + 16 > u32Const.JRNL_SIZE.value) or (bytes_read >= self.ct_bytes_to_write)
+    def _check_journal_end(self, bytes_read: int, ct_bytes_to_write: int) -> bool:
+        return (self.js.tell() + 16 > u32Const.JRNL_SIZE.value) or (bytes_read >= ct_bytes_to_write)
 
     def _read_single_change(self, bytes_read: int) -> Tuple[Optional[Change], int]:
         b_num = read_64bit(self.js)
