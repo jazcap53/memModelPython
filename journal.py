@@ -98,7 +98,7 @@ class Journal:
         self.js.seek(0)
         self.js.write(struct.pack('<qqq', rd_pt, wrt_pt, bytes_stored))
 
-    def calculate_ct_bytes_to_write(self, r_cg_log: ChangeLog) -> None:
+    def calculate_ct_bytes_to_write(self, r_cg_log: ChangeLog) -> int:
         total_bytes = 0
         for blk_num, changes in r_cg_log.the_log.items():
             for cg in changes:
@@ -124,7 +124,7 @@ class Journal:
                 # CRC value (4 bytes) and Zero padding (4 bytes)
                 total_bytes += 8
 
-        self.ct_bytes_to_write = total_bytes
+        return total_bytes
 
     def wrt_cg_log_to_jrnl(self, r_cg_log: ChangeLog):
         if not r_cg_log.cg_line_ct:
