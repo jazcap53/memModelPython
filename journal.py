@@ -838,10 +838,12 @@ class Journal:
 
     @contextmanager
     def track_position(self, operation_name):
-       start_pos = self.js.tell()
-       yield
-       end_pos = self.js.tell()
-       self.position_log.append(f"{operation_name}: {start_pos} -> {end_pos}")
+        start_pos = self.js.tell()
+        yield
+        end_pos = self.js.tell()
+        bytes_read = end_pos - start_pos
+        self.position_log.append(
+            f"{operation_name}: Started at {start_pos}, ended at {end_pos}, read {bytes_read} bytes")
 
     def log_positions(self):
         with open("journal_positions.log", "w") as log_file:
