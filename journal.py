@@ -835,17 +835,20 @@ class Journal:
 
         # Read the stored CRC
         stored_crc = int.from_bytes(p_uc_dat[-u32Const.CRC_BYTES.value:], 'little')
-        print(f"DEBUG [crc_check_pg]: Stored CRC for block {block_num}: {stored_crc:08x}")
+        print(
+            f"DEBUG [crc_check_pg]: Stored CRC for block {block_num}: {format_hex_like_hexdump(stored_crc.to_bytes(4, 'little'))}")
 
         # Calculate the CRC of the page data (excluding the stored CRC)
         calculated_crc = BoostCRC.get_code(p_uc_dat[:-u32Const.CRC_BYTES.value],
                                            u32Const.BYTES_PER_PAGE.value - u32Const.CRC_BYTES.value)
-        print(f"DEBUG [crc_check_pg]: Calculated CRC for block {block_num}: {calculated_crc:08x}")
+        print(
+            f"DEBUG [crc_check_pg]: Calculated CRC for block {block_num}: {format_hex_like_hexdump(calculated_crc.to_bytes(4, 'little'))}")
 
         if stored_crc != calculated_crc:
-            print(
-                f"WARNING [crc_check_pg]: CRC mismatch for block {block_num}. Stored: {stored_crc:08x}, Calculated: {calculated_crc:08x}")
-            print(f"DEBUG [crc_check_pg]: Last 16 bytes of page: {p_uc_dat[-16:].hex()}")
+            print(f"WARNING [crc_check_pg]: CRC mismatch for block {block_num}.")
+            print(f"  Stored:     {format_hex_like_hexdump(stored_crc.to_bytes(4, 'little'))}")
+            print(f"  Calculated: {format_hex_like_hexdump(calculated_crc.to_bytes(4, 'little'))}")
+            print(f"DEBUG [crc_check_pg]: Last 16 bytes of page: {format_hex_like_hexdump(p_uc_dat[-16:])}")
             return False
 
         # Write the calculated CRC back to the page
@@ -853,11 +856,13 @@ class Journal:
 
         # Verify the written CRC
         final_crc = BoostCRC.get_code(p_uc_dat, u32Const.BYTES_PER_PAGE.value)
-        print(f"DEBUG [crc_check_pg]: Verification CRC for block {block_num}: {final_crc:08x}")
+        print(
+            f"DEBUG [crc_check_pg]: Verification CRC for block {block_num}: {format_hex_like_hexdump(final_crc.to_bytes(4, 'little'))}")
 
         if final_crc != 0:
             print(f"ERROR [crc_check_pg]: Final CRC check failed for block {block_num}")
-            print(f"DEBUG [crc_check_pg]: Last 16 bytes of page after CRC update: {p_uc_dat[-16:].hex()}")
+            print(
+                f"DEBUG [crc_check_pg]: Last 16 bytes of page after CRC update: {format_hex_like_hexdump(p_uc_dat[-16:])}")
             return False
 
         print(f"DEBUG [crc_check_pg]: CRC check passed for block {block_num}")
