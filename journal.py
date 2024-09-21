@@ -127,6 +127,25 @@ class Journal:
         return total_bytes
 
     def wrt_cg_log_to_jrnl(self, r_cg_log: ChangeLog):
+        """
+            Write the change log to the journal file.
+
+            This method writes the contents of the given ChangeLog to the journal file.
+            It calculates the total bytes to write, writes the start tag, change data,
+            and end tag, and updates the journal metadata.
+
+            Args:
+                r_cg_log (ChangeLog): The ChangeLog object containing the changes to be written.
+
+            Raises:
+                ValueError: If the number of bytes written doesn't match the calculated total.
+
+            Side effects:
+                - Updates the journal file with new change data.
+                - Modifies internal journal metadata (meta_get, meta_put, meta_sz).
+                - Clears the change line count in the input ChangeLog.
+                - Writes a status message.
+            """
         if not r_cg_log.cg_line_ct:
             return
 
@@ -194,6 +213,24 @@ class Journal:
         return bytes_written
 
     def purge_jrnl(self, keep_going: bool, had_crash: bool):
+        """
+            Purge the journal by applying changes to the disk and clearing the journal.
+
+            This method reads the last journal entry, applies the changes to the disk,
+            and then clears the journal. It's typically called after a crash or when
+            the journal needs to be cleared.
+
+            Args:
+                keep_going (bool): If True, continue normal operation after purging.
+                                   If False, finish the program after purging.
+                had_crash (bool): Indicates whether a crash occurred before purging.
+
+            Side effects:
+                - Reads and applies changes from the journal to the disk.
+                - Clears the journal and internal change log.
+                - Updates the blocks_in_jrnl array.
+                - Writes a status message.
+            """
         if self.debug:
             return
 
@@ -248,11 +285,30 @@ class Journal:
         self.p_stt.wrt("Purged journal" if keep_going else "Finishing")
 
     def wrt_cg_to_pg(self, cg: Change, pg: Page):
+        """
+            Write a single Change object to a Page object.
+
+            This method applies the changes specified in the Change object to the given Page object.
+            It processes each selector in the Change, writing the corresponding data to the appropriate
+            lines in the Page. After writing all changes, it calculates and writes the CRC for the page.
+
+            Args:
+                cg (Change): The Change object containing the changes to apply.
+                pg (Page): The Page object to which the changes will be written.
+
+            Side effects:
+                - Modifies the contents of the input Page object.
+                - Calculates and writes a CRC to the last 4 bytes of the Page.
+
+            Notes:
+                - The method stops processing when it encounters a selector with the last block flag set.
+                - If the Change runs out of data while processing selectors, a warning is logged.
+            """
         print(f"DEBUG [wrt_cg_to_pg]: Starting to write change for block {cg.block_num}")
         print(f"DEBUG [wrt_cg_to_pg]: Change has {len(cg.selectors)} selectors and {len(cg.new_data)} data items")
+        print(f"DEBUG [wrt_cg_to_pg]: In-memory Page before changes: Last 16 bytes: {pg.dat[-16:].hex()}")
 
         cg.arr_next = 0
-
         try:
             while True:
                 lin_num = self.get_next_lin_num(cg)
@@ -266,6 +322,7 @@ class Journal:
                 start = lin_num * u32Const.BYTES_PER_LINE.value
                 end = (lin_num + 1) * u32Const.BYTES_PER_LINE.value
                 pg.dat[start:end] = temp
+                print(f"DEBUG [wrt_cg_to_pg]: Wrote data to line {lin_num}")
         except NoSelectorsAvailableError:
             print("DEBUG [wrt_cg_to_pg]: No more selectors available")
 
@@ -273,9 +330,8 @@ class Journal:
         crc = BoostCRC.get_code(pg.dat[:-4], u32Const.BYTES_PER_PAGE.value - 4)
         BoostCRC.wrt_bytes_little_e(crc, pg.dat[-4:], 4)
 
-        print(
-            f"DEBUG [wrt_cg_to_pg]: Wrote CRC {format_hex_like_hexdump(pg.dat[-4:])} to page for block {cg.block_num}")
-        print(f"DEBUG [wrt_cg_to_pg]: Last 16 bytes of page: {format_hex_like_hexdump(pg.dat[-16:])}")
+        print(f"DEBUG [wrt_cg_to_pg]: Calculated and wrote CRC {crc:08x} to in-memory Page for block {cg.block_num}")
+        print(f"DEBUG [wrt_cg_to_pg]: In-memory Page after changes: Last 16 bytes: {pg.dat[-16:].hex()}")
 
     def is_in_jrnl(self, b_num: bNum_t) -> bool:
         return self.blks_in_jrnl[b_num]
@@ -537,10 +593,27 @@ class Journal:
         self.empty_purge_jrnl_buf(p_buf, ctr, True)
 
     def rd_last_jrnl(self, r_j_cg_log: ChangeLog):
+        """
+            Read the last journal entry and populate the given ChangeLog.
+
+            This method reads the last entry in the journal file, verifies the start
+            and end tags, and populates the given ChangeLog with the read changes.
+
+            Args:
+                r_j_cg_log (ChangeLog): The ChangeLog object to populate with the read changes.
+
+            Raises:
+                ValueError: If the start or end tags in the journal don't match the expected values.
+
+            Side effects:
+                - Populates the input ChangeLog with data read from the journal.
+                - Updates internal tracking of file positions.
+            """
         self.position_log.clear()  # Clear previous logs
         with self.track_position("rd_last_jrnl"):
             self.rd_metadata()
 
+            print(f"DEBUG [rd_last_jrnl]: Reading from journal file position {self.meta_get}")
             if self.meta_get == -1:
                 print("Warning: No metadata available. Journal might be empty.")
                 return
@@ -560,6 +633,8 @@ class Journal:
                 raise ValueError(f"End tag mismatch: expected {self.END_TAG:X}, got {ck_end_tag:X}")
 
             self.verify_bytes_read()
+
+            print(f"DEBUG [rd_last_jrnl]: Finished reading journal entry. Total bytes read: {ttl_bytes}")
 
         self.log_positions()  # Write positions to file
 
@@ -654,19 +729,6 @@ class Journal:
             cg.new_data.append(line_data)
 
         return data_bytes_read
-
-    # def _read_end_tag(self) -> int:
-    #     current_pos = self.js.tell()
-    #     if self.end_tag_posn is not None and current_pos != self.end_tag_posn:
-    #         print(
-    #             f"DEBUG [_read_end_tag]: Position mismatch at END_TAG. Expected: {self.end_tag_posn}, Actual: {current_pos}")
-    #
-    #     ck_end_tag = read_64bit(self.js)
-    #
-    #     after_read_pos = self.js.tell()
-    #     print(f"DEBUG [_read_end_tag]: Position before reading END_TAG: {current_pos}, after reading: {after_read_pos}")
-    #
-    #     return ck_end_tag
 
     def _read_end_tag(self) -> int:
         current_pos = self.js.tell()
@@ -768,37 +830,37 @@ class Journal:
         return ok_val
 
     def crc_check_pg(self, p_pr: Tuple[bNum_t, Page]):
-        p_uc_dat = bytearray(p_pr[1].dat)
+        block_num, page = p_pr
+        p_uc_dat = bytearray(page.dat)
 
         # Read the stored CRC
-        stored_crc = int.from_bytes(p_uc_dat[u32Const.BYTES_PER_PAGE.value - u32Const.CRC_BYTES.value:], 'little')
-        print(f"DEBUG [crc_check_pg]: Stored CRC: {stored_crc:08x}")
+        stored_crc = int.from_bytes(p_uc_dat[-u32Const.CRC_BYTES.value:], 'little')
+        print(f"DEBUG [crc_check_pg]: Stored CRC for block {block_num}: {stored_crc:08x}")
 
-        # Zero out the CRC bytes for calculation
-        BoostCRC.wrt_bytes_little_e(0x00000000, p_uc_dat[u32Const.BYTES_PER_PAGE.value - u32Const.CRC_BYTES.value:],
-                                    u32Const.CRC_BYTES.value)
-
-        # Calculate the CRC
-        calculated_crc = BoostCRC.get_code(p_uc_dat, u32Const.BYTES_PER_PAGE.value)
-        print(f"DEBUG [crc_check_pg]: Calculated CRC: {calculated_crc:08x}")
+        # Calculate the CRC of the page data (excluding the stored CRC)
+        calculated_crc = BoostCRC.get_code(p_uc_dat[:-u32Const.CRC_BYTES.value],
+                                           u32Const.BYTES_PER_PAGE.value - u32Const.CRC_BYTES.value)
+        print(f"DEBUG [crc_check_pg]: Calculated CRC for block {block_num}: {calculated_crc:08x}")
 
         if stored_crc != calculated_crc:
             print(
-                f"WARNING: CRC mismatch for block {p_pr[0]}. Stored: {stored_crc:08x}, Calculated: {calculated_crc:08x}")
+                f"WARNING [crc_check_pg]: CRC mismatch for block {block_num}. Stored: {stored_crc:08x}, Calculated: {calculated_crc:08x}")
+            print(f"DEBUG [crc_check_pg]: Last 16 bytes of page: {p_uc_dat[-16:].hex()}")
             return False
 
         # Write the calculated CRC back to the page
-        BoostCRC.wrt_bytes_little_e(calculated_crc, p_uc_dat[u32Const.BYTES_PER_PAGE.value - u32Const.CRC_BYTES.value:],
-                                    u32Const.CRC_BYTES.value)
+        BoostCRC.wrt_bytes_little_e(calculated_crc, p_uc_dat[-u32Const.CRC_BYTES.value:], u32Const.CRC_BYTES.value)
 
-        # Recalculate CRC (should be 0)
+        # Verify the written CRC
         final_crc = BoostCRC.get_code(p_uc_dat, u32Const.BYTES_PER_PAGE.value)
-        print(f"DEBUG [crc_check_pg]: Final CRC: {final_crc:08x}")
+        print(f"DEBUG [crc_check_pg]: Verification CRC for block {block_num}: {final_crc:08x}")
 
         if final_crc != 0:
-            print(f"ERROR: Final CRC check failed for block {p_pr[0]}")
+            print(f"ERROR [crc_check_pg]: Final CRC check failed for block {block_num}")
+            print(f"DEBUG [crc_check_pg]: Last 16 bytes of page after CRC update: {p_uc_dat[-16:].hex()}")
             return False
 
+        print(f"DEBUG [crc_check_pg]: CRC check passed for block {block_num}")
         return True
 
     def get_next_lin_num(self, cg: Change) -> lNum_t:
