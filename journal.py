@@ -798,6 +798,37 @@ class Journal:
 
         return data
 
+    # def empty_purge_jrnl_buf(self, p_pg_pr: List[Tuple[bNum_t, Page]], p_ctr: int, is_end: bool = False) -> bool:
+    #     temp = bytearray(u32Const.BLOCK_BYTES.value)
+    #     self.p_d.do_create_block(temp, u32Const.BLOCK_BYTES.value)
+    #
+    #     while p_ctr:
+    #         p_ctr -= 1
+    #         cursor = p_pg_pr[p_ctr]
+    #         self.crc_check_pg(cursor)
+    #
+    #         print(f"DEBUG [empty_purge_jrnl_buf]: Writing block {cursor[0]} to disk")
+    #         print(f"DEBUG [empty_purge_jrnl_buf]: Last 16 bytes of page: {cursor[1].dat[-16:].hex()}")
+    #
+    #         self.p_d.get_ds().seek(cursor[0] * u32Const.BLOCK_BYTES.value)
+    #
+    #         if self.wipers.is_dirty(cursor[0]):
+    #             self.p_d.get_ds().write(temp)
+    #             print(f"{self.tabs(3, True)}Overwriting dirty block {cursor[0]}")
+    #         else:
+    #             self.p_d.get_ds().write(cursor[1].dat)
+    #             print(f"{self.tabs(3, True)}Writing page {cursor[0]:3} to disk")
+    #
+    #     if not is_end:
+    #         print()
+    #
+    #     ok_val = True
+    #     if not self.p_d.get_ds():
+    #         print(f"ERROR: Error writing to {self.p_d.get_d_file_name()}")
+    #         ok_val = False
+    #
+    #     return ok_val
+
     def empty_purge_jrnl_buf(self, p_pg_pr: List[Tuple[bNum_t, Page]], p_ctr: int, is_end: bool = False) -> bool:
         temp = bytearray(u32Const.BLOCK_BYTES.value)
         self.p_d.do_create_block(temp, u32Const.BLOCK_BYTES.value)
@@ -805,7 +836,13 @@ class Journal:
         while p_ctr:
             p_ctr -= 1
             cursor = p_pg_pr[p_ctr]
-            self.crc_check_pg(cursor)
+
+            # Calculate CRC for the page
+            crc = BoostCRC.get_code(cursor[1].dat[:-u32Const.CRC_BYTES.value],
+                                    u32Const.BYTES_PER_PAGE.value - u32Const.CRC_BYTES.value)
+
+            # Write CRC to the last 4 bytes of the page
+            BoostCRC.wrt_bytes_little_e(crc, cursor[1].dat[-u32Const.CRC_BYTES.value:], u32Const.CRC_BYTES.value)
 
             print(f"DEBUG [empty_purge_jrnl_buf]: Writing block {cursor[0]} to disk")
             print(f"DEBUG [empty_purge_jrnl_buf]: Last 16 bytes of page: {cursor[1].dat[-16:].hex()}")
