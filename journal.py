@@ -330,6 +330,9 @@ class Journal:
         crc = BoostCRC.get_code(pg.dat[:-4], u32Const.BYTES_PER_PAGE.value - 4)
         BoostCRC.wrt_bytes_little_e(crc, pg.dat[-4:], 4)
 
+        # NOTE: below line is a temporary test
+        # pg.dat[-1] = 255
+
         print(f"DEBUG [wrt_cg_to_pg]: Calculated and wrote CRC {crc:08x} to in-memory Page for block {cg.block_num}")
         print(f"DEBUG [wrt_cg_to_pg]: In-memory Page after changes: Last 16 bytes: {pg.dat[-16:].hex()}")
 
@@ -583,12 +586,10 @@ class Journal:
         # Add debug output
         print(f"DEBUG [r_and_wb_last]: Block {cur_blk_num} CRC after writing change:")
         crc = BoostCRC.get_code(pg.dat, u32Const.BYTES_PER_PAGE.value)
-        print(f"Calculated CRC: {crc:08x}")
+        print(
+            f"Calculated CRC of entire Page for block {cur_blk_num}: {format_hex_like_hexdump(to_bytes_64bit(crc)[:4])}")
         stored_crc = int.from_bytes(pg.dat[-4:], 'little')
-        # print(f"Stored CRC: {stored_crc:08x}")
-
-        print(f"Calculated CRC: {format_hex_like_hexdump(to_bytes_64bit(crc)[:4])}")
-        print(f"Stored CRC: {format_hex_like_hexdump(pg.dat[-4:])}")
+        print(f"Stored CRC in Page for block {cur_blk_num}: {format_hex_like_hexdump(to_bytes_64bit(stored_crc)[:4])}")
 
         self.empty_purge_jrnl_buf(p_buf, ctr, True)
 
