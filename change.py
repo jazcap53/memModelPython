@@ -75,6 +75,17 @@ class Change:
     def __lt__(self, other):
         return self.time_stamp < other.time_stamp
 
+    def print(self):
+        print(f"\t\tBlock: {self.block_num}")
+        print(f"\t\tTimestamp: {self.time_stamp}")
+        print("\t\tSelectors:")
+        for i, selector in enumerate(self.selectors):
+            print(f"\t\t  Selector {i}: {selector.value:016x}")
+        print("\t\tData:")
+        for i, data in enumerate(self.new_data):
+            print(f"\t\t  Line {i}: {data[:16]}...")  # Print first 16 bytes of each data line
+
+
 class ChangeLog:
     def __init__(self, test_sw: bool = False):
         self.the_log: Dict[int, List[Change]] = {}
@@ -112,12 +123,12 @@ if __name__ == '__main__':
 
     # Create some Change instances and add them to the ChangeLog
     change1 = Change(1)
-    change1.add_line(1, 0, Line(bytearray(b"Hello, World!")))
-    change1.add_line(1, 1, Line(bytearray(b"This is a test.")))
+    change1.add_line(0, b"Hello, World!")
+    change1.add_line(1, b"This is a test.")
     change_log.add_to_log(change1)
 
     change2 = Change(2)
-    change2.add_line(2, 0, Line(bytearray(b"Another change.")))
+    change2.add_line(0, b"Another change.")
     change_log.add_to_log(change2)
 
     # Print the ChangeLog
