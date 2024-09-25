@@ -77,7 +77,6 @@ class Journal:
         self.last_jrnl_purge_time = 0
         self.tabs = Tabber()
         self.wipers = WipeList()
-        self.position_log = []  # Initialize position_log here
 
         if self.p_cck.get_last_status()[0] == 'C':
             self.purge_jrnl(True, True)
@@ -152,7 +151,6 @@ class Journal:
         print("\n\tSaving change log:\n")
         r_cg_log.print()
 
-        self.position_log.clear()  # Clear previous logs
         with self.track_position("wrt_cg_log_to_jrnl"):
             self.rd_metadata()
 
@@ -198,8 +196,6 @@ class Journal:
             print(f"\tChange log written to journal at time {get_cur_time()}")
             r_cg_log.cg_line_ct = 0
             self.p_stt.wrt("Change log written")
-
-        self.log_positions()  # Write positions to file
 
     def write_change(self, cg: Change) -> int:
         bytes_written = 0
@@ -602,7 +598,6 @@ class Journal:
                 - Populates the input ChangeLog with data read from the journal.
                 - Updates internal tracking of file positions.
             """
-        self.position_log.clear()  # Clear previous logs
         with self.track_position("rd_last_jrnl"):
             self.rd_metadata()
 
@@ -626,10 +621,6 @@ class Journal:
                 raise ValueError(f"End tag mismatch: expected {self.END_TAG:X}, got {ck_end_tag:X}")
 
             self.verify_bytes_read()
-
-            
-
-        self.log_positions()  # Write positions to file
 
     def rd_jrnl(self, r_j_cg_log: ChangeLog, start_pos: int) -> Tuple[int, int, int]:
         with self.track_position("read_start_tag"):
@@ -933,15 +924,6 @@ class Journal:
         yield
         end_pos = self.js.tell()
         bytes_read = end_pos - start_pos
-        self.position_log.append(
-            f"{operation_name}: Started at {start_pos}, ended at {end_pos}, read {bytes_read} bytes")
-
-    def log_positions(self):
-        with open("journal_positions.log", "w") as log_file:
-            for entry in self.position_log:
-                log_file.write(f"{entry}\n")
-
-
 
 
 if __name__ == "__main__":
