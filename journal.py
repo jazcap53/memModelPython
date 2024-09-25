@@ -328,7 +328,7 @@ class Journal:
 
         # Calculate and write CRC
         crc = BoostCRC.get_code(pg.dat[:-4], u32Const.BYTES_PER_PAGE.value - 4)
-        BoostCRC.wrt_bytes_little_e(crc, pg.dat[-4:], 4)
+        pg.dat[-4:] = BoostCRC.wrt_bytes_little_e(crc, pg.dat[-4:], 4)
 
         # NOTE: below line is a temporary test
         # pg.dat[-1] = 255

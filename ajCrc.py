@@ -9,10 +9,11 @@ class BoostCRC:
         return zlib.crc32(data[:byte_ct], BoostCRC.init_rem) ^ BoostCRC.init_rem
 
     @staticmethod
-    def wrt_bytes_little_e(num: int, p: bytearray, byt: int) -> None:
+    def wrt_bytes_little_e(num: int, p: bytearray, byt: int) -> bytearray:
         for i in range(byt):
             p[i] = num & 0xFF
             num >>= 8
+        return p
 
 
 if __name__ == '__main__':
