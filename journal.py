@@ -245,7 +245,7 @@ class Journal:
 
             self.rd_last_jrnl(j_cg_log)
 
-            print("DEBUG [purge_jrnl]: Content of j_cg_log after rd_last_jrnl:")
+            
             for block, changes in j_cg_log.the_log.items():
                 print(f"  Block {block}: {len(changes)} changes")
 
@@ -260,19 +260,16 @@ class Journal:
                     curr_blk_num = prev_blk_num = None
                 pg = Page()
 
-                print("DEBUG [purge_jrnl]: Before calling rd_and_wrt_back")
-                print(
-                    f"DEBUG [purge_jrnl]: Initial values - ctr: {ctr}, prev_blk_num: {prev_blk_num}, curr_blk_num: {curr_blk_num}")
+                
+                
                 ctr, prev_blk_num, curr_blk_num, pg = self.rd_and_wrt_back(j_cg_log, self.p_buf, ctr, prev_blk_num,
                                                                            curr_blk_num, pg)
-                print(
-                    f"DEBUG [purge_jrnl]: After rd_and_wrt_back: ctr={ctr}, prev_blk_num={prev_blk_num}, curr_blk_num={curr_blk_num}")
+                
 
                 if curr_blk_num in j_cg_log.the_log and j_cg_log.the_log[curr_blk_num]:
                     cg = j_cg_log.the_log[curr_blk_num][-1]
-                    print(f"DEBUG [purge_jrnl]: Processing last change for block {curr_blk_num}")
-                    print(
-                        f"DEBUG [purge_jrnl]: Last change has {len(cg.selectors)} selectors and {len(cg.new_data)} data items")
+                    
+                    
                     self.r_and_wb_last(cg, self.p_buf, ctr, curr_blk_num, pg)
                 else:
                     print(f"Warning: No changes found for block {curr_blk_num}")
@@ -304,16 +301,15 @@ class Journal:
                 - The method stops processing when it encounters a selector with the last block flag set.
                 - If the Change runs out of data while processing selectors, a warning is logged.
             """
-        print(f"DEBUG [wrt_cg_to_pg]: Starting to write change for block {cg.block_num}")
-        print(f"DEBUG [wrt_cg_to_pg]: Change has {len(cg.selectors)} selectors and {len(cg.new_data)} data items")
-        print(f"DEBUG [wrt_cg_to_pg]: In-memory Page before changes: Last 16 bytes: {pg.dat[-16:].hex()}")
+        
+        
+        
 
         cg.arr_next = 0
         try:
             while True:
                 lin_num = self.get_next_lin_num(cg)
                 if lin_num == 0xFF:
-                    print("DEBUG [wrt_cg_to_pg]: Reached end of selectors")
                     break
                 if not cg.new_data:
                     print("WARNING [wrt_cg_to_pg]: Ran out of data while processing selectors")
@@ -322,9 +318,9 @@ class Journal:
                 start = lin_num * u32Const.BYTES_PER_LINE.value
                 end = (lin_num + 1) * u32Const.BYTES_PER_LINE.value
                 pg.dat[start:end] = temp
-                print(f"DEBUG [wrt_cg_to_pg]: Wrote data to line {lin_num}")
+                
         except NoSelectorsAvailableError:
-            print("DEBUG [wrt_cg_to_pg]: No more selectors available")
+            pass
 
         # Calculate and write CRC
         crc = BoostCRC.get_code(pg.dat[:-4], u32Const.BYTES_PER_PAGE.value - 4)
@@ -333,8 +329,8 @@ class Journal:
         # NOTE: below line is a temporary test
         # pg.dat[-1] = 255
 
-        print(f"DEBUG [wrt_cg_to_pg]: Calculated and wrote CRC {crc:08x} to in-memory Page for block {cg.block_num}")
-        print(f"DEBUG [wrt_cg_to_pg]: In-memory Page after changes: Last 16 bytes: {pg.dat[-16:].hex()}")
+        
+        
 
     def is_in_jrnl(self, b_num: bNum_t) -> bool:
         return self.blks_in_jrnl[b_num]
@@ -424,7 +420,7 @@ class Journal:
                 # Write block number
                 b_num_bytes = to_bytes_64bit(cg.block_num)
                 write_64bit(self.js, cg.block_num)
-                print(f"DEBUG [wrt_cgs_to_jrnl]: Writing block number at {current_pos}, appears in hex dump as: {format_hex_like_hexdump(b_num_bytes)}")
+                
                 bytes_written += 8
                 self.ttl_bytes_written += 8
                 self.blks_in_jrnl[cg.block_num] = True
@@ -432,7 +428,7 @@ class Journal:
                 # Write timestamp
                 ts_bytes = to_bytes_64bit(cg.time_stamp)
                 write_64bit(self.js, cg.time_stamp)
-                print(f"DEBUG [wrt_cgs_to_jrnl]: Writing timestamp, appears in hex dump as: {format_hex_like_hexdump(ts_bytes)}")
+                
                 bytes_written += 8
                 self.ttl_bytes_written += 8
 
@@ -446,7 +442,7 @@ class Journal:
 
                     selector_bytes = selector.to_bytes()
                     self.js.write(selector_bytes)
-                    print(f"DEBUG [wrt_cgs_to_jrnl]: Writing selector at {self.js.tell()}, appears in hex dump as: {format_hex_like_hexdump(selector_bytes)}")
+                    
                     bytes_written += 8
                     self.ttl_bytes_written += 8
 
@@ -460,8 +456,7 @@ class Journal:
                             if cg.new_data:
                                 data = cg.new_data.popleft()
                                 data_bytes = data if isinstance(data, bytes) else bytes(data)
-                                print(
-                                    f"DEBUG [wrt_cgs_to_jrnl]: Writing data for bit {i}, first 16 bytes appear as: {format_hex_like_hexdump(data_bytes[:16])}")
+                                
                                 self.wrt_field(data_bytes, u32Const.BYTES_PER_LINE.value, True)
                                 start = i * u32Const.BYTES_PER_LINE.value
                                 end = start + u32Const.BYTES_PER_LINE.value
@@ -475,7 +470,7 @@ class Journal:
                     crc = BoostCRC.get_code(page_data, u32Const.BYTES_PER_PAGE.value)
                     crc_bytes = to_bytes_64bit(crc)[:4]
                     write_32bit(self.js, crc)
-                    print(f"DEBUG [wrt_cgs_to_jrnl]: Writing CRC, appears in hex dump as: {format_hex_like_hexdump(crc_bytes)}")
+                    
                     self.ttl_bytes_written += 4
                     bytes_written += 4
 
@@ -488,7 +483,7 @@ class Journal:
 
         if bytes_written < self.ct_bytes_to_write:
             padding = self.ct_bytes_to_write - bytes_written
-            print(f"DEBUG [wrt_cgs_to_jrnl]: Adding {padding} bytes of padding")
+            
             self.js.write(b'\0' * padding)
             self.ttl_bytes_written += padding
 
@@ -533,15 +528,15 @@ class Journal:
         self.js.seek(0)
         metadata = struct.pack('<qqq', new_g_pos, new_p_pos, u_ttl_bytes_written)
         self.js.write(metadata)
-        print(f"DEBUG: Writing metadata: g_pos={new_g_pos}, p_pos={new_p_pos}, ttl_bytes_written={u_ttl_bytes_written}")
+        
 
     def rd_and_wrt_back(self, j_cg_log: ChangeLog, p_buf: List, ctr: int, prv_blk_num: bNum_t, cur_blk_num: bNum_t,
                         pg: Page):
-        print(f"DEBUG [rd_and_wrt_back]: Starting with ctr={ctr}, prv_blk_num={prv_blk_num}, cur_blk_num={cur_blk_num}")
+        
         for blk_num, changes in j_cg_log.the_log.items():
-            print(f"DEBUG [rd_and_wrt_back]: Processing block {blk_num} with {len(changes)} changes")
+            
             for idx, cg in enumerate(changes):
-                print(f"DEBUG [rd_and_wrt_back]: Processing change {idx + 1} for block {blk_num}")
+                
                 cur_blk_num = cg.block_num
                 if cur_blk_num != prv_blk_num:
                     if prv_blk_num is not None:
@@ -557,21 +552,18 @@ class Journal:
 
                 prv_blk_num = cur_blk_num
 
-                print(f"DEBUG [rd_and_wrt_back]: About to write Change for block {cur_blk_num}")
-                print(
-                    f"DEBUG [rd_and_wrt_back]: Change has {len(cg.selectors)} selectors and {len(cg.new_data)} data items")
-                for idx, selector in enumerate(cg.selectors):
-                    print(
-                        f"DEBUG [rd_and_wrt_back]: Selector {idx}: {format_hex_like_hexdump(to_bytes_64bit(selector.value))}")
-                print(f"DEBUG [rd_and_wrt_back]: Last 16 bytes of page: {format_hex_like_hexdump(pg.dat[-16:])}")
+                
+                
+                # for idx, selector in enumerate(cg.selectors):
+                #     pass
+                
 
                 self.wrt_cg_to_pg(cg, pg)
 
-                print(f"DEBUG [rd_and_wrt_back]: After wrt_cg_to_pg for block {cur_blk_num}")
-                print(f"DEBUG [rd_and_wrt_back]: Last 16 bytes of page: {format_hex_like_hexdump(pg.dat[-16:])}")
+                
+                
 
-        print(
-            f"DEBUG [rd_and_wrt_back]: Finished. Returning ctr={ctr}, prv_blk_num={prv_blk_num}, cur_blk_num={cur_blk_num}")
+        
         return ctr, prv_blk_num, cur_blk_num, pg
 
     def r_and_wb_last(self, cg: Change, p_buf: List, ctr: int, cur_blk_num: bNum_t, pg: Page):
@@ -584,7 +576,7 @@ class Journal:
         self.wrt_cg_to_pg(cg, pg)
 
         # Add debug output
-        print(f"DEBUG [r_and_wb_last]: Block {cur_blk_num} CRC after writing change:")
+        
         crc = BoostCRC.get_code(pg.dat, u32Const.BYTES_PER_PAGE.value)
         print(
             f"Calculated CRC of entire Page for block {cur_blk_num}: {format_hex_like_hexdump(to_bytes_64bit(crc)[:4])}")
@@ -614,7 +606,7 @@ class Journal:
         with self.track_position("rd_last_jrnl"):
             self.rd_metadata()
 
-            print(f"DEBUG [rd_last_jrnl]: Reading from journal file position {self.meta_get}")
+            
             if self.meta_get == -1:
                 print("Warning: No metadata available. Journal might be empty.")
                 return
@@ -635,7 +627,7 @@ class Journal:
 
             self.verify_bytes_read()
 
-            print(f"DEBUG [rd_last_jrnl]: Finished reading journal entry. Total bytes read: {ttl_bytes}")
+            
 
         self.log_positions()  # Write positions to file
 
@@ -808,8 +800,8 @@ class Journal:
     #         cursor = p_pg_pr[p_ctr]
     #         self.crc_check_pg(cursor)
     #
-    #         print(f"DEBUG [empty_purge_jrnl_buf]: Writing block {cursor[0]} to disk")
-    #         print(f"DEBUG [empty_purge_jrnl_buf]: Last 16 bytes of page: {cursor[1].dat[-16:].hex()}")
+    #         
+    #         
     #
     #         self.p_d.get_ds().seek(cursor[0] * u32Const.BLOCK_BYTES.value)
     #
@@ -845,8 +837,8 @@ class Journal:
             # Write CRC to the last 4 bytes of the page
             BoostCRC.wrt_bytes_little_e(crc, cursor[1].dat[-u32Const.CRC_BYTES.value:], u32Const.CRC_BYTES.value)
 
-            print(f"DEBUG [empty_purge_jrnl_buf]: Writing block {cursor[0]} to disk")
-            print(f"DEBUG [empty_purge_jrnl_buf]: Last 16 bytes of page: {cursor[1].dat[-16:].hex()}")
+            
+            
 
             self.p_d.get_ds().seek(cursor[0] * u32Const.BLOCK_BYTES.value)
 
@@ -873,20 +865,18 @@ class Journal:
 
         # Read the stored CRC
         stored_crc = int.from_bytes(p_uc_dat[-u32Const.CRC_BYTES.value:], 'little')
-        print(
-            f"DEBUG [crc_check_pg]: Stored CRC for block {block_num}: {format_hex_like_hexdump(stored_crc.to_bytes(4, 'little'))}")
+        
 
         # Calculate the CRC of the page data (excluding the stored CRC)
         calculated_crc = BoostCRC.get_code(p_uc_dat[:-u32Const.CRC_BYTES.value],
                                            u32Const.BYTES_PER_PAGE.value - u32Const.CRC_BYTES.value)
-        print(
-            f"DEBUG [crc_check_pg]: Calculated CRC for block {block_num}: {format_hex_like_hexdump(calculated_crc.to_bytes(4, 'little'))}")
+        
 
         if stored_crc != calculated_crc:
             print(f"WARNING [crc_check_pg]: CRC mismatch for block {block_num}.")
             print(f"  Stored:     {format_hex_like_hexdump(stored_crc.to_bytes(4, 'little'))}")
             print(f"  Calculated: {format_hex_like_hexdump(calculated_crc.to_bytes(4, 'little'))}")
-            print(f"DEBUG [crc_check_pg]: Last 16 bytes of page: {format_hex_like_hexdump(p_uc_dat[-16:])}")
+            
             return False
 
         # Write the calculated CRC back to the page
@@ -894,25 +884,22 @@ class Journal:
 
         # Verify the written CRC
         final_crc = BoostCRC.get_code(p_uc_dat, u32Const.BYTES_PER_PAGE.value)
-        print(
-            f"DEBUG [crc_check_pg]: Verification CRC for block {block_num}: {format_hex_like_hexdump(final_crc.to_bytes(4, 'little'))}")
+        
 
         if final_crc != 0:
             print(f"ERROR [crc_check_pg]: Final CRC check failed for block {block_num}")
-            print(
-                f"DEBUG [crc_check_pg]: Last 16 bytes of page after CRC update: {format_hex_like_hexdump(p_uc_dat[-16:])}")
+            
             return False
 
-        print(f"DEBUG [crc_check_pg]: CRC check passed for block {block_num}")
+        
         return True
 
     def get_next_lin_num(self, cg: Change) -> lNum_t:
         if not cg.selectors:
-            print("DEBUG [get_next_lin_num]: No selectors available")
             return 0xFF  # Return sentinel value immediately if no selectors
 
         current_selector = cg.selectors[0]
-        print(f"DEBUG [get_next_lin_num]: Current selector value: {format_hex_like_hexdump(to_bytes_64bit(current_selector.value))}, arr_next: {cg.arr_next}")
+        
 
         for i in range(64):
             if current_selector.is_set(i):
@@ -921,13 +908,12 @@ class Journal:
                     if cg.arr_next == 64:
                         cg.selectors.popleft()
                         cg.arr_next = 0
-                    print(f"DEBUG [get_next_lin_num]: Returning line number {i}")
+                    
                     return i
 
         # If we've gone through all bits and found nothing, move to the next selector
         cg.selectors.popleft()
         cg.arr_next = 0
-        print("DEBUG [get_next_lin_num]: Moving to next selector")
         return self.get_next_lin_num(cg)  # Recursive call to check next selector
 
     def reset_file(self):

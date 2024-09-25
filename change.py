@@ -90,9 +90,6 @@ class ChangeLog:
         else:
             self.the_log[cg.block_num].append(cg)
 
-        print(
-            f"DEBUG [ChangeLog.add_to_log]: Added Change for block {cg.block_num} with {len(cg.selectors)} selectors and {len(cg.new_data)} data items")
-
     def print(self):
         for block_num, changes in self.the_log.items():
             for cg in changes:
