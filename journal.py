@@ -19,12 +19,8 @@ class NoSelectorsAvailableError(Exception):
 
 class Journal:
     # Note: the values of START_TAG and END_TAG were arbitrarily chosen
-    # START_TAG = 0xf19186770cf76d4f  # 17406841880640449871
-    # END_TAG = 0x3a5d27655ea00dae  # 4205560943366639022
     START_TAG = 0x4f6df70c778691f1
     END_TAG = 0xae0da05e65275d3a
-    # START_TAG = 0x4f6df70c778691f1
-    # END_TAG = 0xae0da05e65275d3a
     START_TAG_SIZE = 8
     CT_BYTES_TO_WRITE_SIZE = 8
     END_TAG_SIZE = 8
@@ -256,16 +252,11 @@ class Journal:
                     curr_blk_num = prev_blk_num = None
                 pg = Page()
 
-                
-                
                 ctr, prev_blk_num, curr_blk_num, pg = self.rd_and_wrt_back(j_cg_log, self.p_buf, ctr, prev_blk_num,
                                                                            curr_blk_num, pg)
-                
 
                 if curr_blk_num in j_cg_log.the_log and j_cg_log.the_log[curr_blk_num]:
                     cg = j_cg_log.the_log[curr_blk_num][-1]
-                    
-                    
                     self.r_and_wb_last(cg, self.p_buf, ctr, curr_blk_num, pg)
                 else:
                     print(f"Warning: No changes found for block {curr_blk_num}")
@@ -297,10 +288,6 @@ class Journal:
                 - The method stops processing when it encounters a selector with the last block flag set.
                 - If the Change runs out of data while processing selectors, a warning is logged.
             """
-        
-        
-        
-
         cg.arr_next = 0
         try:
             while True:
@@ -321,12 +308,6 @@ class Journal:
         # Calculate and write CRC
         crc = BoostCRC.get_code(pg.dat[:-4], u32Const.BYTES_PER_PAGE.value - 4)
         pg.dat[-4:] = BoostCRC.wrt_bytes_little_e(crc, pg.dat[-4:], 4)
-
-        # NOTE: below line is a temporary test
-        # pg.dat[-1] = 255
-
-        
-        
 
     def is_in_jrnl(self, b_num: bNum_t) -> bool:
         return self.blks_in_jrnl[b_num]
@@ -524,15 +505,12 @@ class Journal:
         self.js.seek(0)
         metadata = struct.pack('<qqq', new_g_pos, new_p_pos, u_ttl_bytes_written)
         self.js.write(metadata)
-        
 
     def rd_and_wrt_back(self, j_cg_log: ChangeLog, p_buf: List, ctr: int, prv_blk_num: bNum_t, cur_blk_num: bNum_t,
                         pg: Page):
         
         for blk_num, changes in j_cg_log.the_log.items():
-            
             for idx, cg in enumerate(changes):
-                
                 cur_blk_num = cg.block_num
                 if cur_blk_num != prv_blk_num:
                     if prv_blk_num is not None:
@@ -548,18 +526,8 @@ class Journal:
 
                 prv_blk_num = cur_blk_num
 
-                
-                
-                # for idx, selector in enumerate(cg.selectors):
-                #     pass
-                
-
                 self.wrt_cg_to_pg(cg, pg)
 
-                
-                
-
-        
         return ctr, prv_blk_num, cur_blk_num, pg
 
     def r_and_wb_last(self, cg: Change, p_buf: List, ctr: int, cur_blk_num: bNum_t, pg: Page):
@@ -571,8 +539,6 @@ class Journal:
 
         self.wrt_cg_to_pg(cg, pg)
 
-        # Add debug output
-        
         crc = BoostCRC.get_code(pg.dat, u32Const.BYTES_PER_PAGE.value)
         print(
             f"Calculated CRC of entire Page for block {cur_blk_num}: {format_hex_like_hexdump(to_bytes_64bit(crc)[:4])}")
@@ -601,7 +567,6 @@ class Journal:
         with self.track_position("rd_last_jrnl"):
             self.rd_metadata()
 
-            
             if self.meta_get == -1:
                 print("Warning: No metadata available. Journal might be empty.")
                 return
@@ -782,37 +747,6 @@ class Journal:
 
         return data
 
-    # def empty_purge_jrnl_buf(self, p_pg_pr: List[Tuple[bNum_t, Page]], p_ctr: int, is_end: bool = False) -> bool:
-    #     temp = bytearray(u32Const.BLOCK_BYTES.value)
-    #     self.p_d.do_create_block(temp, u32Const.BLOCK_BYTES.value)
-    #
-    #     while p_ctr:
-    #         p_ctr -= 1
-    #         cursor = p_pg_pr[p_ctr]
-    #         self.crc_check_pg(cursor)
-    #
-    #         
-    #         
-    #
-    #         self.p_d.get_ds().seek(cursor[0] * u32Const.BLOCK_BYTES.value)
-    #
-    #         if self.wipers.is_dirty(cursor[0]):
-    #             self.p_d.get_ds().write(temp)
-    #             print(f"{self.tabs(3, True)}Overwriting dirty block {cursor[0]}")
-    #         else:
-    #             self.p_d.get_ds().write(cursor[1].dat)
-    #             print(f"{self.tabs(3, True)}Writing page {cursor[0]:3} to disk")
-    #
-    #     if not is_end:
-    #         print()
-    #
-    #     ok_val = True
-    #     if not self.p_d.get_ds():
-    #         print(f"ERROR: Error writing to {self.p_d.get_d_file_name()}")
-    #         ok_val = False
-    #
-    #     return ok_val
-
     def empty_purge_jrnl_buf(self, p_pg_pr: List[Tuple[bNum_t, Page]], p_ctr: int, is_end: bool = False) -> bool:
         temp = bytearray(u32Const.BLOCK_BYTES.value)
         self.p_d.do_create_block(temp, u32Const.BLOCK_BYTES.value)
@@ -827,9 +761,6 @@ class Journal:
 
             # Write CRC to the last 4 bytes of the page
             BoostCRC.wrt_bytes_little_e(crc, cursor[1].dat[-u32Const.CRC_BYTES.value:], u32Const.CRC_BYTES.value)
-
-            
-            
 
             self.p_d.get_ds().seek(cursor[0] * u32Const.BLOCK_BYTES.value)
 
@@ -856,12 +787,10 @@ class Journal:
 
         # Read the stored CRC
         stored_crc = int.from_bytes(p_uc_dat[-u32Const.CRC_BYTES.value:], 'little')
-        
 
         # Calculate the CRC of the page data (excluding the stored CRC)
         calculated_crc = BoostCRC.get_code(p_uc_dat[:-u32Const.CRC_BYTES.value],
                                            u32Const.BYTES_PER_PAGE.value - u32Const.CRC_BYTES.value)
-        
 
         if stored_crc != calculated_crc:
             print(f"WARNING [crc_check_pg]: CRC mismatch for block {block_num}.")
@@ -875,14 +804,12 @@ class Journal:
 
         # Verify the written CRC
         final_crc = BoostCRC.get_code(p_uc_dat, u32Const.BYTES_PER_PAGE.value)
-        
 
         if final_crc != 0:
             print(f"ERROR [crc_check_pg]: Final CRC check failed for block {block_num}")
             
             return False
 
-        
         return True
 
     def get_next_lin_num(self, cg: Change) -> lNum_t:
@@ -890,7 +817,6 @@ class Journal:
             return 0xFF  # Return sentinel value immediately if no selectors
 
         current_selector = cg.selectors[0]
-        
 
         for i in range(64):
             if current_selector.is_set(i):
