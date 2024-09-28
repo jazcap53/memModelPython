@@ -20,7 +20,9 @@ class InodeTable:
         self.file_name = nfn
         self.shifter = FileShifter()
         self.tabs = Tabber()
+        # self.avail = ArrBit(u32Const.NUM_INODE_TBL_BLOCKS.value * lNum_tConst.INODES_PER_BLOCK.value)
         self.avail = ArrBit(u32Const.NUM_INODE_TBL_BLOCKS.value, lNum_tConst.INODES_PER_BLOCK.value)
+        self.avail.set()  # Set all bits to 1 (all inodes available initially)
         self.tbl = [[Inode() for _ in range(lNum_tConst.INODES_PER_BLOCK.value)]
                     for _ in range(u32Const.NUM_INODE_TBL_BLOCKS.value)]
         self.load_tbl()

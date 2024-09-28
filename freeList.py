@@ -6,16 +6,30 @@ from arrBit import ArrBit
 
 class FreeList:
     def __init__(self, ffn: str):
-        self.frs = open(ffn, "r+b")
+        self.ffn = ffn  # Store the filename
         self.bitsFrm = ArrBit(u32Const.NUM_FREE_LIST_BLOCKS.value, u32Const.BITS_PER_PAGE.value)
         self.bitsTo = ArrBit(u32Const.NUM_FREE_LIST_BLOCKS.value, u32Const.BITS_PER_PAGE.value)
         self.fromPosn = 0
         self.tabs = Tabber()
-        self.load_lst()
+
+        try:
+            self.frs = open(ffn, "r+b")
+            self.load_lst()
+        except FileNotFoundError:
+            print(f"Free list file not found. Initializing new file.")
+            self.initialize_new_file()
+
+    def initialize_new_file(self):
+        self.frs = open(self.ffn, "w+b")
+        self.bitsFrm.set()  # Set all blocks as free initially
+        self.bitsTo.reset()  # Clear bitsTo
+        self.fromPosn = 0
+        self.store_lst()
 
     def __del__(self):
-        self.store_lst()
-        self.frs.close()
+        if hasattr(self, 'frs'):
+            self.store_lst()
+            self.frs.close()
 
     def load_lst(self):
         self.frs.seek(0)
@@ -33,7 +47,7 @@ class FreeList:
         self.frs.write(self.bitsFrm.to_bytes())
         self.frs.write(self.bitsTo.to_bytes())
         self.frs.write(struct.pack('<I', self.fromPosn))
-        print(f"\n{self.tabs(1)}Free list stored.")
+        print(f"\nFree list stored.")  # Removed self.tabs usage
 
     def get_blk(self) -> bNum_t:
         if self.fromPosn == bNum_tConst.NUM_DISK_BLOCKS.value:
