@@ -128,6 +128,26 @@ class SimDisk:
         ofs.write(bTo)
         ofs.write(struct.pack('<I', init_posn))
 
+    # @staticmethod
+    # def create_n_file(ofs):
+    #     avl_arr_sz_bytes = u32Const.NUM_INODE_TBL_BLOCKS.value * u32Const.INODES_PER_BLOCK.value // 8
+    #     avl_arr = bytearray(b'\xff' * avl_arr_sz_bytes)
+    #     ofs.write(avl_arr)
+    #
+    #     b_nums_filler = SENTINEL_INUM.to_bytes(4, 'little') * u32Const.CT_INODE_BNUMS.value
+    #     indirect_filler = SENTINEL_INUM.to_bytes(4, 'little') * u32Const.CT_INODE_INDIRECTS.value
+    #     lkd_filler = SENTINEL_INUM.to_bytes(4, 'little')
+    #     cr_time_filler = (0).to_bytes(8, 'little')
+    #
+    #     for i in range(u32Const.NUM_INODE_TBL_BLOCKS.value):
+    #         for j in range(u32Const.INODES_PER_BLOCK.value):
+    #             ix = i * u32Const.INODES_PER_BLOCK.value + j
+    #             ofs.write(b_nums_filler)
+    #             ofs.write(lkd_filler)
+    #             ofs.write(cr_time_filler)
+    #             ofs.write(indirect_filler)
+    #             ofs.write(ix.to_bytes(4, 'little'))
+
     @staticmethod
     def create_n_file(ofs):
         avl_arr_sz_bytes = u32Const.NUM_INODE_TBL_BLOCKS.value * lNum_tConst.INODES_PER_BLOCK.value // 8
@@ -160,13 +180,12 @@ class SimDisk:
             print(f"WARNING: Found data error in block {bN} on startup.")
         print()
 
-    @staticmethod
-    def cleanup_output_files(disk_file, jrnl_file, free_file, node_file):
-        for file in [disk_file, jrnl_file, free_file, node_file]:
-            if os.path.exists(file):
-                os.remove(file)
-        print("Output files cleaned up.")
-
+@staticmethod
+def cleanup_output_files(disk_file, jrnl_file, free_file, node_file):
+    for file in [disk_file, jrnl_file, free_file, node_file]:
+        if os.path.exists(file):
+            os.remove(file)
+    print("Output files cleaned up.")
 
 if __name__ == "__main__":
     # Basic test setup
