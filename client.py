@@ -166,11 +166,9 @@ class Client:
     def rnd_blk_num(self, tgt_nd_num: inNum_t) -> bNum_t:
         if self.req_count_blocks(tgt_nd_num):
             tmp = self.req_get_inode(tgt_nd_num)
-            while True:
-                tgt_blk_ix = self.rng.randint(0, u32Const.CT_INODE_BNUMS.value - 1)
-                tgt_blk = tmp.b_nums[tgt_blk_ix]
-                if tgt_blk != SENTINEL_INUM:
-                    return tgt_blk
+            valid_blocks = [b for b in tmp.b_nums if b != SENTINEL_INUM]
+            if valid_blocks:
+                return self.rng.choice(valid_blocks)
         return SENTINEL_BNUM
 
     def set_up_cgs(self, cg: Change):
@@ -183,12 +181,12 @@ class Client:
                 lin_num = 0
             else:
                 if self.p_drvr.get_test():
-                    lin_num = self.rng.randint(1, u32Const.LINES_PER_PAGE.value - 1)
+                    lin_num = self.rng.randint(1, lNum_tConst.LINES_PER_PAGE.value - 1)
                 else:
-                    lin_num = self.rng.randint(0, u32Const.LINES_PER_PAGE.value - 1)
+                    lin_num = self.rng.randint(0, lNum_tConst.LINES_PER_PAGE.value - 1)
                 s = f"Line {lin_num}\n"
 
-            lin = bytearray(u32Const.BYTES_PER_LINE)
+            lin = bytearray(u32Const.BYTES_PER_LINE.value)
             self.lin_cpy(lin, s)
             cg.add_line(lin_num, lin)
 
@@ -235,7 +233,8 @@ if __name__ == "__main__":
         def get_inode(self, i_num: inNum_t):
             class MockInode:
                 def __init__(self):
-                    self.b_nums = [1, 2, 3, SENTINEL_INUM, SENTINEL_INUM]
+                    # Ensure we have CT_INODE_BNUMS elements
+                    self.b_nums = [1, 2, 3] + [SENTINEL_INUM] * (u32Const.CT_INODE_BNUMS.value - 3)
 
             return MockInode()
 
