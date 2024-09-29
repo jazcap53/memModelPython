@@ -20,7 +20,7 @@ import time
 from typing import List, Optional, Dict
 from collections import deque
 
-from ajTypes import bNum_t, inNum_t, Line, u32Const, lNum_tConst, SENTINEL_INUM, SENTINEL_BNUM
+from ajTypes import bNum_t, inNum_t, Line, u32Const, lNum_tConst, bNum_tConst, SENTINEL_INUM, SENTINEL_BNUM
 from change import Change
 from fileMan import FileMan
 from driver import Driver
@@ -38,10 +38,10 @@ class Client:
         self.RUN_FACTOR = 112
         self.rd_pct = 60  # Percentage of read operations
         self.lo_chooser, self.hi_chooser = 0, 99
-        self.lo_page, self.hi_page = 0, bNum_t.NUM_DISK_BLOCKS - 1
+        self.lo_page, self.hi_page = 0, bNum_tConst.NUM_DISK_BLOCKS.value - 1
         self.min_delay, self.max_delay = 0, 850
         self.actions = 99
-        self.hi_inode = (u32Const.NUM_INODE_TBL_BLOCKS * lNum_tConst.INODES_PER_BLOCK - 1)
+        self.hi_inode = (u32Const.NUM_INODE_TBL_BLOCKS.value * lNum_tConst.INODES_PER_BLOCK.value - 1)
 
         # Initialize random number generator
         self.rng = random.Random()
@@ -60,12 +60,15 @@ class Client:
 
         # Set up number of requests
         if self.p_drvr.get_long_run():
-            self.num_requests = self.RUN_FACTOR * u32Const.PAGES_PER_JRNL
+            self.num_requests = self.RUN_FACTOR * u32Const.PAGES_PER_JRNL.value
         else:
             self.num_requests = self.SHORT_RUN
 
     def make_requests(self):
-        for i in range(self.num_requests):
+        num_requests = (self.RUN_FACTOR * u32Const.PAGES_PER_JRNL.value
+                   if self.p_drvr.get_long_run()
+                   else self.SHORT_RUN)
+        for i in range(num_requests):
             self.rnd_delay()
             act = self.rng.randint(0, self.actions)
 
@@ -85,7 +88,7 @@ class Client:
 
     # Private methods
     def create_or_delete(self):
-        if self.req_count_files() < u32Const.NUM_INODE_TBL_BLOCKS * lNum_tConst.INODES_PER_BLOCK - 1:
+        if self.req_count_files() < u32Const.NUM_INODE_TBL_BLOCKS.value * lNum_tConst.INODES_PER_BLOCK.value - 1:
             self.req_create_file()
         else:
             self.req_delete_file(self.rng.randint(0, self.hi_inode))
@@ -100,7 +103,7 @@ class Client:
     def add_rnd_block(self):
         tgt = self.rnd_file_num()
         if tgt != SENTINEL_INUM:
-            if self.req_count_blocks(tgt) < u32Const.CT_INODE_BNUMS - 1:
+            if self.req_count_blocks(tgt) < u32Const.CT_INODE_BNUMS.value - 1:
                 self.req_add_block(tgt)
 
     def remv_rnd_block(self):
@@ -155,7 +158,7 @@ class Client:
         file_ct = self.req_count_files()
         if file_ct:
             while True:
-                tgt = self.rng.randint(0, u32Const.NUM_INODE_TBL_BLOCKS * lNum_tConst.INODES_PER_BLOCK - 1)
+                tgt = self.rng.randint(0, u32Const.NUM_INODE_TBL_BLOCKS.value * lNum_tConst.INODES_PER_BLOCK.value - 1)
                 if self.req_file_exists(tgt):
                     return tgt
         return SENTINEL_INUM
@@ -164,7 +167,7 @@ class Client:
         if self.req_count_blocks(tgt_nd_num):
             tmp = self.req_get_inode(tgt_nd_num)
             while True:
-                tgt_blk_ix = self.rng.randint(0, u32Const.CT_INODE_BNUMS - 1)
+                tgt_blk_ix = self.rng.randint(0, u32Const.CT_INODE_BNUMS.value - 1)
                 tgt_blk = tmp.b_nums[tgt_blk_ix]
                 if tgt_blk != SENTINEL_INUM:
                     return tgt_blk
@@ -180,9 +183,9 @@ class Client:
                 lin_num = 0
             else:
                 if self.p_drvr.get_test():
-                    lin_num = self.rng.randint(1, u32Const.LINES_PER_PAGE - 1)
+                    lin_num = self.rng.randint(1, u32Const.LINES_PER_PAGE.value - 1)
                 else:
-                    lin_num = self.rng.randint(0, u32Const.LINES_PER_PAGE - 1)
+                    lin_num = self.rng.randint(0, u32Const.LINES_PER_PAGE.value - 1)
                 s = f"Line {lin_num}\n"
 
             lin = bytearray(u32Const.BYTES_PER_LINE)
@@ -191,12 +194,12 @@ class Client:
 
     def lin_cpy(self, ln: bytearray, s: str):
         sz = len(s)
-        assert sz < u32Const.BYTES_PER_LINE
 
-        for i in range(u32Const.BYTES_PER_LINE - 1):
+        assert sz < u32Const.BYTES_PER_LINE.value
+
+        for i in range(u32Const.BYTES_PER_LINE.value - 1):
             ln[i] = ord(s[i]) if i < sz else 0
-
-        ln[u32Const.BYTES_PER_LINE - 1] = sz
+        ln[u32Const.BYTES_PER_LINE.value - 1] = sz
 
     def rnd_delay(self):
         delay = self.rng.randint(self.min_delay, self.max_delay)
