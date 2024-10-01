@@ -7,9 +7,10 @@ class Page:
 
 class Memory:
     def __init__(self):
+        self.num_mem_slots = u32Const.NUM_MEM_SLOTS.value
         self.first_avl_mem_slt = 0
-        self.the_mem = [Page() for _ in range(u32Const.NUM_MEM_SLOTS.value)]
-        self.avl_mem_slts = [True] * u32Const.NUM_MEM_SLOTS.value
+        self.the_mem = [Page() for _ in range(self.num_mem_slots)]
+        self.avl_mem_slts = [True] * self.num_mem_slots
 
     def get_first_avl_mem_slt(self) -> int:
         for i, is_available in enumerate(self.avl_mem_slts):

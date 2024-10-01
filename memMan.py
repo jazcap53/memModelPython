@@ -43,10 +43,10 @@ class MemMan:
     def __del__(self):
         print("\n\tProgram exiting...")
         self.p_j.wrt_cg_log_to_jrnl(self.p_cL)
-        self.p_j.purge_jrnl(False)  # False: don't keep going; program finished
+        self.p_j.purge_jrnl(False, False)  # False: don't keep going; program finished
 
     def process_request(self, cg: Change, p_fM: FileMan):
-        assert len(self.pT.pg_tab) == self.p_m.NUM_MEM_SLOTS - sum(self.p_m.avl_mem_slts)
+        assert len(self.pT.pg_tab) == self.p_m.num_mem_slots - sum(self.p_m.avl_mem_slts)
 
         b_num = cg.block_num
         assert b_num < bNum_tConst.NUM_DISK_BLOCKS.value
@@ -119,7 +119,7 @@ class MemMan:
     def setup_pg(self, b_num: bNum_t) -> Optional[int]:
         mem_slot = self.p_m.get_first_avl_mem_slt()
 
-        if mem_slot == u32Const.NUM_MEM_SLOTS.value:
+        if mem_slot == self.p_m.num_mem_slots:
             mem_slot = self.evict_lru_page()
 
         if mem_slot is not None:
@@ -136,7 +136,7 @@ class MemMan:
     def evict_lru_page(self) -> Optional[int]:
         mem_slot = None
 
-        if len(self.pT.pg_tab) == u32Const.NUM_MEM_SLOTS.value:
+        if len(self.pT.pg_tab) == self.p_m.num_mem_slots:
             assert self.pT.check_heap()
 
             self.pT.print()
