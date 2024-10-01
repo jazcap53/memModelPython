@@ -100,7 +100,7 @@ class MemMan:
             self.p_cL.last_cg_wrt_time = cur_time
             self.p_j.wrt_cg_log_to_jrnl(self.p_cL)
             self.p_j.last_jrnl_purge_time = cur_time
-            self.p_j.purge_jrnl()
+            self.p_j.purge_jrnl(True, False)  # True to keep going, False for no crash
         else:
             delay = cur_time - self.p_cL.last_cg_wrt_time
             if delay > self.WRITEALL_DELAY_USEC:
