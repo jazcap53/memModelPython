@@ -75,7 +75,7 @@ class Journal:
         self.wipers = WipeList()
 
         last_status = self.p_cck.get_last_status()
-        if last_status and last_status()[0] == 'C':
+        if last_status and last_status[0] == 'C':
             self.purge_jrnl(True, True)
             self.p_stt.wrt("Last change log recovered")
         self.init()
