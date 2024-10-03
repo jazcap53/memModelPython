@@ -303,8 +303,8 @@ if __name__ == "__main__":
         def wrt_cg_log_to_jrnl(self, r_cg_log):
             print("Writing change log to journal")
 
-        def purge_jrnl(self, keep_going=True):
-            print("Purging journal")
+        def purge_jrnl(self, keep_going: bool, had_crash: bool = False):
+            print(f"Purging journal (keep_going={keep_going}, had_crash={had_crash})")
 
         def wrt_cg_to_pg(self, cg, pg):
             print(f"Writing change to page for block {cg.block_num}")
