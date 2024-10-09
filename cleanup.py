@@ -19,12 +19,14 @@ def get_files_to_remove() -> List[str]:
         'jrnl_file.bin',
         'node_file.bin',
         'free_file.bin',
-        'output.txt'
+        'output.txt',
     ]
 
     # Use glob to find files matching patterns
     glob_patterns = [
-        '*_jrnl'  # Files ending in '_jrnl'
+        '*_jrnl',
+        'status*.txt',
+        '*.bin',
     ]
 
     # Create list of files from glob patterns
