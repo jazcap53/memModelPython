@@ -80,11 +80,6 @@ def test_write_read_32bit_edge_cases():
     assert read_32bit(file_obj) == max_value
     assert read_32bit(file_obj) == min_value
 
-def test_line_type_and_contents():
-    line = [1, 2, 3, 4]
-    assert isinstance(line, list)
-    assert all(isinstance(item, int) for item in line)
-
 def test_sentinel_values():
     assert SENTINEL_32 == sys.maxsize
     assert SENTINEL_INUM == 0xFFFFFFFF
