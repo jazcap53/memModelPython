@@ -1,4 +1,3 @@
-# test_ajTypes.py
 import pytest
 import io
 from ajTypes import *
@@ -60,3 +59,33 @@ def test_write_32bit_none():
 def test_read_32bit_none():
     with pytest.raises(AttributeError):
         read_32bit(None)
+
+def test_write_read_64bit_edge_cases():
+    file_obj = io.BytesIO()
+    max_value = 0xffffffffffffffff
+    min_value = 0x0000000000000000
+    write_64bit(file_obj, max_value)
+    write_64bit(file_obj, min_value)
+    file_obj.seek(0)
+    assert read_64bit(file_obj) == max_value
+    assert read_64bit(file_obj) == min_value
+
+def test_write_read_32bit_edge_cases():
+    file_obj = io.BytesIO()
+    max_value = 0xffffffff
+    min_value = 0x00000000
+    write_32bit(file_obj, max_value)
+    write_32bit(file_obj, min_value)
+    file_obj.seek(0)
+    assert read_32bit(file_obj) == max_value
+    assert read_32bit(file_obj) == min_value
+
+def test_line_type_and_contents():
+    line = [1, 2, 3, 4]
+    assert isinstance(line, list)
+    assert all(isinstance(item, int) for item in line)
+
+def test_sentinel_values():
+    assert SENTINEL_32 == sys.maxsize
+    assert SENTINEL_INUM == 0xFFFFFFFF
+    assert SENTINEL_BNUM == 0xFFFFFFFF
