@@ -35,6 +35,7 @@ output_body = [
     'simDisk.py',
     'status.py',
     'wipeList.py',
+    'tests/test_ajTypes.py',
     # 'check_new_functionality.py',
     'run_modules.py',
 ]
@@ -58,7 +59,7 @@ with open('make_junk/mem_junk.txt', 'w') as outfile:
     # write body files
     for ix, file in enumerate(output_body):
         if ix == len(output_body) - 1:
-            disclaimer = '\n\nThis file runs each module (except for memoryMain.py) checking the output'
+            disclaimer = '\n\nThis file runs each module (except for memoryMain.py and the tests) checking the output'
             output_file_contents += disclaimer
         output_file_contents += f'\n\n{file}:\n'
         output_file_contents += '\n```python\n'
