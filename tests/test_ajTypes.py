@@ -26,16 +26,24 @@ def test_lNum_tConst():
 def test_bNum_tConst():
     assert bNum_tConst.NUM_DISK_BLOCKS.value == 256
 
-def test_write_read_64bit():
+@pytest.mark.parametrize("value", [
+    0x1234567890abcdef,
+    0xffffffffffffffff,
+    0x0000000000000000,
+])
+def test_write_read_64bit(value):
     file_obj = io.BytesIO()
-    value = 0x1234567890abcdef
     write_64bit(file_obj, value)
     file_obj.seek(0)
     assert read_64bit(file_obj) == value
 
-def test_write_read_32bit():
+@pytest.mark.parametrize("value", [
+    0x12345678,
+    0xffffffff,
+    0x00000000,
+])
+def test_write_read_32bit(value):
     file_obj = io.BytesIO()
-    value = 0x12345678
     write_32bit(file_obj, value)
     file_obj.seek(0)
     assert read_32bit(file_obj) == value
@@ -59,26 +67,6 @@ def test_write_32bit_none():
 def test_read_32bit_none():
     with pytest.raises(AttributeError):
         read_32bit(None)
-
-def test_write_read_64bit_edge_cases():
-    file_obj = io.BytesIO()
-    max_value = 0xffffffffffffffff
-    min_value = 0x0000000000000000
-    write_64bit(file_obj, max_value)
-    write_64bit(file_obj, min_value)
-    file_obj.seek(0)
-    assert read_64bit(file_obj) == max_value
-    assert read_64bit(file_obj) == min_value
-
-def test_write_read_32bit_edge_cases():
-    file_obj = io.BytesIO()
-    max_value = 0xffffffff
-    min_value = 0x00000000
-    write_32bit(file_obj, max_value)
-    write_32bit(file_obj, min_value)
-    file_obj.seek(0)
-    assert read_32bit(file_obj) == max_value
-    assert read_32bit(file_obj) == min_value
 
 def test_sentinel_values():
     assert SENTINEL_32 == sys.maxsize
