@@ -2,6 +2,7 @@ import pytest
 import io
 from ajTypes import *
 
+
 def test_u32Const():
     assert u32Const.BLOCK_BYTES.value == 4096
     assert u32Const.BYTES_PER_LINE.value == 64
@@ -72,3 +73,41 @@ def test_sentinel_values():
     assert SENTINEL_32 == sys.maxsize
     assert SENTINEL_INUM == 0xFFFFFFFF
     assert SENTINEL_BNUM == 0xFFFFFFFF
+
+@pytest.mark.parametrize("value", [0, 0x7FFFFFFF, 0xFFFFFFFF])
+def test_ranged_bnum_valid(value):
+    assert int(RangedBNum(value)) == value
+
+@pytest.mark.parametrize("value", [-1, 0x100000000])
+def test_ranged_bnum_invalid(value):
+    with pytest.raises(ValueError):
+        RangedBNum(value)
+
+@pytest.mark.parametrize("value", [0, 127, 255])
+def test_ranged_lnum_valid(value):
+    assert int(RangedLNum(value)) == value
+
+@pytest.mark.parametrize("value", [-1, 256])
+def test_ranged_lnum_invalid(value):
+    with pytest.raises(ValueError):
+        RangedLNum(value)
+
+@pytest.mark.parametrize("value", [0, 2**31-1, 2**32-1])
+def test_ranged_innum_valid(value):
+    assert int(RangedInNum(value)) == value
+
+@pytest.mark.parametrize("value", [-1, 2**32])
+def test_ranged_innum_invalid(value):
+    with pytest.raises(ValueError):
+        RangedInNum(value)
+
+def test_ranged_line_valid():
+    values = list(range(64))
+    line = RangedLine(values)
+    assert len(line) == 64
+    assert list(line) == values
+
+@pytest.mark.parametrize("values", [list(range(63)), list(range(65))])
+def test_ranged_line_invalid(values):
+    with pytest.raises(ValueError):
+        RangedLine(values)

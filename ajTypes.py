@@ -69,8 +69,8 @@ def from_bytes_64bit(bytes_value: bytes) -> int:
 
 class RangedBNum:
     def __init__(self, value: int):
-        if value < 0:
-            raise ValueError("Block number must be non-negative")
+        if not (0 <= value <= 0xFFFFFFFF):
+            raise ValueError("Block number must be between 0 and 0xFFFFFFFF (inclusive)")
         self.value = value
 
     def __int__(self) -> int:
@@ -87,8 +87,8 @@ class RangedLNum:
 
 class RangedInNum:
     def __init__(self, value: int):
-        if value < 0:
-            raise ValueError("Inode number must be non-negative")
+        if not (0 <= value <= 0xFFFFFFFF):
+            raise ValueError("Inode number must be between 0 and 0xFFFFFFFF (inclusive)")
         self.value = value
 
     def __int__(self) -> int:
