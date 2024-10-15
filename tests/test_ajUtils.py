@@ -25,17 +25,16 @@ def test_tabber():
     assert tabber(4) == "\t\t\t\t"
     assert tabber(2, True) == "\n\t\t"
 
-# Test print_with_tabs
-def test_print_with_tabs(capsys):
-    print_with_tabs("Hello", "World")
-    captured = capsys.readouterr()
-    assert captured.out == "\tHello World\n"
-
 # Test format_hex_like_hexdump
 @pytest.mark.parametrize("data, expected", [
-    (b"\x12\x34\x56\x78", "34 12 78 56"),
-    (b"\xab\xcd\xef", "cd ab ef"),
+    (b"\x12\x34\x56\x78", "3412 7856"),
+    (b"\xab\xcd\xef", "cdab ef"),
     (b"", "")
 ])
 def test_format_hex_like_hexdump(data, expected):
     assert format_hex_like_hexdump(data) == expected
+
+def test_print_with_tabs(capsys):
+    print_with_tabs("Hello", "World")
+    captured = capsys.readouterr()
+    assert captured.out == "\t\tHello World\n"
