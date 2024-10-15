@@ -36,6 +36,7 @@ output_body = [
     'status.py',
     'wipeList.py',
     'tests/test_ajTypes.py',
+    'tests/test_ajUtils.py',
     # 'check_new_functionality.py',
     'run_modules.py',
 ]
@@ -48,6 +49,10 @@ output_post = [
     # 'make_junk/question_for_assistant.txt',
     'make_junk/describe_utilities.txt',
     'make_junk/mem_ask_ai_to_do_stuff.txt',
+    'make_junk/run_modules_output.txt',
+    'make_junk/strategy_etc.txt',
+    'make_junk/pytest_output.txt',
+    'make_junk/please_explain_and_fix.txt',
 ]
 
 output_file_contents = []
