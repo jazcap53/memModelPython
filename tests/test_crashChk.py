@@ -1,80 +1,116 @@
 import pytest
-from unittest.mock import mock_open, patch
+from io import StringIO
+import builtins
 from crashChk import CrashChk
 
 
+class FileSystem:
+    """A class to manage our virtual file system using StringIO objects"""
+
+    def __init__(self):
+        self.files = {}
+
+    def write_file(self, filename: str, content: str):
+        self.files[filename] = StringIO(content)
+
+    def remove_file(self, filename: str):
+        if filename in self.files:
+            self.files[filename].close()
+            del self.files[filename]
+
+    def clear(self):
+        for file in self.files.values():
+            file.close()
+        self.files.clear()
+
+    def open(self, filename: str, mode: str):
+        if filename not in self.files:
+            raise FileNotFoundError(f"No such file: {filename}")
+        self.files[filename].seek(0)  # Reset file pointer to start
+        return self.files[filename]
+
+
 @pytest.fixture
-def mock_file_ops():
-    # Create a mock context that will be used for all file operations
-    mock = mock_open()
-    with patch('builtins.open', mock):
-        yield mock
+def virtual_fs():
+    # Create our virtual file system
+    fs = FileSystem()
+
+    # Store the original open function
+    original_open = builtins.open
+
+    # Replace the built-in open with our virtual one
+    def mock_open(filename, mode='r'):
+        return fs.open(filename, mode)
+
+    builtins.open = mock_open
+
+    # Provide the file system for test use
+    yield fs
+
+    # Clean up and restore original open
+    fs.clear()
+    builtins.open = original_open
 
 
-def test_no_status_files(mock_file_ops):
+def test_no_status_files(virtual_fs):
     """Test behavior when neither status file exists"""
-    # Configure mock to raise FileNotFoundError for both files
-    mock_file_ops.side_effect = FileNotFoundError
-
     checker = CrashChk()
     assert checker.get_last_status() == ""
 
 
-def test_status_txt_exists(mock_file_ops):
+def test_status_txt_exists(virtual_fs):
     """Test reading from status.txt when it exists"""
     expected_status = "Normal operation"
-    mock_file_ops.return_value.readline.return_value = expected_status
-
-    checker = CrashChk()
-    assert checker.get_last_status() == expected_status.strip()
-    # Verify that it tried to open status.txt
-    mock_file_ops.assert_called_once_with("status.txt", "r")
-
-
-def test_status_tmp_fallback(mock_file_ops):
-    """Test fallback to status.tmp when status.txt doesn't exist"""
-    expected_status = "Backup status"
-
-    # Configure mock to fail for status.txt but succeed for status.tmp
-    def side_effect(filename, mode):
-        if filename == "status.txt":
-            raise FileNotFoundError
-        return mock_file_ops.return_value
-
-    mock_file_ops.side_effect = side_effect
-    mock_file_ops.return_value.readline.return_value = expected_status
-
-    checker = CrashChk()
-    assert checker.get_last_status() == expected_status.strip()
-    # Verify that it tried both files in the correct order
-    assert mock_file_ops.call_args_list[0][0] == ("status.txt", "r")
-    assert mock_file_ops.call_args_list[1][0] == ("status.tmp", "r")
-
-
-def test_prefer_status_txt_over_tmp(mock_file_ops):
-    """Test that status.txt is preferred over status.tmp when both exist"""
-    status_txt_content = "Primary status"
-    mock_file_ops.return_value.readline.return_value = status_txt_content
-
-    checker = CrashChk()
-    assert checker.get_last_status() == status_txt_content.strip()
-    # Verify that only status.txt was read
-    mock_file_ops.assert_called_once_with("status.txt", "r")
-
-
-def test_empty_status_file(mock_file_ops):
-    """Test behavior with empty status file"""
-    mock_file_ops.return_value.readline.return_value = ""
-
-    checker = CrashChk()
-    assert checker.get_last_status() == ""
-
-
-def test_whitespace_status(mock_file_ops):
-    """Test that whitespace is properly stripped from status"""
-    status_with_whitespace = "  Running  \n"
-    expected_status = "Running"
-    mock_file_ops.return_value.readline.return_value = status_with_whitespace
+    virtual_fs.write_file("status.txt", expected_status)
 
     checker = CrashChk()
     assert checker.get_last_status() == expected_status
+
+
+def test_status_tmp_fallback(virtual_fs):
+    """Test fallback to status.tmp when status.txt doesn't exist"""
+    expected_status = "Backup status"
+    virtual_fs.write_file("status.tmp", expected_status)
+
+    checker = CrashChk()
+    assert checker.get_last_status() == expected_status
+
+
+def test_prefer_status_txt_over_tmp(virtual_fs):
+    """Test that status.txt is preferred over status.tmp when both exist"""
+    status_txt_content = "Primary status"
+    status_tmp_content = "Backup status"
+
+    virtual_fs.write_file("status.txt", status_txt_content)
+    virtual_fs.write_file("status.tmp", status_tmp_content)
+
+    checker = CrashChk()
+    assert checker.get_last_status() == status_txt_content
+
+
+def test_empty_status_file(virtual_fs):
+    """Test behavior with empty status file"""
+    virtual_fs.write_file("status.txt", "")
+
+    checker = CrashChk()
+    assert checker.get_last_status() == ""
+
+
+def test_whitespace_status(virtual_fs):
+    """Test that whitespace is properly stripped from status"""
+    status_with_whitespace = "  Running  \n"
+    expected_status = "Running"
+
+    virtual_fs.write_file("status.txt", status_with_whitespace)
+
+    checker = CrashChk()
+    assert checker.get_last_status() == expected_status
+
+
+def test_file_removal(virtual_fs):
+    """Test that we can remove files from our virtual filesystem"""
+    virtual_fs.write_file("status.txt", "test")
+    virtual_fs.remove_file("status.txt")
+
+    checker = CrashChk()
+    assert checker.get_last_status() == ""
