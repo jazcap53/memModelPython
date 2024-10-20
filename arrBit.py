@@ -4,8 +4,24 @@ T = TypeVar('T')
 U = TypeVar('U')
 V = TypeVar('V')
 
+
+class ArrBitSizeError(Exception):
+    """Custom exception raised when the requested ArrBit size is too large."""
+    pass
+
+
 class ArrBit(Generic[T, U, V]):
     def __init__(self, array_size: int, bitset_size: int):
+        # Set a reasonable maximum size limit
+        MAX_SIZE_LIMIT = 1024 * 1024  # 1 MiB, adjust as needed
+
+        requested_size = array_size * bitset_size
+
+        if requested_size > MAX_SIZE_LIMIT:
+            raise ArrBitSizeError(
+                f"Requested ArrBit size ({requested_size} bits) exceeds the maximum allowed size ({MAX_SIZE_LIMIT} bits)."
+            )
+
         self.array_size = array_size
         self.bitset_size = bitset_size
         self.arBt = [[False] * bitset_size for _ in range(array_size)]
@@ -19,7 +35,10 @@ class ArrBit(Generic[T, U, V]):
                 for j in range(self.bitset_size):
                     self.arBt[i][j] = True
         else:
-            self.arBt[ix // self.bitset_size][ix % self.bitset_size] = True
+            if 0 <= ix < self.size():
+                self.arBt[ix // self.bitset_size][ix % self.bitset_size] = True
+            else:
+                raise IndexError(f"Bit index {ix} is out of range for ArrBit of size {self.size()}")
 
     def reset(self, ix: V = None):
         if ix is None:
