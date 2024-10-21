@@ -82,19 +82,37 @@ class ArrBit(Generic[T, U, V]):
 
     @classmethod
     def from_bytes(cls, bytes_data: bytes, array_size: int, bitset_size: int) -> 'ArrBit':
+        # First validate the input size
+        expected_size = (array_size * bitset_size + 7) // 8
+        if len(bytes_data) != expected_size:
+            raise ValueError(f"Input bytes size {len(bytes_data)} does not match expected size {expected_size}")
+
         arr_bit = cls(array_size, bitset_size)
         for i, byte in enumerate(bytes_data):
             for j in range(8):
+                bit_index = i * 8 + j
+                if bit_index >= arr_bit.size():
+                    break
                 if byte & (1 << j):
-                    arr_bit.set(i * 8 + j)
+                    arr_bit.set(bit_index)
         return arr_bit
+
+    # def to_bytes(self) -> bytes:
+    #     byte_count = (self.size() + 7) // 8
+    #     result = bytearray(byte_count)
+    #     for byte_index in range(byte_count):
+    #         for bit_in_byte in range(8):
+    #             bit_index = byte_index * 8 + bit_in_byte
+    #             if bit_index < self.size() and self.test(bit_index):
+    #                 result[byte_index] |= (1 << bit_in_byte)
+    #     return bytes(result)
 
     def to_bytes(self) -> bytes:
         byte_count = (self.size() + 7) // 8
         result = bytearray(byte_count)
         for i in range(self.size()):
             if self.test(i):
-                result[i // 8] |= 1 << (i % 8)
+                result[i // 8] |= (1 << (i % 8))
         return bytes(result)
 
 
