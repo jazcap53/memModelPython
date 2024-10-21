@@ -12,22 +12,20 @@ class ArrBitSizeError(Exception):
 
 class ArrBit(Generic[T, U, V]):
     def __init__(self, array_size: int, bitset_size: int):
-        # Set a reasonable maximum size limit
         MAX_SIZE_LIMIT = 1024 * 1024  # 1 MiB, adjust as needed
-
         requested_size = array_size * bitset_size
-
         if requested_size > MAX_SIZE_LIMIT:
             raise ArrBitSizeError(
                 f"Requested ArrBit size ({requested_size} bits) exceeds the maximum allowed size ({MAX_SIZE_LIMIT} bits)."
             )
-
         self.array_size = array_size
         self.bitset_size = bitset_size
         self.arBt = [[False] * bitset_size for _ in range(array_size)]
 
     def test(self, ix: V) -> bool:
-        return self.arBt[ix // self.bitset_size][ix % self.bitset_size]
+        array_idx = ix // self.bitset_size
+        bit_idx = ix % self.bitset_size
+        return self.arBt[array_idx][bit_idx]
 
     def set(self, ix: V = None):
         if ix is None:
@@ -36,7 +34,9 @@ class ArrBit(Generic[T, U, V]):
                     self.arBt[i][j] = True
         else:
             if 0 <= ix < self.size():
-                self.arBt[ix // self.bitset_size][ix % self.bitset_size] = True
+                array_idx = ix // self.bitset_size
+                bit_idx = ix % self.bitset_size
+                self.arBt[array_idx][bit_idx] = True
             else:
                 raise IndexError(f"Bit index {ix} is out of range for ArrBit of size {self.size()}")
 
@@ -108,11 +108,13 @@ class ArrBit(Generic[T, U, V]):
     #     return bytes(result)
 
     def to_bytes(self) -> bytes:
-        byte_count = (self.size() + 7) // 8
+        byte_count = (self.size() + 7) // 8  # Round up to nearest byte
         result = bytearray(byte_count)
-        for i in range(self.size()):
-            if self.test(i):
-                result[i // 8] |= (1 << (i % 8))
+        for bit_index in range(self.size()):
+            if self.test(bit_index):
+                byte_index = bit_index // 8  # Which byte this bit belongs to
+                bit_in_byte = bit_index % 8  # Which position in that byte
+                result[byte_index] |= (1 << bit_in_byte)  # Set the bit
         return bytes(result)
 
 

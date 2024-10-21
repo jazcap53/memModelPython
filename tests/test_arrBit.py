@@ -69,12 +69,17 @@ def test_from_bytes(arr_bit):
     assert new_arr_bit.test(5)
     assert new_arr_bit.test(10)
 
+
 def test_to_bytes(arr_bit):
     arr_bit.set(5)
     arr_bit.set(10)
     bytes_data = arr_bit.to_bytes()
-    expected_bytes = b'\x20\x40\x00\x00'
-    assert bytes_data == expected_bytes
+    expected_bits = [0, 0, 0, 0, 0, 1, 0, 0,  # First byte
+                    0, 0, 1, 0, 0, 0, 0, 0,  # Second byte
+                    0, 0, 0, 0, 0, 0, 0, 0,  # Third byte
+                    0, 0, 0, 0, 0, 0, 0, 0]  # Fourth byte
+    expected_bytes = bytes(int(''.join(map(str, expected_bits[i:i+8])), 2) for i in range(0, len(expected_bits), 8))
+    assert bytes_data == expected_bytes, f"Got {bytes_data.hex(' ')} expected {expected_bytes.hex(' ')}"
 
 def test_invalid_size_from_bytes(arr_bit):
     with pytest.raises(ValueError):
