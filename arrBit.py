@@ -10,102 +10,128 @@ class ArrBitSizeError(Exception):
     pass
 
 
-class ArrBit(Generic[T, U, V]):
+class ArrBit:
+    MAX_SIZE_LIMIT = 1024 * 1024  # 1 MiB, adjust as needed
+
     def __init__(self, array_size: int, bitset_size: int):
-        MAX_SIZE_LIMIT = 1024 * 1024  # 1 MiB, adjust as needed
+        # Validate size constraints
         requested_size = array_size * bitset_size
-        if requested_size > MAX_SIZE_LIMIT:
+        if requested_size > self.MAX_SIZE_LIMIT:
             raise ArrBitSizeError(
-                f"Requested ArrBit size ({requested_size} bits) exceeds the maximum allowed size ({MAX_SIZE_LIMIT} bits)."
+                f"Requested ArrBit size ({requested_size} bits) exceeds the maximum allowed size ({self.MAX_SIZE_LIMIT} bits)."
             )
+
         self.array_size = array_size
         self.bitset_size = bitset_size
-        self.arBt = [[False] * bitset_size for _ in range(array_size)]
 
-    def test(self, ix: V) -> bool:
-        array_idx = ix // self.bitset_size
-        bit_idx = ix % self.bitset_size
-        return self.arBt[array_idx][bit_idx]
+        # Total number of bits
+        self.total_bits = array_size * bitset_size
 
-    def set(self, ix: V = None):
+        # Use a single byte array for storage
+        self.bytes = bytearray((self.total_bits + 7) // 8)
+
+    def test(self, ix: int) -> bool:
+        if 0 <= ix < self.total_bits:
+            byte_index = ix // 8
+            bit_in_byte = ix % 8
+            return bool(self.bytes[byte_index] & (1 << bit_in_byte))
+        raise IndexError(f"Bit index {ix} is out of range for ArrBit of size {self.total_bits}")
+
+    def set(self, ix: int = None):
         if ix is None:
-            for i in range(self.array_size):
-                for j in range(self.bitset_size):
-                    self.arBt[i][j] = True
+            # Set all bits
+            self.bytes = bytearray(b'\xff' * len(self.bytes))
+            # Clear any extra bits in the last byte
+            if self.total_bits % 8 != 0:
+                last_byte_mask = (1 << (self.total_bits % 8)) - 1
+                self.bytes[-1] &= last_byte_mask
         else:
-            if 0 <= ix < self.size():
-                array_idx = ix // self.bitset_size
-                bit_idx = ix % self.bitset_size
-                self.arBt[array_idx][bit_idx] = True
+            if 0 <= ix < self.total_bits:
+                byte_index = ix // 8
+                bit_in_byte = ix % 8
+                self.bytes[byte_index] |= (1 << bit_in_byte)
             else:
-                raise IndexError(f"Bit index {ix} is out of range for ArrBit of size {self.size()}")
+                raise IndexError(f"Bit index {ix} is out of range for ArrBit of size {self.total_bits}")
 
-    def reset(self, ix: V = None):
+    def reset(self, ix: int = None):
         if ix is None:
-            for i in range(self.array_size):
-                for j in range(self.bitset_size):
-                    self.arBt[i][j] = False
+            # Reset all bits
+            self.bytes = bytearray(len(self.bytes))
         else:
-            self.arBt[ix // self.bitset_size][ix % self.bitset_size] = False
+            if 0 <= ix < self.total_bits:
+                byte_index = ix // 8
+                bit_in_byte = ix % 8
+                self.bytes[byte_index] &= ~(1 << bit_in_byte)
+            else:
+                raise IndexError(f"Bit index {ix} is out of range for ArrBit of size {self.total_bits}")
 
-    def size(self) -> U:
-        return self.array_size * self.bitset_size
+    def size(self) -> int:
+        return self.total_bits
 
-    def count(self) -> V:
-        return sum(sum(row) for row in self.arBt)
+    def count(self) -> int:
+        return sum(bin(byte).count('1') for byte in self.bytes)
 
     def all(self) -> bool:
-        return all(all(row) for row in self.arBt)
+        # Check if all bits are set, handling potential extra bits in last byte
+        if len(self.bytes) > 0:
+            # Check full bytes
+            if any(byte != 0xFF for byte in self.bytes[:-1]):
+                return False
+
+            # Check last byte, considering only the bits we actually use
+            last_byte_mask = (1 << (self.total_bits % 8 or 8)) - 1
+            return self.bytes[-1] == (last_byte_mask & 0xFF)
+        return True
 
     def any(self) -> bool:
-        return any(any(row) for row in self.arBt)
-
-    def flip(self, ix: V = None):
-        if ix is None:
-            for i in range(self.array_size):
-                for j in range(self.bitset_size):
-                    self.arBt[i][j] = not self.arBt[i][j]
-        else:
-            i, j = ix // self.bitset_size, ix % self.bitset_size
-            self.arBt[i][j] = not self.arBt[i][j]
+        return any(self.bytes)
 
     def none(self) -> bool:
-        return not self.any()
+        return all(byte == 0 for byte in self.bytes)
 
-    def __ior__(self, other: 'ArrBit[T, U, V]') -> 'ArrBit[T, U, V]':
-        if self is not other:
-            for i in range(self.array_size):
-                for j in range(self.bitset_size):
-                    if other.arBt[i][j]:
-                        self.arBt[i][j] = True
+    def flip(self, ix: int = None):
+        if ix is None:
+            # Flip all bits
+            for i in range(len(self.bytes)):
+                self.bytes[i] = ~self.bytes[i] & 0xFF
+
+            # Clear any extra bits in the last byte
+            if self.total_bits % 8 != 0:
+                last_byte_mask = (1 << (self.total_bits % 8)) - 1
+                self.bytes[-1] &= last_byte_mask
+        else:
+            if 0 <= ix < self.total_bits:
+                byte_index = ix // 8
+                bit_in_byte = ix % 8
+                self.bytes[byte_index] ^= (1 << bit_in_byte)
+            else:
+                raise IndexError(f"Bit index {ix} is out of range for ArrBit of size {self.total_bits}")
+
+    def __ior__(self, other: 'ArrBit') -> 'ArrBit':
+        # Ensure other ArrBit has the same total number of bits
+        if self.total_bits != other.total_bits:
+            raise ValueError("ArrBit sizes must match for bitwise OR")
+
+        for i in range(len(self.bytes)):
+            self.bytes[i] |= other.bytes[i]
+
         return self
 
     @classmethod
     def from_bytes(cls, bytes_data: bytes, array_size: int, bitset_size: int) -> 'ArrBit':
-        # First validate the input size
+        # Validate input size
         expected_size = (array_size * bitset_size + 7) // 8
         if len(bytes_data) != expected_size:
             raise ValueError(f"Input bytes size {len(bytes_data)} does not match expected size {expected_size}")
 
+        # Create ArrBit instance
         arr_bit = cls(array_size, bitset_size)
-        for i, byte in enumerate(bytes_data):
-            for j in range(8):
-                bit_index = i * 8 + j
-                if bit_index >= arr_bit.size():
-                    break
-                if byte & (1 << j):
-                    arr_bit.set(bit_index)
+        arr_bit.bytes = bytearray(bytes_data)
+
         return arr_bit
 
     def to_bytes(self) -> bytes:
-        byte_count = (self.size() + 7) // 8  # Round up to nearest byte
-        result = bytearray(byte_count)
-        for bit_index in range(self.size()):
-            if self.test(bit_index):
-                byte_index = bit_index // 8  # Which byte this bit belongs to
-                bit_in_byte = bit_index % 8  # Which position in that byte
-                result[byte_index] |= (1 << bit_in_byte)  # Set the bit
-        return bytes(result)
+        return bytes(self.bytes)
 
 
 if __name__ == '__main__':
