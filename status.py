@@ -52,13 +52,18 @@ class Status:
         had_error = 0
 
         try:
+            # First, check if we can read the file (which will raise an exception for permission issues)
             with open(self.file_name, 'r'):
-                had_error = self.replace(msg)
-        except IOError:
+                pass
+
+            # If we can read, try to replace the content
+            had_error = self.replace(msg)
+        except (IOError, PermissionError):
             try:
+                # If reading fails, try to create/write the file
                 with open(self.file_name, 'w') as f:
                     f.write(f"{msg}\n")
-            except IOError:
+            except (IOError, PermissionError):
                 print(f"ERROR: Can't open file {self.file_name} for write of message {msg}")
                 had_error = -1
 
@@ -77,14 +82,4 @@ class Status:
         def do_replace(fs):
             fs.write(f"{s}\n")
 
-        return self.shifter.shift_files(self.file_name, do_replace)
-
-
-if __name__ == '__main__':
-    # Basic test
-    status = Status("test_status.txt")
-    status.wrt("Initial status")
-    print(f"Current status: {status.rd()}")
-    status.wrt("Updated status")
-    print(f"Updated status: {status.rd()}")
-    os.remove("test_status.txt")
+        return self.shifter.shift_files(self.file_name, lambda f: do_replace(f))
