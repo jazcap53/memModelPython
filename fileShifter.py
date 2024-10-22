@@ -30,17 +30,26 @@ class FileShifter:
 
             mode = "wb" if binary_mode else "w"
             with open(tmp_file, mode) as f:
+                # Capture the state before and after action
+                before_pos = f.tell()
                 action(f)
+                after_pos = f.tell()
 
-            # Check if the action actually modified the file
-            with open(tmp_file, 'rb' if binary_mode else 'r') as tmp:
-                new_content = tmp.read()
-
-            # If no changes, just remove tmp file
-            if new_content == original_content:
+            # If no changes were made (file not modified), remove tmp and keep original
+            if before_pos == after_pos:
                 os.unlink(tmp_file)
                 return 0
 
+            # Check content of temporary file
+            with open(tmp_file, 'rb' if binary_mode else 'r') as tmp:
+                new_content = tmp.read()
+
+            # If new content is empty, keep original file
+            if not new_content:
+                os.unlink(tmp_file)
+                return 0
+
+            # Replace the original file
             os.replace(tmp_file, f_name)
         except PermissionError:
             had_error = -2
