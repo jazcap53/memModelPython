@@ -1,15 +1,47 @@
+"""
+ajCrc.py
+
+This module provides CRC (Cyclic Redundancy Check) calculation utilities using the Boost CRC algorithm.
+"""
+
 import zlib
 
+
 class BoostCRC:
+    """
+    A class that provides methods for CRC calculation and byte manipulation using the Boost CRC algorithm.
+    """
+
     polynom = 0x04c11db7
     init_rem = 0xffffffff
 
     @staticmethod
     def get_code(data: bytes, byte_ct: int) -> int:
+        """
+        Calculate the CRC code for the given data using the Boost CRC algorithm.
+
+        Args:
+            data (bytes): The data to calculate the CRC for.
+            byte_ct (int): The number of bytes to include in the CRC calculation.
+
+        Returns:
+            int: The calculated CRC code.
+        """
         return zlib.crc32(data[:byte_ct], BoostCRC.init_rem) ^ BoostCRC.init_rem
 
     @staticmethod
     def wrt_bytes_little_e(num: int, p: bytearray, byt: int) -> bytearray:
+        """
+        Write the given number to the bytearray in little-endian format.
+
+        Args:
+            num (int): The number to write.
+            p (bytearray): The bytearray to write to.
+            byt (int): The number of bytes to write.
+
+        Returns:
+            bytearray: The modified bytearray.
+        """
         for i in range(byt):
             p[i] = num & 0xFF
             num >>= 8
