@@ -97,16 +97,6 @@ class ArrBit(Generic[T, U, V]):
                     arr_bit.set(bit_index)
         return arr_bit
 
-    # def to_bytes(self) -> bytes:
-    #     byte_count = (self.size() + 7) // 8
-    #     result = bytearray(byte_count)
-    #     for byte_index in range(byte_count):
-    #         for bit_in_byte in range(8):
-    #             bit_index = byte_index * 8 + bit_in_byte
-    #             if bit_index < self.size() and self.test(bit_index):
-    #                 result[byte_index] |= (1 << bit_in_byte)
-    #     return bytes(result)
-
     def to_bytes(self) -> bytes:
         byte_count = (self.size() + 7) // 8  # Round up to nearest byte
         result = bytearray(byte_count)
