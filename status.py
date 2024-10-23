@@ -1,3 +1,5 @@
+# status.py
+
 """
 status.py
 
@@ -51,16 +53,17 @@ class Status:
         """
         had_error = 0
 
-        try:
-            # First, check if we can read the file (which will raise an exception for permission issues)
-            with open(self.file_name, 'r'):
-                pass
+        # Check if we have write permission before attempting to write
+        if os.path.exists(self.file_name) and not os.access(self.file_name, os.W_OK):
+            print(f"ERROR: No write permission for file {self.file_name}")
+            return -1
 
-            # If we can read, try to replace the content
+        try:
+            # Try to replace the content
             had_error = self.replace(msg)
         except (IOError, PermissionError):
             try:
-                # If reading fails, try to create/write the file
+                # If replace fails, try to create/write the file
                 with open(self.file_name, 'w') as f:
                     f.write(f"{msg}\n")
             except (IOError, PermissionError):
