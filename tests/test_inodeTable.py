@@ -222,17 +222,38 @@ class TestInodeTable:
         inode_num2 = empty_inode_table.assign_in_n()
         empty_inode_table.assign_blk_n(inode_num2, 2)
 
+        # Verify initial state
+        print(f"\nInitial state:")
+        print(f"inode_num1: {inode_num1}, in_use: {empty_inode_table.node_in_use(inode_num1)}")
+        print(f"inode_num2: {inode_num2}, in_use: {empty_inode_table.node_in_use(inode_num2)}")
+        print(f"Availability bitmap: {empty_inode_table.avail.to_bytes().hex()}")
+
         # Store the table
         empty_inode_table.store_tbl()
+
+        # Verify file contents after store
+        with open(temp_inode_file, 'rb') as f:
+            avail_bytes = f.read((u32Const.NUM_INODE_TBL_BLOCKS.value *
+                                  lNum_tConst.INODES_PER_BLOCK.value + 7) // 8)
+            print(f"\nStored availability bitmap: {avail_bytes.hex()}")
 
         # Create new table instance and load from file
         new_table = InodeTable(temp_inode_file)
 
-        # Verify loaded data matches original
+        # Debug loaded state
+        print(f"\nLoaded state:")
+        print(f"inode_num1: {inode_num1}, in_use: {new_table.node_in_use(inode_num1)}")
+        print(f"inode_num2: {inode_num2}, in_use: {new_table.node_in_use(inode_num2)}")
+        print(f"Loaded availability bitmap: {new_table.avail.to_bytes().hex()}")
+
+        # Original assertions
         assert new_table.node_in_use(inode_num1)
         assert new_table.node_in_use(inode_num2)
         assert 1 in new_table.ref_tbl_node(inode_num1).b_nums
         assert 2 in new_table.ref_tbl_node(inode_num2).b_nums
+
+        # Additional verification
+        assert new_table.avail.to_bytes() == empty_inode_table.avail.to_bytes()
 
     def test_full_table(self, empty_inode_table):
         """Test behavior when inode table is full."""
