@@ -167,3 +167,139 @@ class TestInodeTable:
         inode = empty_inode_table.ref_tbl_node(inode_num)
         assert 1 in inode.b_nums
         assert 2 in inode.b_nums
+
+    def test_release_block_numbers(self, empty_inode_table):
+        """Test releasing block numbers from an inode."""
+        # First assign an inode and some blocks
+        inode_num = empty_inode_table.assign_in_n()
+        empty_inode_table.assign_blk_n(inode_num, 1)
+        empty_inode_table.assign_blk_n(inode_num, 2)
+
+        # Release one block
+        assert empty_inode_table.release_blk_n(inode_num, 1)
+
+        # Verify the release
+        inode = empty_inode_table.ref_tbl_node(inode_num)
+        assert 1 not in inode.b_nums
+        assert 2 in inode.b_nums
+
+        # Try to release non-existent block
+        assert not empty_inode_table.release_blk_n(inode_num, 999)
+
+    def test_release_all_blocks(self, empty_inode_table):
+        """Test releasing all blocks from an inode."""
+        # Assign inode and blocks
+        inode_num = empty_inode_table.assign_in_n()
+        empty_inode_table.assign_blk_n(inode_num, 1)
+        empty_inode_table.assign_blk_n(inode_num, 2)
+
+        # Release all blocks
+        empty_inode_table.release_all_blk_n(inode_num)
+
+        # Verify all blocks are released
+        inode = empty_inode_table.ref_tbl_node(inode_num)
+        assert all(bn == SENTINEL_BNUM for bn in inode.b_nums)
+
+    def test_list_all_blocks(self, empty_inode_table):
+        """Test listing all blocks associated with an inode."""
+        # Test with sentinel inode number
+        assert empty_inode_table.list_all_blk_n(SENTINEL_INUM) == []
+
+        # Test with real inode
+        inode_num = empty_inode_table.assign_in_n()
+        empty_inode_table.assign_blk_n(inode_num, 1)
+        empty_inode_table.assign_blk_n(inode_num, 2)
+
+        block_list = empty_inode_table.list_all_blk_n(inode_num)
+        assert block_list == [1, 2]
+
+    def test_store_and_load_table(self, empty_inode_table, temp_inode_file):
+        """Test storing and loading the inode table."""
+        # Assign some inodes and blocks
+        inode_num1 = empty_inode_table.assign_in_n()
+        empty_inode_table.assign_blk_n(inode_num1, 1)
+
+        inode_num2 = empty_inode_table.assign_in_n()
+        empty_inode_table.assign_blk_n(inode_num2, 2)
+
+        # Store the table
+        empty_inode_table.store_tbl()
+
+        # Create new table instance and load from file
+        new_table = InodeTable(temp_inode_file)
+
+        # Verify loaded data matches original
+        assert new_table.node_in_use(inode_num1)
+        assert new_table.node_in_use(inode_num2)
+        assert 1 in new_table.ref_tbl_node(inode_num1).b_nums
+        assert 2 in new_table.ref_tbl_node(inode_num2).b_nums
+
+    def test_full_table(self, empty_inode_table):
+        """Test behavior when inode table is full."""
+        # Fill the table
+        inodes = []
+        while True:
+            inode_num = empty_inode_table.assign_in_n()
+            if inode_num == SENTINEL_INUM:
+                break
+            inodes.append(inode_num)
+
+        # Verify table is full
+        assert empty_inode_table.assign_in_n() == SENTINEL_INUM
+        assert len(inodes) == u32Const.NUM_INODE_TBL_BLOCKS.value * lNum_tConst.INODES_PER_BLOCK.value
+
+    def test_invalid_inode_operations(self, empty_inode_table):
+        """Test operations with invalid inode numbers."""
+        # Test operations with SENTINEL_INUM
+        assert not empty_inode_table.node_in_use(SENTINEL_INUM)
+        assert empty_inode_table.list_all_blk_n(SENTINEL_INUM) == []
+
+        # Test releasing non-existent block from valid inode
+        inode_num = empty_inode_table.assign_in_n()
+        assert not empty_inode_table.release_blk_n(inode_num, 999)
+
+    def test_ensure_stored_behavior(self, empty_inode_table):
+        """Test the ensure_stored method."""
+        # Initially not modified
+        assert not empty_inode_table.modified
+        empty_inode_table.ensure_stored()
+
+        # Modify table
+        inode_num = empty_inode_table.assign_in_n()
+        assert empty_inode_table.modified
+
+        # Store and verify not modified
+        empty_inode_table.ensure_stored()
+        assert not empty_inode_table.modified
+
+    def test_concurrent_block_assignment(self, empty_inode_table):
+        """Test assigning blocks to multiple inodes."""
+        # Assign multiple inodes
+        inode_nums = [empty_inode_table.assign_in_n() for _ in range(3)]
+
+        # Assign blocks to each inode
+        for i, inode_num in enumerate(inode_nums):
+            for j in range(2):
+                block_num = i * 2 + j
+                assert empty_inode_table.assign_blk_n(inode_num, block_num)
+
+        # Verify assignments
+        for i, inode_num in enumerate(inode_nums):
+            blocks = empty_inode_table.list_all_blk_n(inode_num)
+            assert blocks == [i * 2, i * 2 + 1]
+
+    def test_inode_reuse(self, empty_inode_table):
+        """Test reusing released inodes."""
+        # Assign and release an inode
+        inode_num = empty_inode_table.assign_in_n()
+        empty_inode_table.assign_blk_n(inode_num, 1)
+        empty_inode_table.release_in_n(inode_num)
+
+        # Reassign the same inode number
+        new_inode_num = empty_inode_table.assign_in_n()
+        assert new_inode_num == inode_num
+
+        # Verify it's clean
+        inode = empty_inode_table.ref_tbl_node(new_inode_num)
+        assert all(bn == SENTINEL_BNUM for bn in inode.b_nums)
+        assert inode.cr_time > 0
