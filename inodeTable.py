@@ -27,7 +27,8 @@ class InodeTable:
                     for _ in range(u32Const.NUM_INODE_TBL_BLOCKS.value)]
         self.load_tbl()
         # Initialize all inodes as available
-        self.avail.set()  # This sets all bits to 1 (available)
+        # TODO: the following line was just commented out 2024-10-25
+        # self.avail.set()  # This sets all bits to 1 (available)
         self.modified = False
 
     def ref_tbl_node(self, i_num: inNum_t) -> Inode:
