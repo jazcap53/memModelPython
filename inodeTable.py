@@ -106,8 +106,10 @@ class InodeTable:
     def load_tbl(self) -> None:
         try:
             with open(self.file_name, 'rb') as f:
-                avail_bytes = f.read(u32Const.NUM_INODE_TBL_BLOCKS.value * lNum_tConst.INODES_PER_BLOCK.value // 8)
-                self.avail = ArrBit.from_bytes(avail_bytes, u32Const.NUM_INODE_TBL_BLOCKS.value,
+                avail_bytes = f.read(u32Const.NUM_INODE_TBL_BLOCKS.value *
+                                     lNum_tConst.INODES_PER_BLOCK.value // 8)
+                self.avail = ArrBit.from_bytes(avail_bytes,
+                                               u32Const.NUM_INODE_TBL_BLOCKS.value,
                                                lNum_tConst.INODES_PER_BLOCK.value)
 
                 for i in range(u32Const.NUM_INODE_TBL_BLOCKS.value):
@@ -122,8 +124,14 @@ class InodeTable:
                                                            f.read(4 * u32Const.CT_INODE_INDIRECTS.value)))
                         node.i_num, = struct.unpack('<I', f.read(4))
                         self.tbl[i][j] = node
-                        if node.i_num != SENTINEL_INUM:
-                            self.avail.reset(i * lNum_tConst.INODES_PER_BLOCK.value + j)
+
+                        # Calculate the expected i_num for this position
+                        expected_inum = i * lNum_tConst.INODES_PER_BLOCK.value + j
+
+                        # If node's i_num equals its position, it's in use
+                        if node.i_num == expected_inum:
+                            self.avail.reset(expected_inum)
+
         except FileNotFoundError:
             print(f"Inode table file not found. Initializing with all inodes available.")
             self.avail.set()  # Set all inodes as available
