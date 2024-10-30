@@ -28,7 +28,8 @@ class InodeTable:
         self.load_tbl()
         # Initialize all inodes as available
         # TODO: the following line was just commented out 2024-10-25
-        # self.avail.set()  # This sets all bits to 1 (available)
+        # TODO: the following line was commented back int 2024-10-29 21:54
+        self.avail.set()  # This sets all bits to 1 (available)
         self.modified = False
 
     def ref_tbl_node(self, i_num: inNum_t) -> Inode:
