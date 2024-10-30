@@ -20,17 +20,12 @@ class InodeTable:
         self.file_name = nfn
         self.shifter = FileShifter()
         self.tabs = Tabber()
-        # self.avail = ArrBit(u32Const.NUM_INODE_TBL_BLOCKS.value * lNum_tConst.INODES_PER_BLOCK.value)
         self.avail = ArrBit(u32Const.NUM_INODE_TBL_BLOCKS.value, lNum_tConst.INODES_PER_BLOCK.value)
-        self.avail.set()  # Set all bits to 1 (all inodes available initially)
+        self.avail.set()  # Initialize with all bits set (all inodes available)
         self.tbl = [[Inode() for _ in range(lNum_tConst.INODES_PER_BLOCK.value)]
                     for _ in range(u32Const.NUM_INODE_TBL_BLOCKS.value)]
-        self.load_tbl()
-        # Initialize all inodes as available
-        # TODO: the following line was just commented out 2024-10-25
-        # TODO: the following line was commented back int 2024-10-29 21:54
-        self.avail.set()  # This sets all bits to 1 (available)
         self.modified = False
+        self.load_tbl()  # Load saved state if it exists
 
     def ref_tbl_node(self, i_num: inNum_t) -> Inode:
         blk_num = i_num // lNum_tConst.INODES_PER_BLOCK.value
@@ -106,35 +101,35 @@ class InodeTable:
     def load_tbl(self) -> None:
         try:
             with open(self.file_name, 'rb') as f:
+                # Read and set availability bitmap
                 avail_bytes = f.read(u32Const.NUM_INODE_TBL_BLOCKS.value *
                                      lNum_tConst.INODES_PER_BLOCK.value // 8)
                 self.avail = ArrBit.from_bytes(avail_bytes,
                                                u32Const.NUM_INODE_TBL_BLOCKS.value,
                                                lNum_tConst.INODES_PER_BLOCK.value)
 
+                # Read inode table entries
                 for i in range(u32Const.NUM_INODE_TBL_BLOCKS.value):
                     for j in range(lNum_tConst.INODES_PER_BLOCK.value):
                         node = Inode()
+                        # Read direct block numbers
                         node.b_nums = list(
                             struct.unpack(f'<{u32Const.CT_INODE_BNUMS.value}I',
                                           f.read(4 * u32Const.CT_INODE_BNUMS.value)))
+                        # Read lock status
                         node.lkd, = struct.unpack('<I', f.read(4))
+                        # Read creation time
                         node.cr_time, = struct.unpack('<Q', f.read(8))
+                        # Read indirect block numbers
                         node.indirect = list(struct.unpack(f'<{u32Const.CT_INODE_INDIRECTS.value}I',
                                                            f.read(4 * u32Const.CT_INODE_INDIRECTS.value)))
+                        # Read inode number
                         node.i_num, = struct.unpack('<I', f.read(4))
                         self.tbl[i][j] = node
 
-                        # Calculate the expected i_num for this position
-                        expected_inum = i * lNum_tConst.INODES_PER_BLOCK.value + j
-
-                        # If node's i_num equals its position, it's in use
-                        if node.i_num == expected_inum:
-                            self.avail.reset(expected_inum)
-
         except FileNotFoundError:
             print(f"Inode table file not found. Initializing with all inodes available.")
-            self.avail.set()  # Set all inodes as available
+            # avail is already set to all 1s from __init__
 
     def store_tbl(self) -> None:
         def do_store_tbl(f):
