@@ -477,6 +477,7 @@ class TestRefactoredInodeTable:
 
         # Create inode and try invalid block operations
         inode_num = inode_table.create_inode()
+        assert not inode_table.assign_block(inode_num, SENTINEL_BNUM)  # Add this line
         assert not inode_table.release_block(inode_num, SENTINEL_BNUM)
 
         # Try to release non-existent block

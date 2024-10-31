@@ -193,8 +193,11 @@ class InodeBlockManager:
         Assign a block number to an inode.
 
         Returns:
-            True if successful, False if inode is full
+            True if successful, False if inode is full or block_num is invalid
         """
+        if block_num == SENTINEL_BNUM:
+            return False
+
         for i, item in enumerate(inode.b_nums):
             if item == SENTINEL_BNUM:
                 inode.b_nums[i] = block_num
@@ -255,7 +258,7 @@ class InodeTable:
 
     def assign_block(self, inode_num: inNum_t, block_num: bNum_t) -> bool:
         """Assign a block to an inode."""
-        if inode_num == SENTINEL_INUM:
+        if inode_num == SENTINEL_INUM or block_num == SENTINEL_BNUM:
             return False
         inode = self.storage.get_inode(inode_num)
         if not inode:
