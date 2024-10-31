@@ -209,6 +209,9 @@ class InodeBlockManager:
         Returns:
             True if block was found and released, False otherwise
         """
+        if target == SENTINEL_BNUM:
+            return False
+
         for i, item in enumerate(inode.b_nums):
             if item == target:
                 inode.b_nums[i] = SENTINEL_BNUM
@@ -264,7 +267,7 @@ class InodeTable:
 
     def release_block(self, inode_num: inNum_t, block_num: bNum_t) -> bool:
         """Release a block from an inode."""
-        if inode_num == SENTINEL_INUM:
+        if inode_num == SENTINEL_INUM or block_num == SENTINEL_BNUM:
             return False
         inode = self.storage.get_inode(inode_num)
         if not inode:
