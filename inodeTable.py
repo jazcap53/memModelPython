@@ -1,12 +1,32 @@
+"""
+inodeTable.py: Manages inode allocation and block number assignments
+
+This module provides classes for managing inodes in the file system:
+- Inode: Data structure representing a single inode
+- InodeStorage: Handles low-level storage operations
+- InodeAllocator: Manages inode allocation and deallocation
+- InodeBlockManager: Handles block number assignments
+- InodeTable: Main class coordinating the above components
+"""
+
+from dataclasses import dataclass
 import struct
-from typing import List
-from ajTypes import u32Const, lNum_tConst, bNum_t, inNum_t, SENTINEL_INUM, SENTINEL_BNUM
+from typing import List, Optional, Set, BinaryIO
+from ajTypes import bNum_t, inNum_t, u32Const, lNum_tConst, SENTINEL_INUM, SENTINEL_BNUM
 from ajUtils import get_cur_time, Tabber
 from fileShifter import FileShifter
 from arrBit import ArrBit
 
 
+@dataclass
 class Inode:
+    """Represents a single inode in the file system."""
+    b_nums: List[bNum_t]  # Direct block numbers
+    lkd: inNum_t  # Lock status
+    cr_time: int  # Creation timestamp
+    indirect: List[bNum_t]  # Indirect block numbers
+    i_num: inNum_t  # Inode number
+
     def __init__(self):
         self.b_nums = [SENTINEL_BNUM] * u32Const.CT_INODE_BNUMS.value
         self.lkd = SENTINEL_INUM
@@ -14,188 +34,239 @@ class Inode:
         self.indirect = [SENTINEL_BNUM] * u32Const.CT_INODE_INDIRECTS.value
         self.i_num = SENTINEL_INUM
 
+    def is_locked(self) -> bool:
+        """Check if this inode is locked."""
+        return self.lkd != SENTINEL_INUM
 
-class InodeTable:
-    def __init__(self, nfn: str):
-        self.file_name = nfn
+    def clear(self) -> None:
+        """Reset this inode to its initial state."""
+        self.__init__()
+
+
+class InodeStorage:
+    """Handles storage and retrieval of inode data."""
+
+    def __init__(self, filename: str):
+        self.filename = filename
         self.shifter = FileShifter()
-        self.tabs = Tabber()
-        self.avail = ArrBit(u32Const.NUM_INODE_TBL_BLOCKS.value, lNum_tConst.INODES_PER_BLOCK.value)
-        self.avail.set()  # Initialize with all bits set (all inodes available)
-        self.tbl = [[Inode() for _ in range(lNum_tConst.INODES_PER_BLOCK.value)]
-                    for _ in range(u32Const.NUM_INODE_TBL_BLOCKS.value)]
         self.modified = False
-        self.load_tbl()  # Load saved state if it exists
+        self.tbl = self._create_empty_table()
 
-    def ref_tbl_node(self, i_num: inNum_t) -> Inode:
-        blk_num = i_num // lNum_tConst.INODES_PER_BLOCK.value
-        blk_ix = i_num % lNum_tConst.INODES_PER_BLOCK.value
+    def _create_empty_table(self) -> List[List[Inode]]:
+        """Create an empty two-dimensional table of inodes."""
+        return [[Inode() for _ in range(lNum_tConst.INODES_PER_BLOCK.value)]
+                for _ in range(u32Const.NUM_INODE_TBL_BLOCKS.value)]
+
+    def get_inode(self, inode_num: inNum_t) -> Inode:
+        """Get reference to an inode by its number."""
+        blk_num = inode_num // lNum_tConst.INODES_PER_BLOCK.value
+        blk_ix = inode_num % lNum_tConst.INODES_PER_BLOCK.value
         return self.tbl[blk_num][blk_ix]
 
-    def assign_in_n(self) -> inNum_t:
-        max_inum = u32Const.NUM_INODE_TBL_BLOCKS.value * lNum_tConst.INODES_PER_BLOCK.value
-        for ix in range(max_inum):
-            if self.avail.test(ix):
-                self.avail.reset(ix)
-                node = self.ref_tbl_node(ix)
-                node.cr_time = get_cur_time(True)
-                self.modified = True
-                return ix
-        print("No available inodes found.")
-        return SENTINEL_INUM
-
-    def release_in_n(self, i_num: inNum_t) -> None:
-        if i_num == SENTINEL_INUM:
-            return
-        node = self.ref_tbl_node(i_num)
-        node.b_nums = [SENTINEL_BNUM] * u32Const.CT_INODE_BNUMS.value
-        node.cr_time = 0
-        node.indirect = [SENTINEL_BNUM] * u32Const.CT_INODE_INDIRECTS.value
-        self.avail.set(i_num)
-        self.modified = True
-
-    def node_in_use(self, i_num: inNum_t) -> bool:
-        if i_num == SENTINEL_INUM:
-            return False
-        return not self.avail.test(i_num)
-
-    def node_locked(self, i_num: inNum_t) -> bool:
-        assert i_num != SENTINEL_INUM
-        return self.ref_tbl_node(i_num).lkd != SENTINEL_INUM
-
-    def assign_blk_n(self, i_num: inNum_t, blk: bNum_t) -> bool:
-        assert i_num != SENTINEL_INUM
-        assert not self.avail.test(i_num)
-        node = self.ref_tbl_node(i_num)
-        for i, item in enumerate(node.b_nums):
-            if item == SENTINEL_BNUM:
-                node.b_nums[i] = blk
-                self.modified = True
-                return True
-        return False
-
-    def release_blk_n(self, i_num: inNum_t, tgt: bNum_t) -> bool:
-        if i_num != SENTINEL_INUM:
-            node = self.ref_tbl_node(i_num)
-            for i, item in enumerate(node.b_nums):
-                if item == tgt:
-                    node.b_nums[i] = SENTINEL_BNUM
-                    print(f"{self.tabs(2, True)}Releasing block number {tgt} from inode {i_num}")
-                    self.modified = True
-                    return True
-        return False
-
-    def release_all_blk_n(self, i_num: inNum_t) -> None:
-        if i_num != SENTINEL_INUM:
-            node = self.ref_tbl_node(i_num)
-            for i, item in enumerate(node.b_nums):
-                if item != SENTINEL_BNUM:
-                    self.release_blk_n(i_num, item)
-
-    def list_all_blk_n(self, i_num: inNum_t) -> List[bNum_t]:
-        if i_num == SENTINEL_INUM:
-            print("InodeTable::list_all_blk_n() called with SENTINEL_INUM")
-            return []
-        return [item for item in self.ref_tbl_node(i_num).b_nums if item != SENTINEL_BNUM]
-
-    def load_tbl(self) -> None:
+    def load_table(self) -> None:
+        """Load the inode table from disk."""
         try:
-            with open(self.file_name, 'rb') as f:
-                # Read and set availability bitmap
-                avail_bytes = f.read(u32Const.NUM_INODE_TBL_BLOCKS.value *
-                                     lNum_tConst.INODES_PER_BLOCK.value // 8)
-                self.avail = ArrBit.from_bytes(avail_bytes,
-                                               u32Const.NUM_INODE_TBL_BLOCKS.value,
-                                               lNum_tConst.INODES_PER_BLOCK.value)
+            with open(self.filename, 'rb') as f:
+                # Skip availability bitmap (handled by InodeAllocator)
+                bitmap_size = (u32Const.NUM_INODE_TBL_BLOCKS.value *
+                               lNum_tConst.INODES_PER_BLOCK.value + 7) // 8
+                f.seek(bitmap_size)
 
                 # Read inode table entries
                 for i in range(u32Const.NUM_INODE_TBL_BLOCKS.value):
                     for j in range(lNum_tConst.INODES_PER_BLOCK.value):
-                        node = Inode()
-                        # Read direct block numbers
-                        node.b_nums = list(
-                            struct.unpack(f'<{u32Const.CT_INODE_BNUMS.value}I',
-                                          f.read(4 * u32Const.CT_INODE_BNUMS.value)))
-                        # Read lock status
-                        node.lkd, = struct.unpack('<I', f.read(4))
-                        # Read creation time
-                        node.cr_time, = struct.unpack('<Q', f.read(8))
-                        # Read indirect block numbers
-                        node.indirect = list(struct.unpack(f'<{u32Const.CT_INODE_INDIRECTS.value}I',
-                                                           f.read(4 * u32Const.CT_INODE_INDIRECTS.value)))
-                        # Read inode number
-                        node.i_num, = struct.unpack('<I', f.read(4))
-                        self.tbl[i][j] = node
-
+                        self._read_inode(f, i, j)
         except FileNotFoundError:
-            print(f"Inode table file not found. Initializing with all inodes available.")
-            # avail is already set to all 1s from __init__
+            print(f"No inode table file found at {self.filename}. Starting fresh.")
 
-    def store_tbl(self) -> None:
-        def do_store_tbl(f):
-            f.write(self.avail.to_bytes())
+    def store_table(self) -> None:
+        """Store the inode table to disk."""
+        if not self.modified:
+            return
+
+        def write_table(f):
+            # Skip availability bitmap (handled by InodeAllocator)
+            bitmap_size = (u32Const.NUM_INODE_TBL_BLOCKS.value *
+                           lNum_tConst.INODES_PER_BLOCK.value + 7) // 8
+            f.seek(bitmap_size)
+
+            # Write inode table entries
             for block in self.tbl:
-                for node in block:
-                    f.write(struct.pack(f'<{u32Const.CT_INODE_BNUMS.value}I', *node.b_nums))
-                    f.write(struct.pack('<I', node.lkd))
-                    f.write(struct.pack('<Q', node.cr_time))
-                    f.write(struct.pack(f'<{u32Const.CT_INODE_INDIRECTS.value}I', *node.indirect))
-                    f.write(struct.pack('<I', node.i_num))
-            print(f"\n{self.tabs(1)}Inode table stored.")
+                for inode in block:
+                    self._write_inode(f, inode)
 
-        self.shifter.shift_files(self.file_name, do_store_tbl, binary_mode=True)
+        self.shifter.shift_files(self.filename, write_table, binary_mode=True)
+        self.modified = False
+
+    def _read_inode(self, f: BinaryIO, block_idx: int, inode_idx: int) -> None:
+        """Read a single inode from the file."""
+        node = self.tbl[block_idx][inode_idx]
+
+        # Read direct block numbers
+        node.b_nums = list(struct.unpack(
+            f'<{u32Const.CT_INODE_BNUMS.value}I',
+            f.read(4 * u32Const.CT_INODE_BNUMS.value)))
+
+        # Read lock status
+        node.lkd, = struct.unpack('<I', f.read(4))
+
+        # Read creation time
+        node.cr_time, = struct.unpack('<Q', f.read(8))
+
+        # Read indirect block numbers
+        node.indirect = list(struct.unpack(
+            f'<{u32Const.CT_INODE_INDIRECTS.value}I',
+            f.read(4 * u32Const.CT_INODE_INDIRECTS.value)))
+
+        # Read inode number
+        node.i_num, = struct.unpack('<I', f.read(4))
+
+    def _write_inode(self, f: BinaryIO, inode: Inode) -> None:
+        """Write a single inode to the file."""
+        # Write direct block numbers
+        f.write(struct.pack(f'<{u32Const.CT_INODE_BNUMS.value}I', *inode.b_nums))
+
+        # Write lock status
+        f.write(struct.pack('<I', inode.lkd))
+
+        # Write creation time
+        f.write(struct.pack('<Q', inode.cr_time))
+
+        # Write indirect block numbers
+        f.write(struct.pack(f'<{u32Const.CT_INODE_INDIRECTS.value}I', *inode.indirect))
+
+        # Write inode number
+        f.write(struct.pack('<I', inode.i_num))
+
+
+class InodeAllocator:
+    """Manages inode allocation and deallocation."""
+
+    def __init__(self, num_blocks: int, inodes_per_block: int):
+        self.avail = ArrBit(num_blocks, inodes_per_block)
+        self.avail.set()  # All inodes initially available
+
+    def allocate(self) -> Optional[inNum_t]:
+        """
+        Allocate a new inode.
+
+        Returns:
+            inode number if successful, None if no inodes available
+        """
+        max_inum = u32Const.NUM_INODE_TBL_BLOCKS.value * lNum_tConst.INODES_PER_BLOCK.value
+        for ix in range(max_inum):
+            if self.avail.test(ix):
+                self.avail.reset(ix)
+                return ix
+        return None
+
+    def deallocate(self, inode_num: inNum_t) -> None:
+        """Mark an inode as available."""
+        if inode_num != SENTINEL_INUM:
+            self.avail.set(inode_num)
+
+    def is_available(self, inode_num: inNum_t) -> bool:
+        """Check if an inode is available."""
+        return self.avail.test(inode_num)
+
+
+class InodeBlockManager:
+    """Handles block number assignments for inodes."""
+
+    @staticmethod
+    def assign_block(inode: Inode, block_num: bNum_t) -> bool:
+        """
+        Assign a block number to an inode.
+
+        Returns:
+            True if successful, False if inode is full
+        """
+        for i, item in enumerate(inode.b_nums):
+            if item == SENTINEL_BNUM:
+                inode.b_nums[i] = block_num
+                return True
+        return False
+
+    @staticmethod
+    def release_block(inode: Inode, target: bNum_t) -> bool:
+        """
+        Release a block number from an inode.
+
+        Returns:
+            True if block was found and released, False otherwise
+        """
+        for i, item in enumerate(inode.b_nums):
+            if item == target:
+                inode.b_nums[i] = SENTINEL_BNUM
+                return True
+        return False
+
+    @staticmethod
+    def list_blocks(inode: Inode) -> List[bNum_t]:
+        """Get list of all blocks assigned to an inode."""
+        return [item for item in inode.b_nums if item != SENTINEL_BNUM]
+
+
+class InodeTable:
+    """Main class coordinating inode operations."""
+
+    def __init__(self, filename: str):
+        self.storage = InodeStorage(filename)
+        self.allocator = InodeAllocator(u32Const.NUM_INODE_TBL_BLOCKS.value,
+                                        lNum_tConst.INODES_PER_BLOCK.value)
+        self.block_manager = InodeBlockManager()
+        self.tabs = Tabber()
+        self.storage.load_table()
+
+    def create_inode(self) -> inNum_t:
+        """Create a new inode."""
+        inode_num = self.allocator.allocate()
+        if inode_num is not None:
+            inode = self.storage.get_inode(inode_num)
+            inode.cr_time = get_cur_time(True)
+            self.storage.modified = True
+            return inode_num
+        return SENTINEL_INUM
+
+    def delete_inode(self, inode_num: inNum_t) -> None:
+        """Delete an inode."""
+        if inode_num != SENTINEL_INUM:
+            inode = self.storage.get_inode(inode_num)
+            inode.clear()
+            self.allocator.deallocate(inode_num)
+            self.storage.modified = True
+
+    def assign_block(self, inode_num: inNum_t, block_num: bNum_t) -> bool:
+        """Assign a block to an inode."""
+        inode = self.storage.get_inode(inode_num)
+        success = self.block_manager.assign_block(inode, block_num)
+        if success:
+            self.storage.modified = True
+        return success
+
+    def release_block(self, inode_num: inNum_t, block_num: bNum_t) -> bool:
+        """Release a block from an inode."""
+        inode = self.storage.get_inode(inode_num)
+        success = self.block_manager.release_block(inode, block_num)
+        if success:
+            self.storage.modified = True
+        return success
+
+    def is_locked(self, inode_num: inNum_t) -> bool:
+        """Check if an inode is locked."""
+        return self.storage.get_inode(inode_num).is_locked()
+
+    def is_in_use(self, inode_num: inNum_t) -> bool:
+        """Check if an inode is in use."""
+        if inode_num == SENTINEL_INUM:
+            return False
+        return not self.allocator.is_available(inode_num)
+
+    def store(self) -> None:
+        """Store the inode table to disk."""
+        self.storage.store_table()
 
     def ensure_stored(self) -> None:
-        if self.modified:
-            self.store_tbl()
-            self.modified = False
-
-
-if __name__ == '__main__':
-    # Test the InodeTable class
-    import tempfile
-
-    with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-        temp_filename = temp_file.name
-
-    # Initialize the inode table file with some dummy data
-    with open(temp_filename, 'wb') as f:
-        f.write(b'\x00' * (u32Const.NUM_INODE_TBL_BLOCKS.value * lNum_tConst.INODES_PER_BLOCK.value // 8))
-        for _ in range(u32Const.NUM_INODE_TBL_BLOCKS.value * lNum_tConst.INODES_PER_BLOCK.value):
-            f.write(
-                struct.pack(f'<{u32Const.CT_INODE_BNUMS.value}I', *([SENTINEL_BNUM] * u32Const.CT_INODE_BNUMS.value)))
-            f.write(struct.pack('<I', SENTINEL_INUM))
-            f.write(struct.pack('<Q', 0))
-            f.write(struct.pack(f'<{u32Const.CT_INODE_INDIRECTS.value}I',
-                                *([SENTINEL_BNUM] * u32Const.CT_INODE_INDIRECTS.value)))
-            f.write(struct.pack('<I', SENTINEL_INUM))
-
-    inode_table = InodeTable(temp_filename)
-
-    # Test assign_in_n and node_in_use
-    inode_num = inode_table.assign_in_n()
-    print(f"Assigned inode number: {inode_num}")
-    if inode_num != SENTINEL_INUM:
-        print(f"Is node {inode_num} in use? {inode_table.node_in_use(inode_num)}")
-
-        # Test assign_blk_n and list_all_blk_n
-        inode_table.assign_blk_n(inode_num, 42)
-        print(f"Blocks assigned to inode {inode_num}: {inode_table.list_all_blk_n(inode_num)}")
-
-        # Test release_blk_n
-        inode_table.release_blk_n(inode_num, 42)
-        print(f"Blocks after release: {inode_table.list_all_blk_n(inode_num)}")
-
-        # Test release_in_n
-        inode_table.release_in_n(inode_num)
-        print(f"Is node {inode_num} in use after release? {inode_table.node_in_use(inode_num)}")
-    else:
-        print("No available inodes to test with.")
-
-    # Explicitly store the table before exiting
-    inode_table.store_tbl()
-
-    # Clean up
-    import os
-
-    os.unlink(temp_filename)
+        """Ensure the inode table is stored if modified."""
+        if self.storage.modified:
+            self.store()
