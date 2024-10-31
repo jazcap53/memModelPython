@@ -59,10 +59,22 @@ class InodeStorage:
         return [[Inode() for _ in range(lNum_tConst.INODES_PER_BLOCK.value)]
                 for _ in range(u32Const.NUM_INODE_TBL_BLOCKS.value)]
 
-    def get_inode(self, inode_num: inNum_t) -> Inode:
-        """Get reference to an inode by its number."""
+    def get_inode(self, inode_num: inNum_t) -> Optional[Inode]:
+        """
+        Get reference to an inode by its number.
+
+        Returns None if inode_num is invalid or out of range.
+        """
+        if inode_num == SENTINEL_INUM:
+            return None
+
         blk_num = inode_num // lNum_tConst.INODES_PER_BLOCK.value
         blk_ix = inode_num % lNum_tConst.INODES_PER_BLOCK.value
+
+        if (blk_num >= len(self.tbl) or
+                blk_ix >= lNum_tConst.INODES_PER_BLOCK.value):
+            return None
+
         return self.tbl[blk_num][blk_ix]
 
     def load_table(self) -> None:
@@ -240,7 +252,11 @@ class InodeTable:
 
     def assign_block(self, inode_num: inNum_t, block_num: bNum_t) -> bool:
         """Assign a block to an inode."""
+        if inode_num == SENTINEL_INUM:
+            return False
         inode = self.storage.get_inode(inode_num)
+        if not inode:
+            return False
         success = self.block_manager.assign_block(inode, block_num)
         if success:
             self.storage.modified = True
@@ -248,7 +264,11 @@ class InodeTable:
 
     def release_block(self, inode_num: inNum_t, block_num: bNum_t) -> bool:
         """Release a block from an inode."""
+        if inode_num == SENTINEL_INUM:
+            return False
         inode = self.storage.get_inode(inode_num)
+        if not inode:
+            return False
         success = self.block_manager.release_block(inode, block_num)
         if success:
             self.storage.modified = True
@@ -256,7 +276,10 @@ class InodeTable:
 
     def is_locked(self, inode_num: inNum_t) -> bool:
         """Check if an inode is locked."""
-        return self.storage.get_inode(inode_num).is_locked()
+        if inode_num == SENTINEL_INUM:
+            return False
+        inode = self.storage.get_inode(inode_num)
+        return bool(inode and inode.is_locked())
 
     def is_in_use(self, inode_num: inNum_t) -> bool:
         """Check if an inode is in use."""
