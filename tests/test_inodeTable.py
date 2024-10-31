@@ -1,8 +1,10 @@
 import pytest
 import os
 import tempfile
-from inodeTable import InodeTable, Inode
+from inodeTable import (Inode, InodeStorage, InodeAllocator,
+                       InodeBlockManager, InodeTable)
 from ajTypes import u32Const, lNum_tConst, SENTINEL_INUM, SENTINEL_BNUM
+
 
 
 @pytest.fixture
@@ -333,12 +335,16 @@ class TestRefactoredInodeTable:
     @pytest.fixture
     def inode_table(self, temp_inode_file):
         """Create a fresh InodeTable instance."""
-        return InodeTable(temp_inode_file)
+        table = InodeTable(temp_inode_file)
+        table.load()  # Ensure table is loaded
+        return table
 
     def test_table_initialization(self, inode_table):
         """Test InodeTable initialization."""
         assert not inode_table.storage.modified
         assert inode_table.allocator.avail.all()  # All inodes should be available
+        assert isinstance(inode_table.block_manager, InodeBlockManager)
+        assert isinstance(inode_table.storage, InodeStorage)
 
     def test_create_and_delete_inode(self, inode_table):
         """Test creating and deleting an inode."""
@@ -348,9 +354,21 @@ class TestRefactoredInodeTable:
         assert inode_table.storage.modified
         assert inode_table.is_in_use(inode_num)
 
+        # Check the created inode's properties
+        inode = inode_table.storage.get_inode(inode_num)
+        assert inode.cr_time > 0
+        assert all(bn == SENTINEL_BNUM for bn in inode.b_nums)
+        assert inode.lkd == SENTINEL_INUM
+
         # Delete inode
         inode_table.delete_inode(inode_num)
         assert not inode_table.is_in_use(inode_num)
+
+        # Check the deleted inode's properties
+        inode = inode_table.storage.get_inode(inode_num)
+        assert inode.cr_time == 0
+        assert all(bn == SENTINEL_BNUM for bn in inode.b_nums)
+        assert inode.lkd == SENTINEL_INUM
 
     def test_block_operations(self, inode_table):
         """Test block assignment and release."""
@@ -360,10 +378,17 @@ class TestRefactoredInodeTable:
         assert inode_table.assign_block(inode_num, 1)
         inode = inode_table.storage.get_inode(inode_num)
         assert 1 in inode.b_nums
+        assert inode_table.storage.modified
 
         # Release block
         assert inode_table.release_block(inode_num, 1)
         assert 1 not in inode.b_nums
+
+        # Try to assign too many blocks
+        for i in range(u32Const.CT_INODE_BNUMS.value):
+            inode_table.assign_block(inode_num, i)
+        # This one should fail as inode is full
+        assert not inode_table.assign_block(inode_num, u32Const.CT_INODE_BNUMS.value)
 
     def test_inode_locking(self, inode_table):
         """Test inode locking status."""
@@ -374,6 +399,10 @@ class TestRefactoredInodeTable:
         inode = inode_table.storage.get_inode(inode_num)
         inode.lkd = 1
         assert inode_table.is_locked(inode_num)
+
+        # Unlock inode
+        inode.lkd = SENTINEL_INUM
+        assert not inode_table.is_locked(inode_num)
 
     def test_store_and_load(self, inode_table):
         """Test storing and loading the inode table."""
@@ -387,9 +416,71 @@ class TestRefactoredInodeTable:
 
         # Create new table instance and verify state
         new_table = InodeTable(inode_table.storage.filename)
+        new_table.load()  # Explicitly load the table
         assert new_table.is_in_use(inode_num1)
         inode = new_table.storage.get_inode(inode_num1)
         assert 1 in inode.b_nums
+
+    def test_sentinel_operations(self, inode_table):
+        """Test operations with sentinel values."""
+        # Test operations with SENTINEL_INUM
+        assert not inode_table.is_in_use(SENTINEL_INUM)
+        assert not inode_table.is_locked(SENTINEL_INUM)
+
+        # Deleting SENTINEL_INUM should not raise errors
+        inode_table.delete_inode(SENTINEL_INUM)
+
+    def test_multiple_inodes(self, inode_table):
+        """Test operations with multiple inodes."""
+        # Create multiple inodes
+        inode_nums = []
+        for i in range(3):
+            inode_num = inode_table.create_inode()
+            assert inode_num != SENTINEL_INUM
+            inode_nums.append(inode_num)
+
+        # Verify each inode is independent
+        for i, inode_num in enumerate(inode_nums):
+            assert inode_table.is_in_use(inode_num)
+            assert inode_table.assign_block(inode_num, i)
+            inode = inode_table.storage.get_inode(inode_num)
+            assert i in inode.b_nums
+
+        # Delete middle inode
+        inode_table.delete_inode(inode_nums[1])
+        assert not inode_table.is_in_use(inode_nums[1])
+        assert inode_table.is_in_use(inode_nums[0])
+        assert inode_table.is_in_use(inode_nums[2])
+
+    def test_inode_reuse(self, inode_table):
+        """Test that deleted inodes can be reused."""
+        # Create and delete an inode
+        inode_num1 = inode_table.create_inode()
+        inode_table.assign_block(inode_num1, 1)
+        inode_table.delete_inode(inode_num1)
+
+        # Create new inode - should get the same number
+        inode_num2 = inode_table.create_inode()
+        assert inode_num2 == inode_num1
+
+        # Verify it's a clean inode
+        inode = inode_table.storage.get_inode(inode_num2)
+        assert all(bn == SENTINEL_BNUM for bn in inode.b_nums)
+        assert inode.cr_time > 0
+        assert inode.lkd == SENTINEL_INUM
+
+    def test_error_conditions(self, inode_table):
+        """Test error conditions and edge cases."""
+        # Try to assign/release blocks on non-existent inode
+        assert not inode_table.assign_block(SENTINEL_INUM, 1)
+        assert not inode_table.release_block(SENTINEL_INUM, 1)
+
+        # Create inode and try invalid block operations
+        inode_num = inode_table.create_inode()
+        assert not inode_table.release_block(inode_num, SENTINEL_BNUM)
+
+        # Try to release non-existent block
+        assert not inode_table.release_block(inode_num, 999)
 
 
 class TestInodeStorage:

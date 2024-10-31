@@ -8,6 +8,8 @@ This module provides classes for managing inodes in the file system:
 - InodeBlockManager: Handles block number assignments
 - InodeTable: Main class coordinating the above components
 """
+__all__ = ['Inode', 'InodeStorage', 'InodeAllocator', 'InodeBlockManager', 'InodeTable']
+
 
 from dataclasses import dataclass
 import struct
@@ -213,7 +215,7 @@ class InodeTable:
     def __init__(self, filename: str):
         self.storage = InodeStorage(filename)
         self.allocator = InodeAllocator(u32Const.NUM_INODE_TBL_BLOCKS.value,
-                                        lNum_tConst.INODES_PER_BLOCK.value)
+                                      lNum_tConst.INODES_PER_BLOCK.value)
         self.block_manager = InodeBlockManager()
         self.tabs = Tabber()
         self.storage.load_table()
@@ -264,7 +266,34 @@ class InodeTable:
 
     def store(self) -> None:
         """Store the inode table to disk."""
+        # First write the availability bitmap
+        with open(self.storage.filename, 'r+b') as f:
+            bitmap_size = (u32Const.NUM_INODE_TBL_BLOCKS.value *
+                           lNum_tConst.INODES_PER_BLOCK.value + 7) // 8
+            f.write(self.allocator.avail.to_bytes())
+
+        # Then store the inode data
         self.storage.store_table()
+
+    def load(self) -> None:
+        """Load the inode table from disk."""
+        # First read the availability bitmap
+        try:
+            with open(self.storage.filename, 'rb') as f:
+                bitmap_size = (u32Const.NUM_INODE_TBL_BLOCKS.value *
+                               lNum_tConst.INODES_PER_BLOCK.value + 7) // 8
+                bitmap_data = f.read(bitmap_size)
+                self.allocator.avail = ArrBit.from_bytes(
+                    bitmap_data,
+                    u32Const.NUM_INODE_TBL_BLOCKS.value,
+                    lNum_tConst.INODES_PER_BLOCK.value
+                )
+        except FileNotFoundError:
+            print(f"No inode table file found. Starting fresh.")
+            return
+
+        # Then load the inode data
+        self.storage.load_table()
 
     def ensure_stored(self) -> None:
         """Ensure the inode table is stored if modified."""
