@@ -18,7 +18,7 @@ class BoostCRC:
     @staticmethod
     def get_code(data: bytes, byte_ct: int) -> int:
         """
-        Calculate the CRC code for the given data using the Boost CRC algorithm.
+        Calculate the CRC code for the given data using the CRC-32 algorithm.
 
         Args:
             data (bytes): The data to calculate the CRC for.
@@ -27,7 +27,8 @@ class BoostCRC:
         Returns:
             int: The calculated CRC code.
         """
-        return zlib.crc32(data[:byte_ct], BoostCRC.init_rem) ^ BoostCRC.init_rem
+        # Start with 0xFFFFFFFF and XOR the result with 0xFFFFFFFF
+        return zlib.crc32(data[:byte_ct], 0xFFFFFFFF) ^ 0xFFFFFFFF
 
     @staticmethod
     def wrt_bytes_little_e(num: int, p: bytearray, byt: int) -> bytearray:

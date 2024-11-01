@@ -36,11 +36,22 @@ def test_simDisk_initialization(temp_files):
 
 
 def test_create_block():
-    test_block = bytearray(u32Const.BLOCK_BYTES.value)
-    SimDisk.create_block(test_block, u32Const.BLOCK_BYTES.value)
+    # Test with zero-filled block
+    zero_block = bytearray(u32Const.BLOCK_BYTES.value)
+    SimDisk.create_block(zero_block, u32Const.BLOCK_BYTES.value)
+    assert zero_block[-4:] != b'\x00\x00\x00\x00', "CRC of zero-filled block should not be zero"
 
-    # Verify CRC is written
-    assert test_block[-4:] != b'\x00\x00\x00\x00'
+    # Test with non-zero data
+    data_block = bytearray(u32Const.BLOCK_BYTES.value)
+    for i in range(len(data_block) - u32Const.CRC_BYTES.value):
+        data_block[i] = i % 256
+    SimDisk.create_block(data_block, u32Const.BLOCK_BYTES.value)
+
+    # Ensure CRCs are different
+    assert zero_block[-4:] != data_block[-4:], "CRCs of different data should be different"
+
+    # Verify CRC is written and non-zero for data block
+    assert data_block[-4:] != b'\x00\x00\x00\x00', "CRC of non-zero block should not be zero"
 
 
 def test_error_scanning(temp_files):
