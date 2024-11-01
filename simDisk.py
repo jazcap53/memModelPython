@@ -99,8 +99,19 @@ class SimDisk:
 
     @staticmethod
     def create_block(s: bytearray, rWSz: bNum_t):
+        # Fill with a pattern (for testing purposes)
+        for i in range(rWSz - u32Const.CRC_BYTES.value):
+            s[i] = i % 256
+
         crc = BoostCRC.get_code(s[:-u32Const.CRC_BYTES.value], rWSz - u32Const.CRC_BYTES.value)
+
+        # Debug: Print CRC value
+        print(f"Calculated CRC: {crc:08x}")
+
         BoostCRC.wrt_bytes_little_e(crc, s[-u32Const.CRC_BYTES.value:], u32Const.CRC_BYTES.value)
+
+        # Debug: Dump block contents
+        print(f"Block contents (first 64 bytes and last 8 bytes): {s[:64].hex()} ... {s[-8:].hex()}")
 
     @staticmethod
     def create_j_file(ofs, rWSz: bNum_t):
