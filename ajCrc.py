@@ -42,9 +42,15 @@ class BoostCRC:
         Returns:
             bytearray: The modified bytearray.
         """
+        # Debug: Print input values
+        print(f"Writing CRC: num={num:08x}, byt={byt}, target={p.hex()}")
+
         for i in range(byt):
-            p[i] = num & 0xFF
-            num >>= 8
+            p[i] = (num >> (i * 8)) & 0xFF  # Change this line
+
+        # Debug: Print result
+        print(f"After writing: {p.hex()}")
+
         return p
 
 
