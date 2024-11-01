@@ -483,6 +483,37 @@ class TestRefactoredInodeTable:
         # Try to release non-existent block
         assert not inode_table.release_block(inode_num, 999)
 
+    def test_full_table(self, inode_table):
+        """Test behavior when inode table is full."""
+        # Fill the table
+        inodes = []
+        while True:
+            inode_num = inode_table.create_inode()
+            if inode_num == SENTINEL_INUM:
+                break
+            inodes.append(inode_num)
+
+        # Verify table is full
+        assert inode_table.create_inode() == SENTINEL_INUM
+        assert len(inodes) == u32Const.NUM_INODE_TBL_BLOCKS.value * lNum_tConst.INODES_PER_BLOCK.value
+
+    def test_concurrent_block_assignment(self, inode_table):
+        """Test assigning blocks to multiple inodes simultaneously."""
+        # Create multiple inodes
+        inode_nums = [inode_table.create_inode() for _ in range(3)]
+
+        # Assign blocks to each inode
+        for i, inode_num in enumerate(inode_nums):
+            for j in range(2):
+                block_num = i * 2 + j
+                assert inode_table.assign_block(inode_num, block_num)
+
+        # Verify assignments
+        for i, inode_num in enumerate(inode_nums):
+            inode = inode_table.storage.get_inode(inode_num)
+            blocks = [b for b in inode.b_nums if b != SENTINEL_BNUM]
+            assert blocks == [i * 2, i * 2 + 1]
+
 
 class TestInodeStorage:
     """Tests for the InodeStorage class."""
