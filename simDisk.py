@@ -178,7 +178,6 @@ class SimDisk:
             print(f"WARNING: Found data error in block {bN} on startup.")
         print()
 
-@staticmethod
 def cleanup_output_files(disk_file, jrnl_file, free_file, node_file):
     for file in [disk_file, jrnl_file, free_file, node_file]:
         if os.path.exists(file):
