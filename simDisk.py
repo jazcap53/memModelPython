@@ -184,7 +184,7 @@ def cleanup_output_files(disk_file, jrnl_file, free_file, node_file):
         if os.path.exists(file):
             os.remove(file)
     print("Output files cleaned up.")
-    
+
 
 if __name__ == "__main__":
     class MockStatus:

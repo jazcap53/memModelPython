@@ -124,8 +124,10 @@ def test_crc_different_data():
 def test_large_block_crc():
     """Test CRC calculation on a block size we actually use."""
     block_size = 4092  # size we use in SimDisk (BLOCK_BYTES - CRC_BYTES)
-    data = bytes(range(block_size))  # non-zero data
-    result = BoostCRC.get_code(data, block_size)
+    data = bytearray(block_size)
+    for i in range(block_size):
+        data[i] = i % 256
+    result = BoostCRC.get_code(bytes(data), block_size)  # convert to bytes for immutability
     assert result != 0, "CRC of non-zero block should not be zero"
 
 
