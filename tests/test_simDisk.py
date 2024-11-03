@@ -4,6 +4,7 @@ import os
 import pytest
 from simDisk import SimDisk
 from ajTypes import u32Const, bNum_tConst
+from ajCrc import BoostCRC
 
 
 class MockStatus:
@@ -37,9 +38,20 @@ def test_simDisk_initialization(temp_files):
 
 def test_create_block():
     # Test with zero-filled block
-    zero_block = bytearray(u32Const.BLOCK_BYTES.value)
+    zero_block = bytearray(u32Const.BLOCK_BYTES.value)  # 4096 bytes
     SimDisk.create_block(zero_block, u32Const.BLOCK_BYTES.value)
-    assert zero_block[-4:] != b'\x00\x00\x00\x00', "CRC of zero-filled block should not be zero"
+
+    # Get the CRC that was written to the last 4 bytes
+    written_crc = int.from_bytes(zero_block[-4:], 'little')
+
+    # Calculate CRC manually over the first 4092 bytes to verify
+    manual_crc = BoostCRC.get_code(
+        zero_block[:-u32Const.CRC_BYTES.value],
+        u32Const.BLOCK_BYTES.value - u32Const.CRC_BYTES.value
+    )
+
+    # The CRCs should match
+    assert written_crc == manual_crc, "Written CRC should match manually calculated CRC"
 
     # Test with non-zero data
     data_block = bytearray(u32Const.BLOCK_BYTES.value)
@@ -47,11 +59,11 @@ def test_create_block():
         data_block[i] = i % 256
     SimDisk.create_block(data_block, u32Const.BLOCK_BYTES.value)
 
-    # Ensure CRCs are different
-    assert zero_block[-4:] != data_block[-4:], "CRCs of different data should be different"
+    # Get the CRC written to the non-zero block
+    data_crc = int.from_bytes(data_block[-4:], 'little')
 
-    # Verify CRC is written and non-zero for data block
-    assert data_block[-4:] != b'\x00\x00\x00\x00', "CRC of non-zero block should not be zero"
+    # CRCs of zero block and non-zero block should differ
+    assert written_crc != data_crc, "CRC of zero block should differ from CRC of non-zero block"
 
 
 def test_error_scanning(temp_files):
