@@ -4,7 +4,7 @@ import os
 import pytest
 from simDisk import SimDisk
 from ajTypes import u32Const, bNum_tConst
-from ajCrc import BoostCRC
+from ajCrc import AJZlibCRC
 
 
 class MockStatus:
@@ -45,7 +45,7 @@ def test_create_block():
     written_crc = int.from_bytes(zero_block[-4:], 'little')
 
     # Calculate CRC manually over the first 4092 bytes to verify
-    manual_crc = BoostCRC.get_code(
+    manual_crc = AJZlibCRC.get_code(
         zero_block[:-u32Const.CRC_BYTES.value],
         u32Const.BLOCK_BYTES.value - u32Const.CRC_BYTES.value
     )
@@ -75,13 +75,13 @@ def test_error_scanning(temp_files):
         # First block: invalid CRC
         block = bytearray(u32Const.BLOCK_BYTES.value)
         # Calculate correct CRC
-        crc = BoostCRC.get_code(
+        crc = AJZlibCRC.get_code(
             block[:-u32Const.CRC_BYTES.value],
             u32Const.BLOCK_BYTES.value - u32Const.CRC_BYTES.value
         )
         # Write wrong CRC (just flip all bits)
         wrong_crc = (~crc) & 0xFFFFFFFF
-        BoostCRC.wrt_bytes_little_e(
+        AJZlibCRC.wrt_bytes_little_e(
             wrong_crc,
             block[-u32Const.CRC_BYTES.value:],
             u32Const.CRC_BYTES.value

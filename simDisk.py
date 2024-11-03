@@ -2,7 +2,7 @@ import os
 import struct
 from typing import List, Optional
 from ajTypes import u32Const, bNum_t, bNum_tConst, lNum_tConst, SENTINEL_INUM
-from ajCrc import BoostCRC
+from ajCrc import AJZlibCRC
 from myMemory import Page
 from status import Status
 from journal import Journal
@@ -100,12 +100,12 @@ class SimDisk:
     def create_block(s: bytearray, rWSz: bNum_t):
         """Create a block with CRC."""
         # Calculate CRC of block data (excluding CRC field)
-        crc = BoostCRC.get_code(
+        crc = AJZlibCRC.get_code(
             s[:-u32Const.CRC_BYTES.value],
             rWSz - u32Const.CRC_BYTES.value
         )
         # Write CRC in little-endian format
-        BoostCRC.wrt_bytes_little_e(
+        AJZlibCRC.wrt_bytes_little_e(
             crc,
             s[-u32Const.CRC_BYTES.value:],
             u32Const.CRC_BYTES.value
@@ -161,7 +161,7 @@ class SimDisk:
         for i, s in enumerate(self.theDisk):
             s.sect = ifs.read(rWSz)
             # Calculate CRC of block data (excluding stored CRC)
-            calculated_crc = BoostCRC.get_code(
+            calculated_crc = AJZlibCRC.get_code(
                 s.sect[:-u32Const.CRC_BYTES.value],
                 rWSz - u32Const.CRC_BYTES.value
             )

@@ -1,5 +1,5 @@
 from ajTypes import u32Const
-from ajCrc import BoostCRC
+from ajCrc import AJZlibCRC
 from myMemory import Page
 from ajUtils import format_hex_like_hexdump
 import struct
@@ -10,7 +10,7 @@ def calculate_zero_page_crc():
     zero_page = Page()
 
     # Calculate CRC
-    crc = BoostCRC.get_code(zero_page.dat, u32Const.BYTES_PER_PAGE.value)
+    crc = AJZlibCRC.get_code(zero_page.dat, u32Const.BYTES_PER_PAGE.value)
 
     print(f"CRC of zero page (hex): {crc:08x}")
     print(f"CRC of zero page (decimal): {crc}")

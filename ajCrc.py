@@ -6,7 +6,7 @@ This module provides CRC (Cyclic Redundancy Check) calculation utilities using z
 
 import zlib
 
-class BoostCRC:
+class AJZlibCRC:
     """
     A class that provides methods for CRC calculation and byte manipulation.
     Uses zlib.crc32() which handles pre- and post-conditioning internally.

@@ -3,7 +3,7 @@ import struct
 from typing import List, Dict, Tuple, Optional
 from collections import deque
 from ajTypes import bNum_t, lNum_t, u32Const, bNum_tConst, SENTINEL_INUM
-from ajCrc import BoostCRC
+from ajCrc import AJZlibCRC
 from ajUtils import get_cur_time, Tabber, format_hex_like_hexdump
 from wipeList import WipeList
 from change import Change, ChangeLog, Select
@@ -307,8 +307,8 @@ class Journal:
             pass
 
         # Calculate and write CRC
-        crc = BoostCRC.get_code(pg.dat[:-4], u32Const.BYTES_PER_PAGE.value - 4)
-        pg.dat[-4:] = BoostCRC.wrt_bytes_little_e(crc, pg.dat[-4:], 4)
+        crc = AJZlibCRC.get_code(pg.dat[:-4], u32Const.BYTES_PER_PAGE.value - 4)
+        pg.dat[-4:] = AJZlibCRC.wrt_bytes_little_e(crc, pg.dat[-4:], 4)
 
     def is_in_jrnl(self, b_num: bNum_t) -> bool:
         return self.blks_in_jrnl[b_num]
@@ -445,7 +445,7 @@ class Journal:
 
                 # Calculate and write CRC
                 if bytes_written + 8 <= self.ct_bytes_to_write:  # 4 for CRC, 4 for padding
-                    crc = BoostCRC.get_code(page_data, u32Const.BYTES_PER_PAGE.value)
+                    crc = AJZlibCRC.get_code(page_data, u32Const.BYTES_PER_PAGE.value)
                     crc_bytes = to_bytes_64bit(crc)[:4]
                     write_32bit(self.js, crc)
                     
@@ -540,7 +540,7 @@ class Journal:
 
         self.wrt_cg_to_pg(cg, pg)
 
-        crc = BoostCRC.get_code(pg.dat, u32Const.BYTES_PER_PAGE.value)
+        crc = AJZlibCRC.get_code(pg.dat, u32Const.BYTES_PER_PAGE.value)
         print(
             f"Calculated CRC of entire Page for block {cur_blk_num}: {format_hex_like_hexdump(to_bytes_64bit(crc)[:4])}")
         stored_crc = int.from_bytes(pg.dat[-4:], 'little')
@@ -757,11 +757,11 @@ class Journal:
             cursor = p_pg_pr[p_ctr]
 
             # Calculate CRC for the page
-            crc = BoostCRC.get_code(cursor[1].dat[:-u32Const.CRC_BYTES.value],
-                                    u32Const.BYTES_PER_PAGE.value - u32Const.CRC_BYTES.value)
+            crc = AJZlibCRC.get_code(cursor[1].dat[:-u32Const.CRC_BYTES.value],
+                                     u32Const.BYTES_PER_PAGE.value - u32Const.CRC_BYTES.value)
 
             # Write CRC to the last 4 bytes of the page
-            BoostCRC.wrt_bytes_little_e(crc, cursor[1].dat[-u32Const.CRC_BYTES.value:], u32Const.CRC_BYTES.value)
+            AJZlibCRC.wrt_bytes_little_e(crc, cursor[1].dat[-u32Const.CRC_BYTES.value:], u32Const.CRC_BYTES.value)
 
             self.p_d.get_ds().seek(cursor[0] * u32Const.BLOCK_BYTES.value)
 
@@ -790,8 +790,8 @@ class Journal:
         stored_crc = int.from_bytes(p_uc_dat[-u32Const.CRC_BYTES.value:], 'little')
 
         # Calculate the CRC of the page data (excluding the stored CRC)
-        calculated_crc = BoostCRC.get_code(p_uc_dat[:-u32Const.CRC_BYTES.value],
-                                           u32Const.BYTES_PER_PAGE.value - u32Const.CRC_BYTES.value)
+        calculated_crc = AJZlibCRC.get_code(p_uc_dat[:-u32Const.CRC_BYTES.value],
+                                            u32Const.BYTES_PER_PAGE.value - u32Const.CRC_BYTES.value)
 
         if stored_crc != calculated_crc:
             print(f"WARNING [crc_check_pg]: CRC mismatch for block {block_num}.")
@@ -801,10 +801,10 @@ class Journal:
             return False
 
         # Write the calculated CRC back to the page
-        BoostCRC.wrt_bytes_little_e(calculated_crc, p_uc_dat[-u32Const.CRC_BYTES.value:], u32Const.CRC_BYTES.value)
+        AJZlibCRC.wrt_bytes_little_e(calculated_crc, p_uc_dat[-u32Const.CRC_BYTES.value:], u32Const.CRC_BYTES.value)
 
         # Verify the written CRC
-        final_crc = BoostCRC.get_code(p_uc_dat, u32Const.BYTES_PER_PAGE.value)
+        final_crc = AJZlibCRC.get_code(p_uc_dat, u32Const.BYTES_PER_PAGE.value)
 
         if final_crc != 0:
             print(f"ERROR [crc_check_pg]: Final CRC check failed for block {block_num}")
