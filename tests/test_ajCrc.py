@@ -3,21 +3,31 @@ import pytest
 from ajCrc import BoostCRC
 import zlib
 
+# tests/test_ajCrc.py
+import pytest
+from ajCrc import BoostCRC
+import zlib
+
 def test_get_code_empty_input():
     assert BoostCRC.get_code(b"", 0) == 0
 
 def test_get_code_small_input():
-    data = b"Hello, World!"
-    assert BoostCRC.get_code(data, len(data)) == zlib.crc32(data, BoostCRC.init_rem) ^ BoostCRC.init_rem
+    full_data = b"Hello, World!"
+    byte_ct = len(full_data)
+    input_data = full_data[:byte_ct]  # match what BoostCRC.get_code() does
+    assert BoostCRC.get_code(full_data, byte_ct) == zlib.crc32(input_data)
 
 def test_get_code_large_input():
-    data = b"a" * 1024 * 1024  # 1 MiB
-    assert BoostCRC.get_code(data, len(data)) == zlib.crc32(data, BoostCRC.init_rem) ^ BoostCRC.init_rem
+    full_data = b"a" * 1024 * 1024  # 1 MiB
+    byte_ct = len(full_data)
+    input_data = full_data[:byte_ct]  # match what BoostCRC.get_code() does
+    assert BoostCRC.get_code(full_data, byte_ct) == zlib.crc32(input_data)
 
 def test_get_code_different_lengths():
-    data = b"Test data"
-    for length in range(len(data) + 1):
-        assert BoostCRC.get_code(data, length) == zlib.crc32(data[:length], BoostCRC.init_rem) ^ BoostCRC.init_rem
+    full_data = b"Test data"
+    for byte_ct in range(len(full_data) + 1):
+        input_data = full_data[:byte_ct]  # match what BoostCRC.get_code() does
+        assert BoostCRC.get_code(full_data, byte_ct) == zlib.crc32(input_data)
 
 def test_wrt_bytes_little_e_zero():
     buf = bytearray(4)

@@ -34,7 +34,6 @@ class SimDisk:
         success_disk = self.read_or_create(self.dFileName, u32Const.BLOCK_BYTES.value * bNum_tConst.NUM_DISK_BLOCKS.value, u32Const.BLOCK_BYTES.value, "disk")
         success_jrnl = self.read_or_create(self.jFileName, u32Const.BLOCK_BYTES.value * u32Const.PAGES_PER_JRNL.value, u32Const.BLOCK_BYTES.value, "jrnl")
         success_free = self.read_or_create(self.fFileName, u32Const.BLOCK_BYTES.value * u32Const.NUM_FREE_LIST_BLOCKS.value * 2 + 4, 0, "free")
-        # success_node = self.read_or_create(self.nFileName, (u32Const.NUM_INODE_TBL_BLOCKS.value * u32Const.INODES_PER_BLOCK.value // 8) + (u32Const.BLOCK_BYTES.value * u32Const.NUM_INODE_TBL_BLOCKS.value), 0, "node")
         success_node = self.read_or_create(self.nFileName, (
                     u32Const.NUM_INODE_TBL_BLOCKS.value * lNum_tConst.INODES_PER_BLOCK.value // 8) + (
                                                        u32Const.BLOCK_BYTES.value * u32Const.NUM_INODE_TBL_BLOCKS.value),
@@ -99,8 +98,18 @@ class SimDisk:
 
     @staticmethod
     def create_block(s: bytearray, rWSz: bNum_t):
-        crc = BoostCRC.get_code(s[:-u32Const.CRC_BYTES.value], rWSz - u32Const.CRC_BYTES.value)
-        BoostCRC.wrt_bytes_little_e(crc, s[-u32Const.CRC_BYTES.value:], u32Const.CRC_BYTES.value)
+        """Create a block with CRC."""
+        # Calculate CRC of block data (excluding CRC field)
+        crc = BoostCRC.get_code(
+            s[:-u32Const.CRC_BYTES.value],
+            rWSz - u32Const.CRC_BYTES.value
+        )
+        # Write CRC in little-endian format
+        BoostCRC.wrt_bytes_little_e(
+            crc,
+            s[-u32Const.CRC_BYTES.value:],
+            u32Const.CRC_BYTES.value
+        )
 
     @staticmethod
     def create_j_file(ofs, rWSz: bNum_t):
@@ -128,26 +137,6 @@ class SimDisk:
         ofs.write(bTo)
         ofs.write(struct.pack('<I', init_posn))
 
-    # @staticmethod
-    # def create_n_file(ofs):
-    #     avl_arr_sz_bytes = u32Const.NUM_INODE_TBL_BLOCKS.value * u32Const.INODES_PER_BLOCK.value // 8
-    #     avl_arr = bytearray(b'\xff' * avl_arr_sz_bytes)
-    #     ofs.write(avl_arr)
-    #
-    #     b_nums_filler = SENTINEL_INUM.to_bytes(4, 'little') * u32Const.CT_INODE_BNUMS.value
-    #     indirect_filler = SENTINEL_INUM.to_bytes(4, 'little') * u32Const.CT_INODE_INDIRECTS.value
-    #     lkd_filler = SENTINEL_INUM.to_bytes(4, 'little')
-    #     cr_time_filler = (0).to_bytes(8, 'little')
-    #
-    #     for i in range(u32Const.NUM_INODE_TBL_BLOCKS.value):
-    #         for j in range(u32Const.INODES_PER_BLOCK.value):
-    #             ix = i * u32Const.INODES_PER_BLOCK.value + j
-    #             ofs.write(b_nums_filler)
-    #             ofs.write(lkd_filler)
-    #             ofs.write(cr_time_filler)
-    #             ofs.write(indirect_filler)
-    #             ofs.write(ix.to_bytes(4, 'little'))
-
     @staticmethod
     def create_n_file(ofs):
         avl_arr_sz_bytes = u32Const.NUM_INODE_TBL_BLOCKS.value * lNum_tConst.INODES_PER_BLOCK.value // 8
@@ -171,8 +160,17 @@ class SimDisk:
     def err_scan(self, ifs, rWSz: bNum_t):
         for i, s in enumerate(self.theDisk):
             s.sect = ifs.read(rWSz)
-            code = BoostCRC.get_code(s.sect, rWSz)
-            if code:
+            # Calculate CRC of block data (excluding stored CRC)
+            calculated_crc = BoostCRC.get_code(
+                s.sect[:-u32Const.CRC_BYTES.value],
+                rWSz - u32Const.CRC_BYTES.value
+            )
+            # Get stored CRC
+            stored_crc = int.from_bytes(
+                s.sect[-u32Const.CRC_BYTES.value:],
+                'little'
+            )
+            if calculated_crc != stored_crc:
                 self.errBlocks.append(i)
 
     def process_errors(self):
@@ -186,33 +184,26 @@ def cleanup_output_files(disk_file, jrnl_file, free_file, node_file):
         if os.path.exists(file):
             os.remove(file)
     print("Output files cleaned up.")
+    
 
 if __name__ == "__main__":
-    # Basic test setup
     class MockStatus:
         def wrt(self, msg):
             print(f"Status: {msg}")
 
     status = MockStatus()
 
-    # Create files in the project root
     disk_file = "sim_disk.bin"
     jrnl_file = "sim_jrnl.bin"
     free_file = "sim_free.bin"
     node_file = "sim_node.bin"
 
-    # Create SimDisk instance
     sim_disk = SimDisk(status, disk_file, jrnl_file, free_file, node_file)
 
-    # Test basic functionality
     print(f"Disk file name: {sim_disk.get_d_file_name()}")
 
-    # Test create_block
     test_block = bytearray(u32Const.BLOCK_BYTES.value)
     sim_disk.do_create_block(test_block, u32Const.BLOCK_BYTES.value)
     print(f"Created block CRC: {test_block[-4:]}")
-
-    # Cleanup function (commented out by default)
-    # SimDisk.cleanup_output_files(disk_file, jrnl_file, free_file, node_file)
 
     print("SimDisk tests completed.")

@@ -72,12 +72,29 @@ def test_error_scanning(temp_files):
 
     # Create a disk file with a known error
     with open(disk_file, 'wb') as f:
+        # First block: invalid CRC
         block = bytearray(u32Const.BLOCK_BYTES.value)
-        block[-4:] = b'\xFF\xFF\xFF\xFF'  # Invalid CRC
+        # Calculate correct CRC
+        crc = BoostCRC.get_code(
+            block[:-u32Const.CRC_BYTES.value],
+            u32Const.BLOCK_BYTES.value - u32Const.CRC_BYTES.value
+        )
+        # Write wrong CRC (just flip all bits)
+        wrong_crc = (~crc) & 0xFFFFFFFF
+        BoostCRC.wrt_bytes_little_e(
+            wrong_crc,
+            block[-u32Const.CRC_BYTES.value:],
+            u32Const.CRC_BYTES.value
+        )
         f.write(block)
-        f.write(b'\x00' * (u32Const.BLOCK_BYTES.value * (bNum_tConst.NUM_DISK_BLOCKS.value - 1)))
+
+        # Rest of blocks: valid CRC
+        rest_block = bytearray(u32Const.BLOCK_BYTES.value)
+        SimDisk.create_block(rest_block, u32Const.BLOCK_BYTES.value)
+        for _ in range(bNum_tConst.NUM_DISK_BLOCKS.value - 1):
+            f.write(rest_block)
 
     sim_disk = SimDisk(status, disk_file, jrnl_file, free_file, node_file)
 
     assert len(sim_disk.errBlocks) == 1
-    assert sim_disk.errBlocks[0] == 0  # Error in the first block
+    assert sim_disk.errBlocks[0] == 0  # Error only in first block

@@ -1,60 +1,42 @@
 """
 ajCrc.py
 
-This module provides CRC (Cyclic Redundancy Check) calculation utilities using the Boost CRC algorithm.
+This module provides CRC (Cyclic Redundancy Check) calculation utilities using zlib's CRC32.
 """
 
 import zlib
 
-
 class BoostCRC:
     """
-    A class that provides methods for CRC calculation and byte manipulation using the Boost CRC algorithm.
+    A class that provides methods for CRC calculation and byte manipulation.
+    Uses zlib.crc32() which handles pre- and post-conditioning internally.
     """
-
-    polynom = 0x04c11db7
-    init_rem = 0xffffffff
+    polynom = 0x04c11db7  # kept for reference
+    init_rem = 0xffffffff  # kept for reference
 
     @staticmethod
     def get_code(data: bytes, byte_ct: int) -> int:
-        print(f"Calculating CRC for {byte_ct} bytes")  # Debug line
-        result = zlib.crc32(data[:byte_ct], 0xFFFFFFFF) ^ 0xFFFFFFFF
-        print(f"Calculated CRC: {result:08x}")  # Debug line
-        return result
+        """
+        Calculate CRC32 of input data.
+
+        Args:
+            data: Input bytes
+            byte_ct: Number of bytes to process
+
+        Returns:
+            32-bit CRC value
+        """
+        # Use first byte_ct bytes of data
+        data = data[:byte_ct]
+
+        # Let zlib handle everything
+        return zlib.crc32(data)
 
     @staticmethod
     def wrt_bytes_little_e(num: int, p: bytearray, byt: int) -> bytearray:
         """
         Write the given number to the bytearray in little-endian format.
-
-        Args:
-            num (int): The number to write.
-            p (bytearray): The bytearray to write to.
-            byt (int): The number of bytes to write.
-
-        Returns:
-            bytearray: The modified bytearray.
         """
-        # Debug: Print input values
-        print(f"Writing CRC: num={num:08x}, byt={byt}, target={p.hex()}")
-
         for i in range(byt):
-            p[i] = (num >> (i * 8)) & 0xFF  # Change this line
-
-        # Debug: Print result
-        print(f"After writing: {p.hex()}")
-
+            p[i] = (num >> (i * 8)) & 0xFF
         return p
-
-
-if __name__ == '__main__':
-    # Test the CRC functionality
-    test_data = b"Hello, World!"
-    crc = BoostCRC.get_code(test_data, len(test_data))
-    print(f"CRC of '{test_data.decode()}': {crc:08x}")
-
-    # Test little-endian writing
-    test_num = 0x12345678
-    test_array = bytearray(4)
-    BoostCRC.wrt_bytes_little_e(test_num, test_array, 4)
-    print(f"Little-endian representation of 0x{test_num:08x}: {test_array.hex()}")
