@@ -38,5 +38,5 @@ class AJZlibCRC:
         Write the given number to the bytearray in little-endian format.
         """
         for i in range(byt):
-            p[i] = (num >> (i * 8)) & 0xFF
+            p[i] = (num >> (8 * i)) & 0xFF
         return p
