@@ -97,20 +97,14 @@ class SimDisk:
             ofs.write(s.sect)
 
     @staticmethod
+    @staticmethod
     def create_block(s: bytearray, rWSz: bNum_t):
         """Create a block with CRC."""
-        print(f"Block data before CRC: {s[:-u32Const.CRC_BYTES.value][:10]}...")
-        print(f"Block size: {rWSz}")
-
         # Calculate CRC of block data (excluding CRC field)
         crc = AJZlibCRC.get_code(
             s[:-u32Const.CRC_BYTES.value],
             rWSz - u32Const.CRC_BYTES.value
         )
-        print(f"Calculated CRC: {crc:08x}")
-
-        # Debug: print CRC area before writing
-        print(f"CRC area before writing: {s[-u32Const.CRC_BYTES.value:].hex()}")
 
         # Create a separate bytearray for CRC
         crc_bytes = bytearray(u32Const.CRC_BYTES.value)
@@ -118,10 +112,6 @@ class SimDisk:
 
         # Copy the CRC bytes into the block
         s[-u32Const.CRC_BYTES.value:] = crc_bytes
-
-        # Debug: print CRC area after writing
-        print(f"CRC area after writing: {s[-u32Const.CRC_BYTES.value:].hex()}")
-        print(f"Written CRC: {int.from_bytes(s[-u32Const.CRC_BYTES.value:], 'little'):08x}")
 
     @staticmethod
     def create_j_file(ofs, rWSz: bNum_t):
