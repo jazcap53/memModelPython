@@ -58,8 +58,10 @@ class FreeList:
         if self.fromPosn < bNum_tConst.NUM_DISK_BLOCKS.value:
             self.bitsFrm.reset(self.fromPosn)
             found = True
+            self.fromPosn +=  1  # NEW
 
-        return self.fromPosn if found else SENTINEL_BNUM
+        # return self.fromPosn if found else SENTINEL_BNUM
+        return self.fromPosn - 1 if found else SENTINEL_BNUM
 
     def refresh(self):
         self.bitsFrm |= self.bitsTo
