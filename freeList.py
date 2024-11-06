@@ -5,7 +5,8 @@ from arrBit import ArrBit
 
 
 class FreeList:
-    def __init__(self, ffn: str):
+    def __init__(self, ffn: str, quiet: bool = False):
+        self.quiet = quiet
         self.ffn = ffn  # Store the filename
         self.bitsFrm = ArrBit(u32Const.NUM_FREE_LIST_BLOCKS.value, u32Const.BITS_PER_PAGE.value)
         self.bitsTo = ArrBit(u32Const.NUM_FREE_LIST_BLOCKS.value, u32Const.BITS_PER_PAGE.value)
@@ -47,7 +48,8 @@ class FreeList:
         self.frs.write(self.bitsFrm.to_bytes())
         self.frs.write(self.bitsTo.to_bytes())
         self.frs.write(struct.pack('<I', self.fromPosn))
-        print(f"\nFree list stored.")  # Removed self.tabs usage
+        if not self.quiet:
+            print(f"\nFree list stored.")
 
     def get_blk(self) -> bNum_t:
         if self.fromPosn == bNum_tConst.NUM_DISK_BLOCKS.value:

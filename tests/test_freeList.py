@@ -31,23 +31,19 @@ def temp_free_list_file():
         os.remove(temp_filename)
 
 
-@pytest.fixture(autouse=True)
-def capture_stdout():
-    """Fixture to capture and suppress stdout."""
-    with contextlib.redirect_stdout(io.StringIO()):
-        yield
-
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def free_list(temp_free_list_file):
-    return FreeList(temp_free_list_file)
+    return FreeList(temp_free_list_file, quiet=True)
 
 
 class TestFreeList:
-    def test_initialization(self, free_list):
+    def test_initialization(self, free_list, capsys):
         """Test FreeList initialization."""
         assert free_list.fromPosn == 0
         assert not free_list.bitsFrm.none()  # All bits should be set initially
         assert free_list.bitsTo.none()  # bitsTo should be empty initially
+        out, err = capsys.readouterr()
+        assert out == '' and err == ''
 
     def test_get_blk(self, free_list):
         """Test getting blocks from the free list."""
