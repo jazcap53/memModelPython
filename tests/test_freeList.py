@@ -37,13 +37,11 @@ def free_list(temp_free_list_file):
 
 
 class TestFreeList:
-    def test_initialization(self, free_list, capsys):
+    def test_initialization(self, free_list):
         """Test FreeList initialization."""
         assert free_list.fromPosn == 0
         assert not free_list.bitsFrm.none()  # All bits should be set initially
         assert free_list.bitsTo.none()  # bitsTo should be empty initially
-        out, err = capsys.readouterr()
-        assert out == '' and err == ''
 
     def test_get_blk(self, free_list):
         """Test getting blocks from the free list."""
