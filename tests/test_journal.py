@@ -7,6 +7,7 @@ from change import Change, ChangeLog
 from ajTypes import u32Const, bNum_tConst
 from myMemory import Page
 from ajCrc import AJZlibCRC
+import struct
 
 
 @pytest.fixture
@@ -123,34 +124,44 @@ def test_crc_check_pg(journal):
     page = Page()
     crc = AJZlibCRC.get_code(page.dat[:-u32Const.CRC_BYTES.value],
                              u32Const.BYTES_PER_PAGE.value - u32Const.CRC_BYTES.value)
-    AJZlibCRC.wrt_bytes_little_e(crc, page.dat[-u32Const.CRC_BYTES.value:], u32Const.CRC_BYTES.value)
+
+    # Directly modify the last 4 bytes of page.dat
+    for i in range(u32Const.CRC_BYTES.value):
+        page.dat[-u32Const.CRC_BYTES.value + i] = (crc >> (8 * i)) & 0xFF
 
     page_tuple = (1, page)
     result = journal.crc_check_pg(page_tuple)
     assert result is True
 
 
-# def test_purge_journal(journal, mock_change_log):
-#     # Setup a change log
-#     change1 = Change(1)
-#     change1.add_line(0, b'A' * u32Const.BYTES_PER_LINE.value)
-#     mock_change_log.the_log = {1: [change1]}
-#     mock_change_log.cg_line_ct = 1
-#
-#     # Write and then purge
-#     journal.wrt_cg_log_to_jrnl(mock_change_log)
-#     journal.purge_jrnl(True, False)
-#
-#     # Verify journal is empty after purge
-#     assert not any(journal.blks_in_jrnl)
-#     mock_change_log.the_log.clear.assert_called_once()
+def test_purge_journal(journal, mock_change_log, mocker):  # add mocker parameter
+    # Setup a change log
+    change1 = Change(1)
+    change1.add_line(0, b'A' * u32Const.BYTES_PER_LINE.value)
+
+    # Create a mock dictionary using mocker instead of Mock
+    mock_dict = mocker.MagicMock()
+    mock_dict.items.return_value = {1: [change1]}.items()
+    mock_dict.__getitem__.side_effect = lambda x: [change1] if x == 1 else KeyError()
+
+    # Set the mock_change_log to use our mock dictionary
+    mock_change_log.the_log = mock_dict
+    mock_change_log.cg_line_ct = 1
+
+    # Write and then purge
+    journal.wrt_cg_log_to_jrnl(mock_change_log)
+    journal.purge_jrnl(True, False)
+
+    # Verify journal is empty after purge
+    assert not any(journal.blks_in_jrnl)
+    mock_dict.clear.assert_called_once()
 
 
-# def test_do_wipe_routine(journal, mocker):
-#     mock_file_man = mocker.Mock()
-#     journal.wipers.set_dirty(1)
-#
-#     journal.do_wipe_routine(1, mock_file_man)
-#
-#     mock_file_man.do_store_inodes.assert_called_once()
-#     mock_file_man.do_store_free_list.assert_called_once()
+def test_do_wipe_routine(journal, mocker):
+    mock_file_man = mocker.Mock()
+    journal.wipers.set_dirty(1)
+
+    journal.do_wipe_routine(1, mock_file_man)
+
+    mock_file_man.do_store_inodes.assert_called_once()
+    mock_file_man.do_store_free_list.assert_called_once()

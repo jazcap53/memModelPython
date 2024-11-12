@@ -319,7 +319,8 @@ class Journal:
             p_f_m.do_store_free_list()
             print(f"\n{self.tabs(1)}Saving change log and purging journal before adding new block")
             self.wrt_cg_log_to_jrnl(self.p_cL)
-            self.purge_jrnl()
+            # self.purge_jrnl()
+            self.purge_jrnl(True, False)
             self.wipers.clear_array()
 
     def wrt_field(self, data: bytes, dat_len: int, do_ct: bool) -> int:
@@ -784,31 +785,18 @@ class Journal:
 
     def crc_check_pg(self, p_pr: Tuple[bNum_t, Page]):
         block_num, page = p_pr
-        p_uc_dat = bytearray(page.dat)
 
-        # Read the stored CRC
-        stored_crc = int.from_bytes(p_uc_dat[-u32Const.CRC_BYTES.value:], 'little')
+        # Read the stored CRC directly from page.dat
+        stored_crc = int.from_bytes(page.dat[-u32Const.CRC_BYTES.value:], 'little')
 
-        # Calculate the CRC of the page data (excluding the stored CRC)
-        calculated_crc = AJZlibCRC.get_code(p_uc_dat[:-u32Const.CRC_BYTES.value],
+        # Calculate the CRC directly from page.dat
+        calculated_crc = AJZlibCRC.get_code(page.dat[:-u32Const.CRC_BYTES.value],
                                             u32Const.BYTES_PER_PAGE.value - u32Const.CRC_BYTES.value)
 
         if stored_crc != calculated_crc:
             print(f"WARNING [crc_check_pg]: CRC mismatch for block {block_num}.")
-            print(f"  Stored:     {format_hex_like_hexdump(stored_crc.to_bytes(4, 'little'))}")
-            print(f"  Calculated: {format_hex_like_hexdump(calculated_crc.to_bytes(4, 'little'))}")
-            
-            return False
-
-        # Write the calculated CRC back to the page
-        AJZlibCRC.wrt_bytes_little_e(calculated_crc, p_uc_dat[-u32Const.CRC_BYTES.value:], u32Const.CRC_BYTES.value)
-
-        # Verify the written CRC
-        final_crc = AJZlibCRC.get_code(p_uc_dat, u32Const.BYTES_PER_PAGE.value)
-
-        if final_crc != 0:
-            print(f"ERROR [crc_check_pg]: Final CRC check failed for block {block_num}")
-            
+            print(f"  Stored:     {stored_crc:04x} {stored_crc >> 16:04x}")
+            print(f"  Calculated: {calculated_crc:04x} {calculated_crc >> 16:04x}")
             return False
 
         return True
