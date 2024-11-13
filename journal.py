@@ -28,11 +28,62 @@ class Journal:
     NUM_PGS_JRNL_BUF = 16
     CPP_SELECT_T_SZ = 8
 
+    # Properties for backward compatibility
+    @property
+    def meta_get(self):
+        return self._metadata.meta_get
+
+    @meta_get.setter
+    def meta_get(self, value):
+        self._metadata.meta_get = value
+
+    @property
+    def meta_put(self):
+        return self._metadata.meta_put
+
+    @meta_put.setter
+    def meta_put(self, value):
+        self._metadata.meta_put = value
+
+    @property
+    def meta_sz(self):
+        return self._metadata.meta_sz
+
+    @meta_sz.setter
+    def meta_sz(self, value):
+        self._metadata.meta_sz = value
+
     # Nested classes
     class _Metadata:
+        """Handles reading and writing of journal metadata."""
         def __init__(self, journal_instance):
             self._journal = journal_instance
-            # ... rest of _Metadata implementation
+            self.meta_get = 0
+            self.meta_put = 0
+            self.meta_sz = 0
+
+        def read(self):
+            """Read metadata from journal file."""
+            self._journal.js.seek(0)
+            self.meta_get, self.meta_put, self.meta_sz = struct.unpack('<qqq',
+                self._journal.js.read(24))
+            return self.meta_get, self.meta_put, self.meta_sz
+
+        def write(self, new_g_pos: int, new_p_pos: int, u_ttl_bytes_written: int):
+            """Write metadata to journal file."""
+            self._journal.js.seek(0)
+            metadata = struct.pack('<qqq', new_g_pos, new_p_pos, u_ttl_bytes_written)
+            self._journal.js.write(metadata)
+
+        def init(self):
+            """Deprecated: Use self._metadata.init() instead."""
+            import warnings
+            warnings.warn(
+                "init is deprecated. Use self._metadata.init() instead.",
+                DeprecationWarning,
+                stacklevel=2
+            )
+            self._metadata.init()
 
 
     class _FileIO:
@@ -91,9 +142,9 @@ class Journal:
 
         # 3. Initialize other instance variables
         self.p_buf = [None] * self.NUM_PGS_JRNL_BUF
-        self.meta_get = 0
-        self.meta_put = 0
-        self.meta_sz = 0
+        # self.meta_get = 0
+        # self.meta_put = 0
+        # self.meta_sz = 0
         self.ct_bytes_to_write = 0
         self.ttl_bytes_written = 0
         self.orig_p_pos = 0
@@ -540,17 +591,27 @@ class Journal:
             print(f"Current file position: {self.js.tell()}")
 
     def rd_metadata(self):
-        self.js.seek(0)
-        self.meta_get, self.meta_put, self.meta_sz = struct.unpack('<qqq', self.js.read(24))
+        """Deprecated: Use self._metadata.read() instead."""
+        import warnings
+        warnings.warn(
+            "rd_metadata is deprecated. Use self._metadata.read() instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        self.meta_get, self.meta_put, self.meta_sz = self._metadata.read()
 
     def wrt_metadata(self, new_g_pos: int, new_p_pos: int, u_ttl_bytes_written: int):
-        self.js.seek(0)
-        metadata = struct.pack('<qqq', new_g_pos, new_p_pos, u_ttl_bytes_written)
-        self.js.write(metadata)
+        """Deprecated: Use self._metadata.write() instead."""
+        import warnings
+        warnings.warn(
+            "wrt_metadata is deprecated. Use self._metadata.write() instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        self._metadata.write(new_g_pos, new_p_pos, u_ttl_bytes_written)
 
     def rd_and_wrt_back(self, j_cg_log: ChangeLog, p_buf: List, ctr: int, prv_blk_num: bNum_t, cur_blk_num: bNum_t,
                         pg: Page):
-        
         for blk_num, changes in j_cg_log.the_log.items():
             for idx, cg in enumerate(changes):
                 cur_blk_num = cg.block_num
