@@ -95,7 +95,7 @@ def test_write_change_log(journal, mock_change_log):
     journal.wrt_cg_log_to_jrnl(mock_change_log)
 
     journal.js.seek(0)
-    journal.rd_metadata()
+    journal.meta_get, journal.meta_put, journal.meta_sz = journal._metadata.read()
     assert journal.meta_get >= Journal.META_LEN
     assert journal.meta_put > journal.meta_get
     assert journal.meta_sz > 0

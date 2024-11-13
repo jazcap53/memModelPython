@@ -240,7 +240,7 @@ class Journal:
         r_cg_log.print()
 
         with self.track_position("wrt_cg_log_to_jrnl"):
-            self.rd_metadata()
+            self.meta_get, self.meta_put, self.meta_sz = self._metadata.read()
 
             self.js.seek(self.meta_put)
             self.orig_p_pos = self.js.tell()
@@ -276,7 +276,8 @@ class Journal:
             self.meta_put = new_p_pos
             self.meta_sz = self.ct_bytes_to_write + self.META_LEN
 
-            self.wrt_metadata(self.meta_get, self.meta_put, self.meta_sz)
+            self._metadata.write(self.meta_get, self.meta_put, self.meta_sz)
+
 
             self.js.flush()
             os.fsync(self.js.fileno())
@@ -668,7 +669,7 @@ class Journal:
                 - Updates internal tracking of file positions.
             """
         with self.track_position("rd_last_jrnl"):
-            self.rd_metadata()
+            self.meta_get, self.meta_put, self.meta_sz = self._metadata.read()
 
             if self.meta_get == -1:
                 print("Warning: No metadata available. Journal might be empty.")
