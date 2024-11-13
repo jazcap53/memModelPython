@@ -28,7 +28,38 @@ class Journal:
     NUM_PGS_JRNL_BUF = 16
     CPP_SELECT_T_SZ = 8
 
+    # Nested classes
+    class _Metadata:
+        def __init__(self, journal_instance):
+            self._journal = journal_instance
+            # ... rest of _Metadata implementation
+
+
+    class _FileIO:
+        def __init__(self, journal_instance):
+            self._journal = journal_instance
+            # ... rest of _FileIO implementation
+
+    class _ChangeLogHandler:
+        def __init__(self, journal_instance):
+            self._journal = journal_instance
+            # Stub methods will be added here
+
+
+    class _CRCHandler:
+        def __init__(self, journal_instance):
+            self._journal = journal_instance
+            # Stub methods will be added here
+
+
+    class _PurgeHandler:
+        def __init__(self, journal_instance):
+            self._journal = journal_instance
+            # Stub methods will be added here
+
+
     def __init__(self, f_name: str, sim_disk, change_log, status, crash_chk, debug=False):
+        # 1. Basic instance variables
         self.debug = debug
         self.f_name = f_name
         self.p_d = sim_disk
@@ -36,9 +67,9 @@ class Journal:
         self.p_stt = status
         self.p_cck = crash_chk
         self.sz = Journal.CPP_SELECT_T_SZ
-        self.end_tag_posn = None  # New data member
+        self.end_tag_posn = None
 
-        # Initialize the file if it doesn't exist or is too small
+        # 2. File initialization
         file_existed = os.path.exists(self.f_name)
         self.js = open(self.f_name, "rb+" if file_existed else "wb+")
         self.js.seek(0, 2)  # Go to end of file
@@ -58,7 +89,7 @@ class Journal:
 
         self.js.seek(self.META_LEN)
 
-        # Rest of the initialization code
+        # 3. Initialize other instance variables
         self.p_buf = [None] * self.NUM_PGS_JRNL_BUF
         self.meta_get = 0
         self.meta_put = 0
@@ -74,11 +105,20 @@ class Journal:
         self.tabs = Tabber()
         self.wipers = WipeList()
 
+        # 4. Initialize nested classes
+        self._metadata = self._Metadata(self)
+        self._file_io = self._FileIO(self)
+        self._change_log_handler = self._ChangeLogHandler(self)
+        self._crc_handler = self._CRCHandler(self)
+        self._purge_handler = self._PurgeHandler(self)
+
+        # 5. Check last status and call init()
         last_status = self.p_cck.get_last_status()
         if last_status and last_status[0] == 'C':
             self.purge_jrnl(True, True)
             self.p_stt.wrt("Last change log recovered")
         self.init()
+
 
     def __del__(self):
         try:
