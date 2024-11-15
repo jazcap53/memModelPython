@@ -85,11 +85,137 @@ class Journal:
             )
             self._metadata.init()
 
-
     class _FileIO:
         def __init__(self, journal_instance):
             self._journal = journal_instance
-            # ... rest of _FileIO implementation
+
+        def wrt_field(self, data: bytes, dat_len: int, do_ct: bool) -> int:
+            bytes_written = 0
+            p_pos = self._journal.js.tell()
+            buf_sz = u32Const.JRNL_SIZE.value
+            end_pt = p_pos + dat_len
+
+            if end_pt > buf_sz:
+                over = end_pt - buf_sz
+                under = dat_len - over
+
+                if dat_len == 8:  # 64-bit value
+                    value = from_bytes_64bit(data)
+                    write_64bit(self._journal.js, value & ((1 << (under * 8)) - 1))
+                    bytes_written += under
+                    if do_ct:
+                        self._journal.ttl_bytes_written += under
+
+                        # Move to the correct position after wraparound
+                    self._journal.js.seek(self._journal.META_LEN)
+
+                    # Write the remaining part
+                    write_64bit(self._journal.js, value >> (under * 8))
+                    bytes_written += over
+                elif dat_len == 4:  # 32-bit value
+                    value = int.from_bytes(data, byteorder='little')
+                    write_32bit(self._journal.js, value & ((1 << (under * 8)) - 1))
+                    bytes_written += under
+                    if do_ct:
+                        self._journal.ttl_bytes_written += under
+                    self._journal.js.seek(self._journal.META_LEN)
+                    write_32bit(self._journal.js, value >> (under * 8))
+                    bytes_written += over
+                else:
+                    self._journal.js.write(data[:under])
+                    bytes_written += under
+                    if do_ct:
+                        self._journal.ttl_bytes_written += under
+                    self._journal.js.seek(self._journal.META_LEN)
+                    self._journal.js.write(data[under:])
+                    bytes_written += over
+
+                if do_ct:
+                    self._journal.ttl_bytes_written += over
+            else:
+                if dat_len == 8:
+                    write_64bit(self._journal.js, from_bytes_64bit(data))
+                elif dat_len == 4:
+                    write_32bit(self._journal.js, int.from_bytes(data, byteorder='little'))
+                else:
+                    self._journal.js.write(data)
+                bytes_written = dat_len
+                if do_ct:
+                    self._journal.ttl_bytes_written += dat_len
+
+            self._journal.final_p_pos = self._journal.js.tell()
+            return bytes_written
+
+        def rd_field(self, dat_len: int) -> bytes:
+            g_pos = self._journal.js.tell()
+            buf_sz = u32Const.JRNL_SIZE.value
+            end_pt = g_pos + dat_len
+
+            if end_pt > buf_sz:
+                over = end_pt - buf_sz
+                under = dat_len - over
+
+                if dat_len == 8:  # 64-bit value
+                    low_bits = read_64bit(self._journal.js)
+                    self._journal.ttl_bytes_written += under
+                    self._journal.js.seek(self._journal.META_LEN)
+                    high_bits = read_64bit(self._journal.js)
+                    value = (high_bits << (under * 8)) | low_bits
+                    data = to_bytes_64bit(value)
+                elif dat_len == 4:  # 32-bit value
+                    low_bits = read_32bit(self._journal.js)
+                    self._journal.ttl_bytes_written += under
+                    self._journal.js.seek(self._journal.META_LEN)
+                    high_bits = read_32bit(self._journal.js)
+                    value = (high_bits << (under * 8)) | low_bits
+                    data = value.to_bytes(4, byteorder='little')
+                else:
+                    data = self._journal.js.read(under)
+                    self._journal.ttl_bytes_written += under
+                    self._journal.js.seek(self._journal.META_LEN)
+                    data += self._journal.js.read(over)
+
+                self._journal.ttl_bytes_written += over
+            else:
+                if dat_len == 8:
+                    data = to_bytes_64bit(read_64bit(self._journal.js))
+                elif dat_len == 4:
+                    data = read_32bit(self._journal.js).to_bytes(4, byteorder='little')
+                else:
+                    data = self._journal.js.read(dat_len)
+                self._journal.ttl_bytes_written += dat_len
+
+            return data
+
+        def advance_strm(self, length: int):
+            new_pos = self._journal.js.tell() + length
+            if new_pos >= u32Const.JRNL_SIZE.value:
+                new_pos -= u32Const.JRNL_SIZE.value
+                new_pos += self._journal.META_LEN
+            self._journal.js.seek(new_pos)
+
+        def reset_file(self):
+            """Closes and re-opens the journal file, resetting its position."""
+            self._journal.js.close()
+            self._journal.js = open(self._journal.f_name, "rb+")
+            self._journal.js.seek(0)
+
+        # Additional small methods for complex operations
+        def write_start_tag(self):
+            write_64bit(self._journal.js, self._journal.START_TAG)
+
+        def write_end_tag(self):
+            write_64bit(self._journal.js, self._journal.END_TAG)
+
+        def write_ct_bytes(self, ct_bytes):
+            write_64bit(self._journal.js, ct_bytes)
+
+        def read_start_tag(self):
+            return read_64bit(self._journal.js)
+
+        def read_end_tag(self):
+            return read_64bit(self._journal.js)
+
 
     class _ChangeLogHandler:
         def __init__(self, journal_instance):
@@ -415,72 +541,31 @@ class Journal:
             self.purge_jrnl(True, False)
             self.wipers.clear_array()
 
-    def wrt_field(self, data: bytes, dat_len: int, do_ct: bool) -> int:
-        bytes_written = 0
-        p_pos = self.js.tell()
-        buf_sz = u32Const.JRNL_SIZE.value
-        end_pt = p_pos + dat_len
+    def wrt_field(self, *args, **kwargs):
+        import warnings
+        warnings.warn(
+            "wrt_field is deprecated. Use self._file_io.wrt_field() instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        return self._file_io.wrt_field(*args, **kwargs)
 
-        if end_pt > buf_sz:
-            over = end_pt - buf_sz
-            under = dat_len - over
-
-            if dat_len == 8:  # 64-bit value
-                value = from_bytes_64bit(data)
-                write_64bit(self.js, value & ((1 << (under * 8)) - 1))
-                bytes_written += under
-                if do_ct:
-                    self.ttl_bytes_written += under
-                self.js.seek(self.META_LEN)
-                write_64bit(self.js, value >> (under * 8))
-                bytes_written += over
-            elif dat_len == 4:  # 32-bit value
-                value = int.from_bytes(data, byteorder='little')
-                write_32bit(self.js, value & ((1 << (under * 8)) - 1))
-                bytes_written += under
-                if do_ct:
-                    self.ttl_bytes_written += under
-                self.js.seek(self.META_LEN)
-                write_32bit(self.js, value >> (under * 8))
-                bytes_written += over
-            else:
-                self.js.write(data[:under])
-                bytes_written += under
-                if do_ct:
-                    self.ttl_bytes_written += under
-                self.js.seek(self.META_LEN)
-                self.js.write(data[under:])
-                bytes_written += over
-
-            if do_ct:
-                self.ttl_bytes_written += over
-        else:
-            if dat_len == 8:
-                write_64bit(self.js, from_bytes_64bit(data))
-            elif dat_len == 4:
-                write_32bit(self.js, int.from_bytes(data, byteorder='little'))
-            else:
-                self.js.write(data)
-            bytes_written = dat_len
-            if do_ct:
-                self.ttl_bytes_written += dat_len
-
-        self.final_p_pos = self.js.tell()
-        return bytes_written
-
-    def advance_strm(self, length: int):
-        new_pos = self.js.tell() + length
-        if new_pos >= u32Const.JRNL_SIZE.value:
-            new_pos -= u32Const.JRNL_SIZE.value
-            new_pos += self.META_LEN
-        self.js.seek(new_pos)
+    def advance_strm(self, *args, **kwargs):
+        import warnings
+        warnings.warn(
+            "advance_strm is deprecated. Use self._file_io.advance_strm() instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        return self._file_io.advance_strm(*args, **kwargs)
 
     def wrt_cgs_to_jrnl(self, r_cg_log: ChangeLog):
         bytes_written = 0
         for blk_num, changes in r_cg_log.the_log.items():
             for cg in changes:
                 if bytes_written + 24 > self.ct_bytes_to_write:  # 8 for block num, 8 for timestamp, 8 for selector
-                    print(f"WARNING: Reached self.ct_bytes_to_write limit ({self.ct_bytes_to_write}) while processing block {blk_num}")
+                    print(
+                        f"WARNING: Reached self.ct_bytes_to_write limit ({self.ct_bytes_to_write}) while processing block {blk_num}")
                     return
 
                 current_pos = self.js.tell()
@@ -488,20 +573,12 @@ class Journal:
                     current_pos = self.META_LEN + (current_pos % (u32Const.JRNL_SIZE.value - self.META_LEN))
                     self.js.seek(current_pos)
 
-                # Write block number
-                b_num_bytes = to_bytes_64bit(cg.block_num)
-                write_64bit(self.js, cg.block_num)
-                
-                bytes_written += 8
-                self.ttl_bytes_written += 8
+                self._file_io.wrt_field(to_bytes_64bit(cg.block_num), 8, True)
+                bytes_written = self.ttl_bytes_written  # Update local counter from total
                 self.blks_in_jrnl[cg.block_num] = True
 
-                # Write timestamp
-                ts_bytes = to_bytes_64bit(cg.time_stamp)
-                write_64bit(self.js, cg.time_stamp)
-                
-                bytes_written += 8
-                self.ttl_bytes_written += 8
+                self._file_io.wrt_field(to_bytes_64bit(cg.time_stamp), 8, True)
+                bytes_written = self.ttl_bytes_written  # Update again after writing timestamp
 
                 page_data = bytearray(u32Const.BYTES_PER_PAGE.value)
 
@@ -513,50 +590,48 @@ class Journal:
 
                     selector_bytes = selector.to_bytes()
                     self.js.write(selector_bytes)
-                    
-                    bytes_written += 8
-                    self.ttl_bytes_written += 8
 
-                    for i in range(63):  # Exclude the MSb
-                        if selector.is_set(i):
-                            if bytes_written + u32Const.BYTES_PER_LINE.value > self.ct_bytes_to_write:
-                                print(
-                                    f"WARNING: Reached self.ct_bytes_to_write limit ({self.ct_bytes_to_write}) while processing data for block {blk_num}")
-                                return
+                    self._file_io.wrt_field(selector.to_bytes(), 8, True)
+                    bytes_written = self.ttl_bytes_written  # Update local counter from total
 
-                            if cg.new_data:
-                                data = cg.new_data.popleft()
-                                data_bytes = data if isinstance(data, bytes) else bytes(data)
-                                
-                                self.wrt_field(data_bytes, u32Const.BYTES_PER_LINE.value, True)
-                                start = i * u32Const.BYTES_PER_LINE.value
-                                end = start + u32Const.BYTES_PER_LINE.value
-                                page_data[start:end] = data_bytes
-                                bytes_written += u32Const.BYTES_PER_LINE.value
-                            else:
-                                print(f"Warning: No data available for set bit {i} in selector")
+                for i in range(63):  # Process up to 63 lines (excluding MSB)
+                        if not selector.is_set(i):
+                            continue
+                        if bytes_written + u32Const.BYTES_PER_LINE.value > self.ct_bytes_to_write:
+                            print(
+                                f"WARNING: Reached self.ct_bytes_to_write limit ({self.ct_bytes_to_write}) while processing data for block {blk_num}")
+                            return
+                        if self.js.tell() + u32Const.BYTES_PER_LINE.value > u32Const.JRNL_SIZE.value:
+                            break
+
+                        if cg.new_data:
+                            data = cg.new_data.popleft()
+                            data_bytes = data if isinstance(data, bytes) else bytes(data)
+
+                            self._file_io.wrt_field(data_bytes, u32Const.BYTES_PER_LINE.value, True)
+                            start = i * u32Const.BYTES_PER_LINE.value
+                            end = start + u32Const.BYTES_PER_LINE.value
+                            page_data[start:end] = data_bytes
+                            bytes_written = self.ttl_bytes_written  # Update local counter from total
+                        else:
+                            print(f"Warning: No data available for set bit {i} in selector")
 
                 # Calculate and write CRC
                 if bytes_written + 8 <= self.ct_bytes_to_write:  # 4 for CRC, 4 for padding
                     crc = AJZlibCRC.get_code(page_data, u32Const.BYTES_PER_PAGE.value)
                     crc_bytes = to_bytes_64bit(crc)[:4]
                     write_32bit(self.js, crc)
-                    
-                    self.ttl_bytes_written += 4
-                    bytes_written += 4
 
-                    # Write zero padding
-                    write_32bit(self.js, 0)
-                    self.ttl_bytes_written += 4
-                    bytes_written += 4
+                    # Write CRC
+                    self._file_io.wrt_field(to_bytes_64bit(crc)[:4], 4, True)
+                    bytes_written = self.ttl_bytes_written  # Update local counter
 
-        self.js.flush()
+            self.js.flush()
 
-        if bytes_written < self.ct_bytes_to_write:
-            padding = self.ct_bytes_to_write - bytes_written
-            
-            self.js.write(b'\0' * padding)
-            self.ttl_bytes_written += padding
+            if bytes_written < self.ct_bytes_to_write:
+                padding = self.ct_bytes_to_write - bytes_written
+                self.js.write(b'\0' * padding)
+                self.ttl_bytes_written += padding
 
     def wrt_cgs_sz_to_jrnl(self, ct_bytes_to_write_pos: int):
         try:
@@ -693,16 +768,16 @@ class Journal:
 
     def rd_jrnl(self, r_j_cg_log: ChangeLog, start_pos: int) -> Tuple[int, int, int]:
         with self.track_position("read_start_tag"):
-            ck_start_tag = self._read_start_tag()
+            ck_start_tag = self._file_io.read_start_tag()
 
         with self.track_position("read_ct_bytes_to_write"):
-            ct_bytes_to_write = read_64bit(self.js)
+            ct_bytes_to_write = int.from_bytes(self._file_io.rd_field(8), 'little')
 
         with self.track_position("read_changes"):
             bytes_read = self._read_changes(r_j_cg_log, ct_bytes_to_write)
 
         with self.track_position("read_end_tag"):
-            ck_end_tag = self._read_end_tag()
+            ck_end_tag = self._file_io.read_end_tag()
 
         return ck_start_tag, ck_end_tag, bytes_read
 
@@ -810,46 +885,14 @@ class Journal:
 
         return min(num_data_lines, 63)  # Ensure we don't exceed 63 lines
 
-    def rd_field(self, dat_len: int) -> bytes:
-        g_pos = self.js.tell()
-        buf_sz = u32Const.JRNL_SIZE.value
-        end_pt = g_pos + dat_len
-
-        if end_pt > buf_sz:
-            over = end_pt - buf_sz
-            under = dat_len - over
-
-            if dat_len == 8:  # 64-bit value
-                low_bits = read_64bit(self.js)
-                self.ttl_bytes_written += under
-                self.js.seek(self.META_LEN)
-                high_bits = read_64bit(self.js)
-                value = (high_bits << (under * 8)) | low_bits
-                data = to_bytes_64bit(value)
-            elif dat_len == 4:  # 32-bit value
-                low_bits = read_32bit(self.js)
-                self.ttl_bytes_written += under
-                self.js.seek(self.META_LEN)
-                high_bits = read_32bit(self.js)
-                value = (high_bits << (under * 8)) | low_bits
-                data = value.to_bytes(4, byteorder='little')
-            else:
-                data = self.js.read(under)
-                self.ttl_bytes_written += under
-                self.js.seek(self.META_LEN)
-                data += self.js.read(over)
-
-            self.ttl_bytes_written += over
-        else:
-            if dat_len == 8:
-                data = to_bytes_64bit(read_64bit(self.js))
-            elif dat_len == 4:
-                data = read_32bit(self.js).to_bytes(4, byteorder='little')
-            else:
-                data = self.js.read(dat_len)
-            self.ttl_bytes_written += dat_len
-
-        return data
+    def rd_field(self, *args, **kwargs):
+        import warnings
+        warnings.warn(
+            "rd_field is deprecated. Use self._file_io.rd_field() instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        return self._file_io.rd_field(*args, **kwargs)
 
     def empty_purge_jrnl_buf(self, p_pg_pr: List[Tuple[bNum_t, Page]], p_ctr: int, is_end: bool = False) -> bool:
         temp = bytearray(u32Const.BLOCK_BYTES.value)
@@ -924,11 +967,14 @@ class Journal:
         cg.arr_next = 0
         return self.get_next_lin_num(cg)  # Recursive call to check next selector
 
-    def reset_file(self):
-        """Closes and re-opens the journal file, resetting its position."""
-        self.js.close()
-        self.js = open(self.f_name, "rb+")
-        self.js.seek(0)
+    def reset_file(self, *args, **kwargs):
+        import warnings
+        warnings.warn(
+            "reset_file is deprecated. Use self._file_io.reset_file() instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        return self._file_io.reset_file(*args, **kwargs)
 
     def verify_bytes_read(self):
         expected_bytes = self.ct_bytes_to_write + self.META_LEN

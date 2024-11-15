@@ -75,15 +75,15 @@ def test_journal_init_file_content(journal):
 def test_write_field(journal):
     # Test writing a 64-bit field
     journal.js.seek(0)
-    bytes_written = journal.wrt_field(b'\x01\x02\x03\x04\x05\x06\x07\x08', 8, True)
+    bytes_written = journal._file_io.wrt_field(b'\x01\x02\x03\x04\x05\x06\x07\x08', 8, True)
     assert bytes_written == 8
     assert journal.ttl_bytes_written == 8
 
     # Test writing with wraparound
     journal.js.seek(u32Const.JRNL_SIZE.value - 4)
-    bytes_written = journal.wrt_field(b'\x01\x02\x03\x04\x05\x06\x07\x08', 8, True)
+    bytes_written = journal._file_io.wrt_field(b'\x01\x02\x03\x04\x05\x06\x07\x08', 8, True)
     assert bytes_written == 8
-    # assert journal.js.tell() == Journal.META_LEN + 4  # Commented out for now
+    assert journal.js.tell() == Journal.META_LEN + 4
 
 
 def test_write_change_log(journal, mock_change_log):
@@ -99,6 +99,18 @@ def test_write_change_log(journal, mock_change_log):
     assert journal.meta_get >= Journal.META_LEN
     assert journal.meta_put > journal.meta_get
     assert journal.meta_sz > 0
+
+    # Additional assertions to verify correct byte counting
+    expected_bytes = (
+            16 +  # Start tag (8) + ct_bytes_to_write (8)
+            8 +  # Block number
+            8 +  # Timestamp
+            8 +  # Selector
+            16 +  # Data line
+            8  # CRC (4) + Padding (4)
+    )
+    assert journal.ttl_bytes_written == expected_bytes - 16  # Exclude start tag and ct_bytes_to_write
+    assert journal.meta_sz == expected_bytes + Journal.META_LEN
 
 
 def test_is_in_journal(journal):
@@ -134,7 +146,7 @@ def test_crc_check_pg(journal):
     assert result is True
 
 
-def test_purge_journal(journal, mock_change_log, mocker):  # add mocker parameter
+def test_purge_journal(journal, mock_change_log, mocker):
     # Setup a change log
     change1 = Change(1)
     change1.add_line(0, b'A' * u32Const.BYTES_PER_LINE.value)
@@ -155,6 +167,11 @@ def test_purge_journal(journal, mock_change_log, mocker):  # add mocker paramete
     # Verify journal is empty after purge
     assert not any(journal.blks_in_jrnl)
     mock_dict.clear.assert_called_once()
+
+    # Additional assertions
+    assert journal._metadata.meta_get == 0
+    assert journal._metadata.meta_put == 0
+    assert journal._metadata.meta_sz == 0
 
 
 def test_do_wipe_routine(journal, mocker):
