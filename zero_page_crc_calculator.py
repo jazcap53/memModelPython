@@ -22,3 +22,5 @@ def calculate_zero_page_crc():
 
 if __name__ == "__main__":
     calculate_zero_page_crc()
+
+# this is a test
