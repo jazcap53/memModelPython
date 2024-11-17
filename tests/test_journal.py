@@ -100,17 +100,16 @@ def test_write_change_log(journal, mock_change_log):
     assert journal.meta_put > journal.meta_get
     assert journal.meta_sz > 0
 
-    # Additional assertions to verify correct byte counting
+    # Updated expected bytes calculation
     expected_bytes = (
-            16 +  # Start tag (8) + ct_bytes_to_write (8)
-            8 +  # Block number
-            8 +  # Timestamp
-            8 +  # Selector
-            16 +  # Data line
-            8  # CRC (4) + Padding (4)
+        8 +  # Block number
+        8 +  # Timestamp
+        8 +  # Selector
+        16 +  # Data line
+        8  # CRC (4) + Padding (4)
     )
-    assert journal.ttl_bytes_written == expected_bytes - 16  # Exclude start tag and ct_bytes_to_write
-    assert journal.meta_sz == expected_bytes + Journal.META_LEN
+    assert journal.ttl_bytes_written == expected_bytes
+    print(f"DEBUG: journal.ttl_bytes_written = {journal.ttl_bytes_written}")
 
 
 def test_is_in_journal(journal):

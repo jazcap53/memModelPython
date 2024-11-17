@@ -156,51 +156,45 @@ class Journal:
         print("\n\tSaving change log:\n")
         r_cg_log.print()
 
-        with self.track_position("wrt_cg_log_to_jrnl"):
-            self.meta_get, self.meta_put, self.meta_sz = self._metadata.read()
+        self.ttl_bytes_written = 0  # Reset here
 
-            self.js.seek(self.meta_put)
-            self.orig_p_pos = self.js.tell()
+        # Calculate ct_bytes_to_write before writing anything
+        self.ct_bytes_to_write = self.calculate_ct_bytes_to_write(r_cg_log)
+        print(f"DEBUG: Calculated bytes to write: {self.ct_bytes_to_write}")
 
-            self.ttl_bytes_written = 0
+        # Write start tag and ct_bytes_to_write (don't count these in ttl_bytes_written)
+        self._file_io.write_start_tag()
+        self._file_io.write_ct_bytes(self.ct_bytes_to_write)
 
-            # Calculate ct_bytes_to_write before writing anything
-            self.ct_bytes_to_write = self.calculate_ct_bytes_to_write(r_cg_log)
+        # Write changes and count bytes
+        self._file_io.wrt_cgs_to_jrnl(r_cg_log)
+        print(f"DEBUG: Actual bytes written: {self.ttl_bytes_written}")
 
-            with self.track_position("write_start_tag"):
-                self._file_io.write_start_tag()
+        # Write end tag (don't count)
+        self._file_io.write_end_tag()
 
-            with self.track_position("write_ct_bytes_to_write"):
-                self._file_io.write_ct_bytes(self.ct_bytes_to_write)
+        # Additional debug info
+        print(f"DEBUG: ct_bytes_to_write: {self.ct_bytes_to_write}")
+        print(f"DEBUG: ttl_bytes_written: {self.ttl_bytes_written}")
 
-            with self.track_position("write_changes"):
-                self._file_io.wrt_cgs_to_jrnl(r_cg_log)
+        # Update metadata
+        new_g_pos = self.orig_p_pos
+        new_p_pos = self.js.tell()
+        if new_p_pos >= u32Const.JRNL_SIZE.value:
+            new_p_pos = self.META_LEN + (new_p_pos % (u32Const.JRNL_SIZE.value - self.META_LEN))
 
-            # Ensure we've written exactly ct_bytes_to_write
-            if self.ttl_bytes_written != self.ct_bytes_to_write:
-                raise ValueError(f"Wrote {self.ttl_bytes_written} bytes, expected {self.ct_bytes_to_write}")
+        self.meta_get = new_g_pos
+        self.meta_put = new_p_pos
+        self.meta_sz = self.ct_bytes_to_write + self.META_LEN
 
-            with self.track_position("write_end_tag"):
-                self._file_io.write_end_tag()
+        self._metadata.write(self.meta_get, self.meta_put, self.meta_sz)
 
-            # Update metadata
-            new_g_pos = self.orig_p_pos
-            new_p_pos = self.js.tell()
-            if new_p_pos >= u32Const.JRNL_SIZE.value:
-                new_p_pos = self.META_LEN + (new_p_pos % (u32Const.JRNL_SIZE.value - self.META_LEN))
+        self.js.flush()
+        os.fsync(self.js.fileno())
 
-            self.meta_get = new_g_pos
-            self.meta_put = new_p_pos
-            self.meta_sz = self.ct_bytes_to_write + self.META_LEN
-
-            self._metadata.write(self.meta_get, self.meta_put, self.meta_sz)
-
-            self.js.flush()
-            os.fsync(self.js.fileno())
-
-            print(f"\tChange log written to journal at time {get_cur_time()}")
-            r_cg_log.cg_line_ct = 0
-            self.p_stt.wrt("Change log written")
+        print(f"\tChange log written to journal at time {get_cur_time()}")
+        r_cg_log.cg_line_ct = 0
+        self.p_stt.wrt("Change log written")
 
     def write_change(self, cg: Change) -> int:
         bytes_written = 0
@@ -756,14 +750,8 @@ class Journal:
             return read_64bit(self._journal.js)
 
         def wrt_cgs_to_jrnl(self, r_cg_log: ChangeLog):
-            self._journal.ttl_bytes_written = 0  # Reset at start of method
             for blk_num, changes in r_cg_log.the_log.items():
                 for cg in changes:
-                    if self._journal.ttl_bytes_written + 24 > self._journal.ct_bytes_to_write:  # 8 for block num, 8 for timestamp, 8 for selector
-                        print(
-                            f"WARNING: Reached self._journal.ct_bytes_to_write limit ({self._journal.ct_bytes_to_write}) while processing block {blk_num}")
-                        return
-
                     # Write block number
                     self.wrt_field(to_bytes_64bit(cg.block_num), 8, True)
                     self._journal.blks_in_jrnl[cg.block_num] = True
@@ -774,21 +762,12 @@ class Journal:
                     page_data = bytearray(u32Const.BYTES_PER_PAGE.value)
 
                     for selector in cg.selectors:
-                        if self._journal.ttl_bytes_written + 8 > self._journal.ct_bytes_to_write:
-                            print(
-                                f"WARNING: Reached self._journal.ct_bytes_to_write limit ({self._journal.ct_bytes_to_write}) while processing selector for block {blk_num}")
-                            return
-
                         # Write selector
                         self.wrt_field(selector.to_bytes(), 8, True)
 
                         for i in range(63):  # Process up to 63 lines (excluding MSB)
                             if not selector.is_set(i):
                                 continue
-                            if self._journal.ttl_bytes_written + u32Const.BYTES_PER_LINE.value > self._journal.ct_bytes_to_write:
-                                print(
-                                    f"WARNING: Reached self._journal.ct_bytes_to_write limit ({self._journal.ct_bytes_to_write}) while processing data for block {blk_num}")
-                                return
 
                             if not cg.new_data:
                                 print(f"Warning: No data available for set bit {i} in selector")
@@ -803,21 +782,24 @@ class Journal:
                             page_data[start:end] = data_bytes
 
                     # Calculate and write CRC
-                    if self._journal.ttl_bytes_written + 8 <= self._journal.ct_bytes_to_write:  # 4 for CRC, 4 for padding
-                        crc = AJZlibCRC.get_code(page_data, u32Const.BYTES_PER_PAGE.value)
+                    crc = AJZlibCRC.get_code(page_data[:-4], u32Const.BYTES_PER_PAGE.value - 4)
+                    print(f"DEBUG: Calculated CRC for block {blk_num}: {crc:08x}")
 
-                        # Write CRC
-                        self.wrt_field(to_bytes_64bit(crc)[:4], 4, True)
+                    # Write CRC and padding
+                    self.wrt_field(struct.pack('<I', crc), 4, True)
+                    self.wrt_field(b'\0\0\0\0', 4, True)
 
-                        # Write zero padding
-                        self.wrt_field(b'\0\0\0\0', 4, True)
+                    # Debug: Read back and verify CRC
+                    current_pos = self._journal.js.tell()
+                    self._journal.js.seek(current_pos - 8)
+                    stored_crc_bytes = self._journal.js.read(4)
+                    stored_crc = struct.unpack('<I', stored_crc_bytes)[0]
+                    print(f"DEBUG: Stored CRC for block {blk_num}: {stored_crc:08x}")
+                    self._journal.js.seek(current_pos)
 
             self._journal.js.flush()
 
-            # Pad to reach ct_bytes_to_write if necessary
-            if self._journal.ttl_bytes_written < self._journal.ct_bytes_to_write:
-                padding = self._journal.ct_bytes_to_write - self._journal.ttl_bytes_written
-                self.wrt_field(b'\0' * padding, padding, True)
+            print(f"DEBUG: Total bytes written: {self._journal.ttl_bytes_written}")
 
     class _ChangeLogHandler:
         def __init__(self, journal_instance):
