@@ -344,25 +344,6 @@ class Journal:
         return total_bytes
 
     def wrt_cg_log_to_jrnl(self, r_cg_log: ChangeLog):
-        """
-            Write the change log to the journal file.
-
-            This method writes the contents of the given ChangeLog to the journal file.
-            It calculates the total bytes to write, writes the start tag, change data,
-            and end tag, and updates the journal metadata.
-
-            Args:
-                r_cg_log (ChangeLog): The ChangeLog object containing the changes to be written.
-
-            Raises:
-                ValueError: If the number of bytes written doesn't match the calculated total.
-
-            Side effects:
-                - Updates the journal file with new change data.
-                - Modifies internal journal metadata (meta_get, meta_put, meta_sz).
-                - Clears the change line count in the input ChangeLog.
-                - Writes a status message.
-            """
         if not r_cg_log.cg_line_ct:
             return
 
@@ -387,7 +368,7 @@ class Journal:
                 write_64bit(self.js, self.ct_bytes_to_write)
 
             with self.track_position("write_changes"):
-                self.wrt_cgs_to_jrnl(r_cg_log)
+                self._file_io.wrt_cgs_to_jrnl(r_cg_log)
 
             # Ensure we've written exactly ct_bytes_to_write
             if self.ttl_bytes_written != self.ct_bytes_to_write:
@@ -407,7 +388,6 @@ class Journal:
             self.meta_sz = self.ct_bytes_to_write + self.META_LEN
 
             self._metadata.write(self.meta_get, self.meta_put, self.meta_sz)
-
 
             self.js.flush()
             os.fsync(self.js.fileno())
@@ -564,38 +544,38 @@ class Journal:
         return self._file_io.advance_strm(*args, **kwargs)
 
     def wrt_cgs_to_jrnl(self, r_cg_log: ChangeLog):
-        self.ttl_bytes_written = 0  # Reset at start of method
+        self._journal.ttl_bytes_written = 0  # Reset at start of method
         for blk_num, changes in r_cg_log.the_log.items():
             for cg in changes:
-                if self.ttl_bytes_written + 24 > self.ct_bytes_to_write:  # 8 for block num, 8 for timestamp, 8 for selector
+                if self._journal.ttl_bytes_written + 24 > self._journal.ct_bytes_to_write:  # 8 for block num, 8 for timestamp, 8 for selector
                     print(
-                        f"WARNING: Reached self.ct_bytes_to_write limit ({self.ct_bytes_to_write}) while processing block {blk_num}")
+                        f"WARNING: Reached self.ct_bytes_to_write limit ({self._journal.ct_bytes_to_write}) while processing block {blk_num}")
                     return
 
                 # Write block number
-                self._file_io.wrt_field(to_bytes_64bit(cg.block_num), 8, True)
-                self.blks_in_jrnl[cg.block_num] = True
+                self.wrt_field(to_bytes_64bit(cg.block_num), 8, True)
+                self._journal.blks_in_jrnl[cg.block_num] = True
 
                 # Write timestamp
-                self._file_io.wrt_field(to_bytes_64bit(cg.time_stamp), 8, True)
+                self.wrt_field(to_bytes_64bit(cg.time_stamp), 8, True)
 
                 page_data = bytearray(u32Const.BYTES_PER_PAGE.value)
 
                 for selector in cg.selectors:
-                    if self.ttl_bytes_written + 8 > self.ct_bytes_to_write:
+                    if self._journal.ttl_bytes_written + 8 > self._journal.ct_bytes_to_write:
                         print(
-                            f"WARNING: Reached self.ct_bytes_to_write limit ({self.ct_bytes_to_write}) while processing selector for block {blk_num}")
+                            f"WARNING: Reached self.ct_bytes_to_write limit ({self._journal.ct_bytes_to_write}) while processing selector for block {blk_num}")
                         return
 
                     # Write selector
-                    self._file_io.wrt_field(selector.to_bytes(), 8, True)
+                    self.wrt_field(selector.to_bytes(), 8, True)
 
                     for i in range(63):  # Process up to 63 lines (excluding MSB)
                         if not selector.is_set(i):
                             continue
-                        if self.ttl_bytes_written + u32Const.BYTES_PER_LINE.value > self.ct_bytes_to_write:
+                        if self._journal.ttl_bytes_written + u32Const.BYTES_PER_LINE.value > self._journal.ct_bytes_to_write:
                             print(
-                                f"WARNING: Reached self.ct_bytes_to_write limit ({self.ct_bytes_to_write}) while processing data for block {blk_num}")
+                                f"WARNING: Reached self.ct_bytes_to_write limit ({self._journal.ct_bytes_to_write}) while processing data for block {blk_num}")
                             return
 
                         if not cg.new_data:
@@ -605,27 +585,27 @@ class Journal:
                         data = cg.new_data.popleft()
                         data_bytes = data if isinstance(data, bytes) else bytes(data)
 
-                        self._file_io.wrt_field(data_bytes, u32Const.BYTES_PER_LINE.value, True)
+                        self.wrt_field(data_bytes, u32Const.BYTES_PER_LINE.value, True)
                         start = i * u32Const.BYTES_PER_LINE.value
                         end = start + u32Const.BYTES_PER_LINE.value
                         page_data[start:end] = data_bytes
 
                 # Calculate and write CRC
-                if self.ttl_bytes_written + 8 <= self.ct_bytes_to_write:  # 4 for CRC, 4 for padding
+                if self._journal.ttl_bytes_written + 8 <= self._journal.ct_bytes_to_write:  # 4 for CRC, 4 for padding
                     crc = AJZlibCRC.get_code(page_data, u32Const.BYTES_PER_PAGE.value)
 
                     # Write CRC
-                    self._file_io.wrt_field(to_bytes_64bit(crc)[:4], 4, True)
+                    self.wrt_field(to_bytes_64bit(crc)[:4], 4, True)
 
                     # Write zero padding
-                    self._file_io.wrt_field(b'\0\0\0\0', 4, True)
+                    self.wrt_field(b'\0\0\0\0', 4, True)
 
-        self.js.flush()
+        self._journal.js.flush()
 
         # Pad to reach ct_bytes_to_write if necessary
-        if self.ttl_bytes_written < self.ct_bytes_to_write:
-            padding = self.ct_bytes_to_write - self.ttl_bytes_written
-            self._file_io.wrt_field(b'\0' * padding, padding, True)
+        if self._journal.ttl_bytes_written < self._journal.ct_bytes_to_write:
+            padding = self._journal.ct_bytes_to_write - self._journal.ttl_bytes_written
+            self.wrt_field(b'\0' * padding, padding, True)
 
     def wrt_cgs_sz_to_jrnl(self, ct_bytes_to_write_pos: int):
         try:
