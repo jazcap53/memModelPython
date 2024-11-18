@@ -41,6 +41,7 @@ def mock_crash_chk(mocker):
 @pytest.fixture
 def temp_journal_file(tmp_path):
     file_path = tmp_path / "test_journal.bin"
+    print(f"Journal file path: {file_path}")
     yield str(file_path)
     if os.path.exists(file_path):
         os.remove(file_path)
@@ -87,6 +88,7 @@ def test_write_field(journal):
 
 
 def test_write_change_log(journal, mock_change_log):
+    print(f"Journal file path: {journal.f_name}")
     change1 = Change(1)
     change1.add_line(0, b'A' * u32Const.BYTES_PER_LINE.value)
     mock_change_log.the_log = {1: [change1]}
@@ -105,7 +107,7 @@ def test_write_change_log(journal, mock_change_log):
         8 +  # Block number
         8 +  # Timestamp
         8 +  # Selector
-        16 +  # Data line
+        64 +  # Data line
         8  # CRC (4) + Padding (4)
     )
     assert journal.ttl_bytes_written == expected_bytes
@@ -168,8 +170,8 @@ def test_purge_journal(journal, mock_change_log, mocker):
     mock_dict.clear.assert_called_once()
 
     # Additional assertions
-    assert journal._metadata.meta_get == 0
-    assert journal._metadata.meta_put == 0
+    assert journal._metadata.meta_get == -1
+    assert journal._metadata.meta_put == 24
     assert journal._metadata.meta_sz == 0
 
 
