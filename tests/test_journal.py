@@ -19,11 +19,11 @@ def mock_sim_disk(mocker):
     return mock
 
 
-@pytest.fixture
-def mock_change_log(mocker):
-    mock = mocker.Mock(spec=ChangeLog)
-    mock.cg_line_ct = 0
-    return mock
+# @pytest.fixture
+# def mock_change_log(mocker):
+#     mock = mocker.Mock(spec=ChangeLog)
+#     mock.cg_line_ct = 0
+#     return mock
 
 
 @pytest.fixture
@@ -50,6 +50,14 @@ def temp_journal_file(tmp_path):
 @pytest.fixture
 def journal(mock_sim_disk, mock_change_log, mock_status, mock_crash_chk, temp_journal_file):
     return Journal(temp_journal_file, mock_sim_disk, mock_change_log, mock_status, mock_crash_chk)
+
+
+@pytest.fixture
+def mock_change_log(mocker):
+    mock = mocker.Mock(spec=ChangeLog)  # Use spec to ensure it behaves like a ChangeLog
+    mock.the_log = {}  # Empty dictionary
+    mock.cg_line_ct = 0  # Any other necessary attributes
+    return mock
 
 
 def test_journal_initialization(journal):
@@ -175,11 +183,26 @@ def test_purge_journal(journal, mock_change_log, mocker):
     assert journal._metadata.meta_sz == 0
 
 
-def test_do_wipe_routine(journal, mocker):
+def test_do_wipe_routine(journal, mocker, mock_change_log):
+    # Mock file manager
     mock_file_man = mocker.Mock()
-    journal.wipers.set_dirty(1)
 
+    # Mock wipers
+    mock_wipers = mocker.Mock()
+    mock_wipers.is_dirty.return_value = True
+    mock_wipers.is_ripe.return_value = False
+    journal.wipers = mock_wipers
+
+    # Assign mock change log to journal
+    journal.p_cL = mock_change_log
+
+    # Call the method
     journal.do_wipe_routine(1, mock_file_man)
 
+    # Assertions
     mock_file_man.do_store_inodes.assert_called_once()
     mock_file_man.do_store_free_list.assert_called_once()
+    mock_wipers.clear_array.assert_called_once()
+
+    # You might also want to assert that wrt_cg_log_to_jrnl and purge_jrnl were called
+    # This depends on how you've set up your mocking for the Journal class
