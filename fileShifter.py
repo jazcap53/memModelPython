@@ -1,5 +1,9 @@
 import os
 from typing import Callable
+import logging
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 
 class FileShifter:
@@ -53,19 +57,19 @@ class FileShifter:
             os.replace(tmp_file, f_name)
         except PermissionError:
             had_error = -2
-            print(f"ERROR: Permission denied in {__file__}")
+            logger.error("Permission denied")
         except FileNotFoundError:
             had_error = -3
-            print(f"ERROR: File not found in {__file__}")
+            logger.error("File not found")
         except OSError as e:
             # Handle cases where errno might be None
             had_error = e.errno * 2 if e.errno and e.errno == 2 else \
                 e.errno * 3 if e.errno and e.errno == 3 else \
                     e.errno * 4 if e.errno else -1
-            print(f"ERROR: OS error {e} in {__file__}")
+            logger.error(f"OS error: {e}")
         except Exception as e:
             had_error = -1
-            print(f"Unexpected error: {e} in {__file__}")
+            logger.error(f"Unexpected error: {e}")
 
         # Remove temporary file if it exists
         if os.path.exists(tmp_file):
