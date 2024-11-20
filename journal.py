@@ -168,7 +168,7 @@ class Journal:
 
         # Calculate ct_bytes_to_write before writing anything
         self.ct_bytes_to_write = self.calculate_ct_bytes_to_write(r_cg_log)
-        print(f"DEBUG: Calculated bytes to write: {self.ct_bytes_to_write}")
+        logger.debug(f"Calculated bytes to write: {self.ct_bytes_to_write}")
 
         # Write start tag and ct_bytes_to_write (don't count these in ttl_bytes_written)
         self._file_io.write_start_tag()
@@ -176,7 +176,7 @@ class Journal:
 
         # Write changes and count bytes
         self._file_io.wrt_cgs_to_jrnl(r_cg_log)
-        print(f"DEBUG: Actual bytes written: {self.ttl_bytes_written}")
+        logger.debug(f"Actual bytes written: {self.ttl_bytes_written}")
 
         # Write end tag (don't count)
         self._file_io.write_end_tag()
@@ -185,10 +185,6 @@ class Journal:
         new_g_pos = Journal.META_LEN  # Start reading from META_LEN
         new_p_pos = self.js.tell()
         self._metadata.write(new_g_pos, new_p_pos, self.ct_bytes_to_write + Journal.META_LEN)
-
-        # Additional debug info
-        print(f"DEBUG: ct_bytes_to_write: {self.ct_bytes_to_write}")
-        print(f"DEBUG: ttl_bytes_written: {self.ttl_bytes_written}")
 
         self.js.flush()
         os.fsync(self.js.fileno())
@@ -201,7 +197,6 @@ class Journal:
                      f"get: {self._metadata.meta_get}, "
                      f"put: {self._metadata.meta_put}, "
                      f"size: {self._metadata.meta_sz}")
-
 
     def write_change(self, cg: Change) -> int:
         bytes_written = 0
@@ -260,16 +255,16 @@ class Journal:
             self.p_cL.the_log.clear()
 
         # Reset metadata
-        print(
-            f"DEBUG: Before reset - meta_get: {self._metadata.meta_get}, meta_put: {self._metadata.meta_put}, meta_sz: {self._metadata.meta_sz}")
+        logger.debug(
+            f"Before reset - meta_get: {self._metadata.meta_get}, meta_put: {self._metadata.meta_put}, meta_sz: {self._metadata.meta_sz}")
 
         self._metadata.meta_get = -1
         self._metadata.meta_put = 24
         self._metadata.meta_sz = 0
         self._metadata.write(-1, 24, 0)
 
-        print(
-            f"DEBUG: After reset - meta_get: {self._metadata.meta_get}, meta_put: {self._metadata.meta_put}, meta_sz: {self._metadata.meta_sz}")
+        logger.debug(
+            f"After reset - meta_get: {self._metadata.meta_get}, meta_put: {self._metadata.meta_put}, meta_sz: {self._metadata.meta_sz}")
 
         self.p_stt.wrt("Purged journal" if keep_going else "Finishing")
 
@@ -763,6 +758,9 @@ class Journal:
                 if do_ct:
                     self._journal.ttl_bytes_written += dat_len
 
+            if do_ct:
+                logger.debug(f"Wrote {bytes_written} bytes for {data[:10]}...")
+
             self._journal.final_p_pos = self._journal.js.tell()
             return bytes_written
 
@@ -839,17 +837,17 @@ class Journal:
 
             for blk_num, changes in r_cg_log.the_log.items():
                 for cg in changes:
-                    print(f"DEBUG: Writing block number: {cg.block_num}")
+                    logger.debug(f"Writing block number: {cg.block_num}")
                     self.wrt_field(to_bytes_64bit(cg.block_num), 8, True)
                     self._journal.blks_in_jrnl[cg.block_num] = True
 
-                    print(f"DEBUG: Writing timestamp: {cg.time_stamp}")
+                    logger.debug(f"Writing timestamp: {cg.time_stamp}")
                     self.wrt_field(to_bytes_64bit(cg.time_stamp), 8, True)
 
                     page_data = bytearray(u32Const.BYTES_PER_PAGE.value)
 
                     for selector in cg.selectors:
-                        print(f"DEBUG: Writing selector: {selector.value}")
+                        logger.debug(f"Writing selector: {selector.value}")
                         self.wrt_field(selector.to_bytes(), 8, True)
 
                         for i in range(63):  # Process up to 63 lines (excluding MSB)
@@ -857,12 +855,12 @@ class Journal:
                                 continue
 
                             if not cg.new_data:
-                                print(f"Warning: No data available for set bit {i} in selector")
+                                logger.warning(f"No data available for set bit {i} in selector")
                                 continue
 
                             data = cg.new_data.popleft()
                             data_bytes = data if isinstance(data, bytes) else bytes(data)
-                            print(f"DEBUG: Writing data line: {data_bytes[:10]}...")
+                            logger.debug(f"Writing data line: {data_bytes[:10]}...")
                             self.wrt_field(data_bytes, u32Const.BYTES_PER_LINE.value, True)
                             start = i * u32Const.BYTES_PER_LINE.value
                             end = start + u32Const.BYTES_PER_LINE.value
@@ -870,13 +868,13 @@ class Journal:
 
                     # Calculate and write CRC
                     crc = AJZlibCRC.get_code(page_data[:-4], u32Const.BYTES_PER_PAGE.value - 4)
-                    print(f"DEBUG: Writing CRC: {crc:08x}")
+                    logger.debug(f"Writing CRC: {crc:08x}")
                     self.wrt_field(struct.pack('<I', crc), 4, True)
-                    print(f"DEBUG: Writing padding")
+                    logger.debug("Writing padding")
                     self.wrt_field(b'\0\0\0\0', 4, True)
 
             self._journal.js.flush()
-            print(f"DEBUG: Total bytes written: {self._journal.ttl_bytes_written}")
+            logger.debug(f"Total bytes written: {self._journal.ttl_bytes_written}")
 
             logger.debug(f"Exiting _FileIO.wrt_cgs_to_jrnl. Total bytes written: {self._journal.ttl_bytes_written}")
 
