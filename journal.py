@@ -11,6 +11,7 @@ from myMemory import Page
 import os
 from contextlib import contextmanager
 import logging
+import warnings
 
 
 # Configure logging
@@ -128,32 +129,12 @@ class Journal:
         self._metadata.init()
 
     def calculate_ct_bytes_to_write(self, r_cg_log: ChangeLog) -> int:
-        total_bytes = 0
-        for blk_num, changes in r_cg_log.the_log.items():
-            for cg in changes:
-                # Block number (8 bytes)
-                total_bytes += 8
-
-                # Timestamp (8 bytes)
-                total_bytes += 8
-
-                # Selectors and actual data
-                for selector in cg.selectors:
-                    # Selector (8 bytes)
-                    total_bytes += 8
-
-                    # Actual data (16 bytes * number of set bits in the selector, excluding MSB)
-                    set_bits = bin(selector.value & 0x7FFFFFFFFFFFFFFF).count('1')
-                    total_bytes += set_bits * u32Const.BYTES_PER_LINE.value
-
-                    # Break after processing the last selector (MSB set)
-                    if selector.is_last_block():
-                        break
-
-                # CRC value (4 bytes) and Zero padding (4 bytes)
-                total_bytes += 8
-
-        return total_bytes
+        warnings.warn(
+            "calculate_ct_bytes_to_write is deprecated. Use self._change_log_handler.calculate_ct_bytes_to_write() instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        return self._change_log_handler.calculate_ct_bytes_to_write(r_cg_log)
 
     def wrt_cg_log_to_jrnl(self, r_cg_log: ChangeLog):
         logger.debug(f"Entering wrt_cg_log_to_jrnl with {len(r_cg_log.the_log)} blocks in change log")
@@ -274,26 +255,12 @@ class Journal:
                      f"size: {self._metadata.meta_sz}")
 
     def wrt_cg_to_pg(self, cg: Change, pg: Page):
-        cg.arr_next = 0
-        try:
-            while True:
-                lin_num = self.get_next_lin_num(cg)
-                if lin_num == 0xFF:
-                    break
-                if not cg.new_data:
-                    print("WARNING [wrt_cg_to_pg]: Ran out of data while processing selectors")
-                    break
-                temp = cg.new_data.popleft()
-                start = lin_num * u32Const.BYTES_PER_LINE.value
-                end = (lin_num + 1) * u32Const.BYTES_PER_LINE.value
-                pg.dat[start:end] = temp
-
-        except NoSelectorsAvailableError:
-            pass
-
-        # Calculate and write CRC
-        crc = AJZlibCRC.get_code(pg.dat[:-4], u32Const.BYTES_PER_PAGE.value - 4)
-        pg.dat[-4:] = AJZlibCRC.wrt_bytes_little_e(crc, pg.dat[-4:], 4)
+        warnings.warn(
+            "wrt_cg_to_pg is deprecated. Use self._change_log_handler.wrt_cg_to_pg() instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        return self._change_log_handler.wrt_cg_to_pg(cg, pg)
 
     def is_in_jrnl(self, b_num: bNum_t) -> bool:
         return self.blks_in_jrnl[b_num]
@@ -550,22 +517,12 @@ class Journal:
         return ck_end_tag
 
     def get_num_data_lines(self, r_cg: Change) -> int:
-        num_data_lines = 0
-        temp_sel = bytearray(b'\xff' * 8)
-        setback = 1
-        sz_ul = 8
-
-        for selector in r_cg.selectors:
-            temp_sel = selector.to_bytes()
-            num_data_lines += sz_ul - 1
-
-            if temp_sel[sz_ul - setback] == 0xFF:
-                setback += 1
-                while setback <= sz_ul and temp_sel[sz_ul - setback] == 0xFF:
-                    setback += 1
-                    num_data_lines -= 1
-
-        return min(num_data_lines, 63)  # Ensure we don't exceed 63 lines
+        warnings.warn(
+            "get_num_data_lines is deprecated. Use self._change_log_handler.get_num_data_lines() instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        return self._change_log_handler.get_num_data_lines(r_cg)
 
     def rd_field(self, *args, **kwargs):
         import warnings
@@ -629,25 +586,12 @@ class Journal:
         return True
 
     def get_next_lin_num(self, cg: Change) -> lNum_t:
-        if not cg.selectors:
-            return 0xFF  # Return sentinel value immediately if no selectors
-
-        current_selector = cg.selectors[0]
-
-        for i in range(64):
-            if current_selector.is_set(i):
-                if i == cg.arr_next:
-                    cg.arr_next += 1
-                    if cg.arr_next == 64:
-                        cg.selectors.popleft()
-                        cg.arr_next = 0
-
-                    return i
-
-        # If we've gone through all bits and found nothing, move to the next selector
-        cg.selectors.popleft()
-        cg.arr_next = 0
-        return self.get_next_lin_num(cg)  # Recursive call to check next selector
+        warnings.warn(
+            "get_next_lin_num is deprecated. Use self._change_log_handler.get_next_lin_num() instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        return self._change_log_handler.get_next_lin_num(cg)
 
     def reset_file(self, *args, **kwargs):
         import warnings
@@ -881,7 +825,96 @@ class Journal:
     class _ChangeLogHandler:
         def __init__(self, journal_instance):
             self._journal = journal_instance
-            # Stub methods will be added here
+
+        def get_num_data_lines(self, r_cg: Change) -> int:
+            num_data_lines = 0
+            temp_sel = bytearray(b'\xff' * 8)
+            setback = 1
+            sz_ul = 8
+
+            for selector in r_cg.selectors:
+                temp_sel = selector.to_bytes()
+                num_data_lines += sz_ul - 1
+
+                if temp_sel[sz_ul - setback] == 0xFF:
+                    setback += 1
+                    while setback <= sz_ul and temp_sel[sz_ul - setback] == 0xFF:
+                        setback += 1
+                        num_data_lines -= 1
+
+            return min(num_data_lines, 63)  # Ensure we don't exceed 63 lines
+
+        def get_next_lin_num(self, cg: Change) -> lNum_t:
+            if not cg.selectors:
+                return 0xFF  # Return sentinel value immediately if no selectors
+
+            current_selector = cg.selectors[0]
+
+            for i in range(64):
+                if current_selector.is_set(i):
+                    if i == cg.arr_next:
+                        cg.arr_next += 1
+                        if cg.arr_next == 64:
+                            cg.selectors.popleft()
+                            cg.arr_next = 0
+
+                        return i
+
+            # If we've gone through all bits and found nothing, move to the next selector
+            cg.selectors.popleft()
+            cg.arr_next = 0
+            return self.get_next_lin_num(cg)  # Recursive call to check next selector
+
+        def calculate_ct_bytes_to_write(self, r_cg_log: ChangeLog) -> int:
+            total_bytes = 0
+            for blk_num, changes in r_cg_log.the_log.items():
+                for cg in changes:
+                    # Block number (8 bytes)
+                    total_bytes += 8
+
+                    # Timestamp (8 bytes)
+                    total_bytes += 8
+
+                    # Selectors and actual data
+                    for selector in cg.selectors:
+                        # Selector (8 bytes)
+                        total_bytes += 8
+
+                        # Actual data (16 bytes * number of set bits in the selector, excluding MSB)
+                        set_bits = bin(selector.value & 0x7FFFFFFFFFFFFFFF).count('1')
+                        total_bytes += set_bits * u32Const.BYTES_PER_LINE.value
+
+                        # Break after processing the last selector (MSB set)
+                        if selector.is_last_block():
+                            break
+
+                    # CRC value (4 bytes) and Zero padding (4 bytes)
+                    total_bytes += 8
+
+            return total_bytes
+
+        def wrt_cg_to_pg(self, cg: Change, pg: Page):
+            cg.arr_next = 0
+            try:
+                while True:
+                    lin_num = self.get_next_lin_num(cg)
+                    if lin_num == 0xFF:
+                        break
+                    if not cg.new_data:
+                        logger.warning("Ran out of data while processing selectors")
+                        break
+                    temp = cg.new_data.popleft()
+                    start = lin_num * u32Const.BYTES_PER_LINE.value
+                    end = (lin_num + 1) * u32Const.BYTES_PER_LINE.value
+                    pg.dat[start:end] = temp
+
+            except NoSelectorsAvailableError:
+                pass
+
+            # Calculate and write CRC
+            crc = AJZlibCRC.get_code(pg.dat[:-4], u32Const.BYTES_PER_PAGE.value - 4)
+            pg.dat[-4:] = AJZlibCRC.wrt_bytes_little_e(crc, pg.dat[-4:], 4)
+
 
     class _CRCHandler:
         def __init__(self, journal_instance):
