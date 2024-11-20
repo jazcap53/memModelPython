@@ -11,7 +11,6 @@ from myMemory import Page
 import os
 from contextlib import contextmanager
 import logging
-import warnings
 
 
 # Configure logging
@@ -129,11 +128,7 @@ class Journal:
         self._metadata.init()
 
     def calculate_ct_bytes_to_write(self, r_cg_log: ChangeLog) -> int:
-        warnings.warn(
-            "calculate_ct_bytes_to_write is deprecated. Use self._change_log_handler.calculate_ct_bytes_to_write() instead.",
-            DeprecationWarning,
-            stacklevel=2
-        )
+        print("DEPRECATED: Use self._change_log_handler.calculate_ct_bytes_to_write() instead")
         return self._change_log_handler.calculate_ct_bytes_to_write(r_cg_log)
 
     def wrt_cg_log_to_jrnl(self, r_cg_log: ChangeLog):
@@ -255,11 +250,7 @@ class Journal:
                      f"size: {self._metadata.meta_sz}")
 
     def wrt_cg_to_pg(self, cg: Change, pg: Page):
-        warnings.warn(
-            "wrt_cg_to_pg is deprecated. Use self._change_log_handler.wrt_cg_to_pg() instead.",
-            DeprecationWarning,
-            stacklevel=2
-        )
+        print("DEPRECATED: Use self._change_log_handler.wrt_cg_to_pg() instead")
         return self._change_log_handler.wrt_cg_to_pg(cg, pg)
 
     def is_in_jrnl(self, b_num: bNum_t) -> bool:
@@ -517,11 +508,7 @@ class Journal:
         return ck_end_tag
 
     def get_num_data_lines(self, r_cg: Change) -> int:
-        warnings.warn(
-            "get_num_data_lines is deprecated. Use self._change_log_handler.get_num_data_lines() instead.",
-            DeprecationWarning,
-            stacklevel=2
-        )
+        print("DEPRECATED: Use self._change_log_handler.get_num_data_lines() instead")
         return self._change_log_handler.get_num_data_lines(r_cg)
 
     def rd_field(self, *args, **kwargs):
@@ -586,11 +573,7 @@ class Journal:
         return True
 
     def get_next_lin_num(self, cg: Change) -> lNum_t:
-        warnings.warn(
-            "get_next_lin_num is deprecated. Use self._change_log_handler.get_next_lin_num() instead.",
-            DeprecationWarning,
-            stacklevel=2
-        )
+        print("DEPRECATED: Use self._change_log_handler.get_next_lin_num() instead")
         return self._change_log_handler.get_next_lin_num(cg)
 
     def reset_file(self, *args, **kwargs):
