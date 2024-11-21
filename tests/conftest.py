@@ -3,106 +3,143 @@
 import pytest
 import logging
 import sys
-from _pytest.logging import LogCaptureHandler
-
 
 def pytest_addoption(parser):
-    """Add logging-related command line options."""
-    group = parser.getgroup('custom_logging')
+    """Add custom output control options."""
+    group = parser.getgroup('output_control')
 
     group.addoption(
-        "--show-warnings",
+        "--show-prints",
         action="store_true",
         default=False,
-        help="Show warning messages during tests"
+        help="Show print debug statements"
     )
 
     group.addoption(
-        "--show-info",
+        "--show-logs",
         action="store_true",
         default=False,
-        help="Show info messages during tests"
+        help="Show logger output"
     )
 
-    group.addoption(
-        "--show-debug",
-        action="store_true",
-        default=False,
-        help="Show debug messages during tests"
+def pytest_configure(config):
+    """Configure custom markers."""
+    config.addinivalue_line(
+        "markers",
+        "no_debug_output: mark test to suppress its debug output"
     )
 
+class PrintCapture:
+    def __init__(self, show_prints):
+        self.show_prints = show_prints
+        self.original_write = sys.stdout.write
+
+    def write(self, message):
+        if 'DEBUG' in message and self.show_prints:
+            self.original_write(f"PRINT: {message}")
+        elif 'DEBUG' not in message:
+            self.original_write(message)
+
+    def flush(self):
+        sys.stdout.flush()
 
 @pytest.fixture(autouse=True)
-def setup_logging(request, caplog):
-    """Configure logging for tests with granular control."""
-    # Get command line options
-    show_warnings = request.config.getoption("--show-warnings")
-    show_info = request.config.getoption("--show-info")
-    show_debug = request.config.getoption("--show-debug")
+def control_output(request):
+    """Control debug output for tests."""
+    show_prints = request.config.getoption("--show-prints")
+    show_logs = request.config.getoption("--show-logs")
 
-    # Set up log levels based on options
-    if show_debug:
-        caplog.set_level(logging.DEBUG)
-    elif show_info:
-        caplog.set_level(logging.INFO)
-    elif show_warnings:
-        caplog.set_level(logging.WARNING)
+    # Check if test is marked to suppress debug output
+    if request.node.get_closest_marker('no_debug_output'):
+        show_prints = False
+        show_logs = False
+
+    # Handle print statements
+    old_stdout = sys.stdout
+    sys.stdout = PrintCapture(show_prints)
+
+    # Handle logging
+    logger = logging.getLogger()
+    old_level = logger.level
+    if not show_logs:
+        logger.setLevel(logging.WARNING)
     else:
-        caplog.set_level(logging.ERROR)
-
-    class PrintCapture:
-        def __init__(self, level):
-            self.level = level
-
-        def write(self, message):
-            if message.strip():
-                logging.log(self.level, message.rstrip())
-
-        def flush(self):
-            pass
-
-    # Capture stdout and stderr
-    old_stdout = sys.stdout
-    old_stderr = sys.stderr
-
-    if show_debug or show_info:
-        sys.stdout = PrintCapture(logging.INFO)
-    if show_warnings:
-        sys.stderr = PrintCapture(logging.WARNING)
+        logger.setLevel(logging.DEBUG)
 
     yield
 
-    # Restore stdout and stderr
+    # Restore original stdout and logging level
     sys.stdout = old_stdout
-    sys.stderr = old_stderr
+    logger.setLevel(old_level)# tests/conftest.py
 
+import pytest
+import logging
+import sys
 
-@pytest.fixture
-def assert_no_prints():
-    """Fixture to ensure no print statements are used in a test."""
+def pytest_addoption(parser):
+    """Add custom output control options."""
+    group = parser.getgroup('output_control')
+
+    group.addoption(
+        "--show-prints",
+        action="store_true",
+        default=False,
+        help="Show print debug statements"
+    )
+
+    group.addoption(
+        "--show-logs",
+        action="store_true",
+        default=False,
+        help="Show logger output"
+    )
+
+def pytest_configure(config):
+    """Configure custom markers."""
+    config.addinivalue_line(
+        "markers",
+        "no_debug_output: mark test to suppress its debug output"
+    )
+
+class PrintCapture:
+    def __init__(self, show_prints):
+        self.show_prints = show_prints
+        self.original_write = sys.stdout.write
+
+    def write(self, message):
+        if 'DEBUG' in message and self.show_prints:
+            self.original_write(f"PRINT: {message}")
+        elif 'DEBUG' not in message:
+            self.original_write(message)
+
+    def flush(self):
+        sys.stdout.flush()
+
+@pytest.fixture(autouse=True)
+def control_output(request):
+    """Control debug output for tests."""
+    show_prints = request.config.getoption("--show-prints")
+    show_logs = request.config.getoption("--show-logs")
+
+    # Check if test is marked to suppress debug output
+    if request.node.get_closest_marker('no_debug_output'):
+        show_prints = False
+        show_logs = False
+
+    # Handle print statements
     old_stdout = sys.stdout
-    old_stderr = sys.stderr
+    sys.stdout = PrintCapture(show_prints)
 
-    class PrintCatcher:
-        def __init__(self):
-            self.printed = []
-
-        def write(self, message):
-            if message.strip():
-                self.printed.append(message.strip())
-
-        def flush(self):
-            pass
-
-    stdout_catcher = PrintCatcher()
-    stderr_catcher = PrintCatcher()
-    sys.stdout = stdout_catcher
-    sys.stderr = stderr_catcher
+    # Handle logging
+    logger = logging.getLogger()
+    old_level = logger.level
+    if not show_logs:
+        logger.setLevel(logging.WARNING)
+    else:
+        logger.setLevel(logging.DEBUG)
 
     yield
 
+    # Restore original stdout and logging level
     sys.stdout = old_stdout
-    sys.stderr = old_stderr
-
-    if stdout_catcher.printed or stderr_catcher.printed:
-        pytest.fail(f"Test used print statements: {stdout_catcher.printed + stderr_catcher.printed}")
+    logger.setLevel(old_level)
