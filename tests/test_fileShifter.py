@@ -106,15 +106,15 @@ def test_empty_update_function():
 
 
 # temporary test
-def test_logging_setup():
-    """Test that logging is working correctly."""
-    logger = logging.getLogger('fileShifter')
-    print(f"Logger disabled: {logger.disabled}")
-    print(f"Logger level: {logger.level}")
-    print(f"Logger effective level: {logger.getEffectiveLevel()}")
-    print(f"Logger handlers: {logger.handlers}")
-    print(f"Root logger level: {logging.getLogger().level}")
-    print(f"Root logger handlers: {logging.getLogger().handlers}")
-
-    # Try to generate a log message
-    logger.error("Test error message")
+# def test_logging_setup():
+#     """Test that logging is working correctly."""
+#     logger = logging.getLogger('fileShifter')
+#     print(f"Logger disabled: {logger.disabled}")
+#     print(f"Logger level: {logger.level}")
+#     print(f"Logger effective level: {logger.getEffectiveLevel()}")
+#     print(f"Logger handlers: {logger.handlers}")
+#     print(f"Root logger level: {logging.getLogger().level}")
+#     print(f"Root logger handlers: {logging.getLogger().handlers}")
+#
+#     # Try to generate a log message
+#     logger.error("Test error message")
