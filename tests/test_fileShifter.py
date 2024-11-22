@@ -6,14 +6,6 @@ import tempfile
 from fileShifter import FileShifter
 
 
-@pytest.fixture(autouse=True)
-def setup_logging():
-    """Configure logging for tests."""
-    logging.basicConfig(level=logging.ERROR)
-    # Optionally disable logging during tests
-    # logging.getLogger('fileShifter').disabled = True
-
-
 def test_shift_files_text_mode():
     """Test file shifting in text mode."""
     def update_file(f):
