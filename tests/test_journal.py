@@ -105,9 +105,9 @@ def test_write_change_log(journal, mock_change_log, mocker, caplog):
         journal.wrt_cg_log_to_jrnl(mock_change_log)
 
     # Verify logging output
-    assert "Saving change log:" in caplog.text
-    assert "Change log written to journal at time 12345" in caplog.text
-    assert any("journal.ttl_bytes_written =" in record.message for record in caplog.records)
+    assert "Entering wrt_cg_log_to_jrnl with 1 blocks in change log" in caplog.text
+    assert "Calculated bytes to write: 96" in caplog.text
+    assert "Exiting wrt_cg_log_to_jrnl. Wrote 96 bytes." in caplog.text
 
     # Verify journal state
     journal.js.seek(0)
