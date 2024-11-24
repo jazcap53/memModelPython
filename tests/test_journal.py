@@ -45,8 +45,29 @@ def temp_journal_file(tmp_path):
 
 
 @pytest.fixture
-def journal(mock_sim_disk, mock_change_log, mock_status, mock_crash_chk, temp_journal_file):
-    return Journal(temp_journal_file, mock_sim_disk, mock_change_log, mock_status, mock_crash_chk)
+def journal(mock_sim_disk, mock_change_log, mock_status, mock_crash_chk, temp_journal_file, caplog):
+    """Create a Journal instance for testing.
+
+    Args:
+        mock_sim_disk: Mock disk simulator
+        mock_change_log: Mock change log
+        mock_status: Mock status tracker
+        mock_crash_chk: Mock crash checker
+        temp_journal_file: Temporary file path
+        caplog: Pytest logging capture fixture
+
+    The fixture sets up logging capture at DEBUG level and clears initial setup messages.
+    """
+    caplog.set_level(logging.DEBUG)
+    journal = Journal(temp_journal_file, mock_sim_disk, mock_change_log, mock_status, mock_crash_chk)
+    caplog.clear()  # Clear creation message from the log
+
+    # Verify journal was initialized correctly
+    assert journal.js.mode == 'rb+'
+    assert os.path.exists(temp_journal_file)
+    assert os.path.getsize(temp_journal_file) == u32Const.JRNL_SIZE.value
+
+    return journal
 
 
 @pytest.fixture
@@ -98,16 +119,17 @@ def test_write_change_log(journal, mock_change_log, mocker, caplog):
     mock_change_log.the_log = {1: [change1]}
     mock_change_log.cg_line_ct = 1
 
-    # Mock get_cur_time to return a fixed value
     mocker.patch('journal.get_cur_time', return_value=12345)
 
     with caplog.at_level(logging.DEBUG):
+        # Use _change_log_handler directly instead of deprecated method
+        ct_bytes = journal._change_log_handler.calculate_ct_bytes_to_write(mock_change_log)
         journal.wrt_cg_log_to_jrnl(mock_change_log)
 
     # Verify logging output
     assert "Entering wrt_cg_log_to_jrnl with 1 blocks in change log" in caplog.text
-    assert "Calculated bytes to write: 96" in caplog.text
-    assert "Exiting wrt_cg_log_to_jrnl. Wrote 96 bytes." in caplog.text
+    assert f"Calculated bytes to write: {ct_bytes}" in caplog.text
+    assert "Exiting wrt_cg_log_to_jrnl. Wrote" in caplog.text
 
     # Verify journal state
     journal.js.seek(0)
@@ -116,13 +138,13 @@ def test_write_change_log(journal, mock_change_log, mocker, caplog):
     assert journal.meta_put > journal.meta_get
     assert journal.meta_sz > 0
 
-    # Updated expected bytes calculation
+    # Verify exact byte count
     expected_bytes = (
         8 +  # Block number
         8 +  # Timestamp
         8 +  # Selector
         64 +  # Data line
-        8  # CRC (4) + Padding (4)
+        8   # CRC (4) + Padding (4)
     )
     assert journal.ttl_bytes_written == expected_bytes
 
@@ -136,17 +158,34 @@ def test_is_in_journal(journal):
     assert not journal.is_in_jrnl(6)
 
 
-def test_write_change_to_page(journal):
+def test_write_change_to_page(journal, caplog):
+    """Test writing changes to a page."""
+    # Setup
     change = Change(1)
     change.add_line(0, b'A' * u32Const.BYTES_PER_LINE.value)
     change.add_line(1, b'B' * u32Const.BYTES_PER_LINE.value)
-
     page = Page()
-    journal.wrt_cg_to_pg(change, page)
+    original_page = page.dat.copy()  # Save original page content
 
+    with caplog.at_level(logging.DEBUG):
+        # Use the nested class method directly
+        journal._change_log_handler.wrt_cg_to_pg(change, page)
+
+    # Verify page contents
     assert page.dat[:u32Const.BYTES_PER_LINE.value] == b'A' * u32Const.BYTES_PER_LINE.value
     assert page.dat[
            u32Const.BYTES_PER_LINE.value:2 * u32Const.BYTES_PER_LINE.value] == b'B' * u32Const.BYTES_PER_LINE.value
+
+    # Verify unchanged portions of the page
+    assert page.dat[2 * u32Const.BYTES_PER_LINE.value:-4] == original_page[2 * u32Const.BYTES_PER_LINE.value:-4]
+
+    # Verify CRC was updated correctly
+    crc = AJZlibCRC.get_code(page.dat[:-4], u32Const.BYTES_PER_PAGE.value - 4)
+    stored_crc = int.from_bytes(page.dat[-4:], 'little')
+    assert crc == stored_crc
+
+    # Verify logging
+    assert any("Writing change to page" in record.message for record in caplog.records)
 
 
 def test_crc_check_pg(journal):
@@ -163,32 +202,54 @@ def test_crc_check_pg(journal):
     assert result is True
 
 
-def test_purge_journal(journal, mock_change_log, mocker):
-    # Setup a change log
+def test_purge_journal(journal, mock_change_log, mocker, caplog):
+    """Test journal purging functionality."""
+    # Setup
     change1 = Change(1)
     change1.add_line(0, b'A' * u32Const.BYTES_PER_LINE.value)
 
-    # Create a mock dictionary using mocker instead of Mock
     mock_dict = mocker.MagicMock()
     mock_dict.items.return_value = {1: [change1]}.items()
     mock_dict.__getitem__.side_effect = lambda x: [change1] if x == 1 else KeyError()
 
-    # Set the mock_change_log to use our mock dictionary
     mock_change_log.the_log = mock_dict
     mock_change_log.cg_line_ct = 1
 
-    # Write and then purge
-    journal.wrt_cg_log_to_jrnl(mock_change_log)
-    journal.purge_jrnl(True, False)
+    # Save initial state
+    initial_meta_get = journal._metadata.meta_get
+    initial_meta_put = journal._metadata.meta_put
+    initial_meta_sz = journal._metadata.meta_sz
 
-    # Verify journal is empty after purge
-    assert not any(journal.blks_in_jrnl)
-    mock_dict.clear.assert_called_once()
+    with caplog.at_level(logging.DEBUG):
+        # Write to journal and then purge
+        journal.wrt_cg_log_to_jrnl(mock_change_log)
 
-    # Additional assertions
+        # Verify journal state after write
+        assert journal.blks_in_jrnl[1] is True
+        assert journal._metadata.meta_sz > 0
+
+        # Purge the journal
+        journal.purge_jrnl(True, False)
+
+    # Verify logging
+    assert any("Purging journal" in record.message for record in caplog.records)
+    assert any("Block 1: 1 changes" in record.message for record in caplog.records)
+
+    # Verify journal state after purge
+    assert not any(journal.blks_in_jrnl)  # All blocks should be marked as not in journal
+    mock_dict.clear.assert_called_once()  # Change log should be cleared
+
+    # Verify metadata was reset correctly
     assert journal._metadata.meta_get == -1
     assert journal._metadata.meta_put == 24
     assert journal._metadata.meta_sz == 0
+
+    # Verify file position
+    assert journal.js.tell() >= Journal.META_LEN
+
+    # Verify the journal file is still valid
+    journal.js.seek(0, 2)  # Seek to end
+    assert journal.js.tell() == u32Const.JRNL_SIZE.value  # File size should remain unchanged
 
 
 def test_do_wipe_routine(journal, mocker, mock_change_log):

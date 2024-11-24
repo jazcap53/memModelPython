@@ -78,8 +78,8 @@ class Journal:
         if current_size < u32Const.JRNL_SIZE.value:
             remaining = u32Const.JRNL_SIZE.value - current_size
             self.js.write(b'\0' * remaining)
-        self.js.seek(0)  # Reset to beginning of file
-        print(f"Journal file: {'Opened' if file_existed else 'Created'}: {self.f_name}")
+        self.js.seek(0)  # Reset to beginning
+        logger.debug(f"Journal file {'opened' if file_existed else 'created'}: {self.f_name}")
 
         # Verify file size
         self.js.seek(0, 2)  # Go to end
@@ -160,10 +160,20 @@ class Journal:
         # Update metadata
         new_g_pos = Journal.META_LEN  # Start reading from META_LEN
         new_p_pos = self.js.tell()
-        self._metadata.write(new_g_pos, new_p_pos, self.ct_bytes_to_write + Journal.META_LEN)
+        ttl_bytes = self.ct_bytes_to_write + Journal.META_LEN
+
+        # Update both instance and file metadata
+        self._metadata.meta_get = new_g_pos
+        self._metadata.meta_put = new_p_pos
+        self._metadata.meta_sz = ttl_bytes
+        self._metadata.write(new_g_pos, new_p_pos, ttl_bytes)
 
         self.js.flush()
         os.fsync(self.js.fileno())
+
+        logger.debug(f"Metadata after write - get: {self._metadata.meta_get}, "
+                     f"put: {self._metadata.meta_put}, "
+                     f"size: {self._metadata.meta_sz}")
 
         print(f"\tChange log written to journal at time {get_cur_time()}")
         r_cg_log.cg_line_ct = 0
@@ -193,20 +203,20 @@ class Journal:
 
         self._file_io.reset_file()  # Reset file state before purging
 
-        print(f"{self.tabs(1, True)}Purging journal{'(after crash)' if had_crash else ''}")
+        logger.info(f"Purging journal{'(after crash)' if had_crash else ''}")
 
         if not any(self.blks_in_jrnl) and not had_crash:
-            print("\tJournal is empty: nothing to purge\n")
+            logger.info("Journal is empty: nothing to purge")
         else:
             j_cg_log = ChangeLog()
 
             self.rd_last_jrnl(j_cg_log)
 
             for block, changes in j_cg_log.the_log.items():
-                print(f"  Block {block}: {len(changes)} changes")
+                logger.debug(f"Block {block}: {len(changes)} changes")
 
             if not j_cg_log.the_log:
-                print("\tNo changes found in the journal")
+                logger.info("No changes found in the journal")
             else:
                 ctr = 0
                 if j_cg_log.the_log:
@@ -223,7 +233,7 @@ class Journal:
                     cg = j_cg_log.the_log[curr_blk_num][-1]
                     self.r_and_wb_last(cg, self.p_buf, ctr, curr_blk_num, pg)
                 else:
-                    print(f"Warning: No changes found for block {curr_blk_num}")
+                    logger.warning(f"No changes found for block {curr_blk_num}")
 
                 assert ctr == 0
 
@@ -877,6 +887,8 @@ class Journal:
             return total_bytes
 
         def wrt_cg_to_pg(self, cg: Change, pg: Page):
+            """Write changes to a page."""
+            logger.debug("Writing change to page")
             cg.arr_next = 0
             try:
                 while True:
@@ -889,14 +901,16 @@ class Journal:
                     temp = cg.new_data.popleft()
                     start = lin_num * u32Const.BYTES_PER_LINE.value
                     end = (lin_num + 1) * u32Const.BYTES_PER_LINE.value
+                    logger.debug(f"Writing line {lin_num} to page")
                     pg.dat[start:end] = temp
 
             except NoSelectorsAvailableError:
-                pass
+                logger.warning("No selectors available")
 
             # Calculate and write CRC
             crc = AJZlibCRC.get_code(pg.dat[:-4], u32Const.BYTES_PER_PAGE.value - 4)
             pg.dat[-4:] = AJZlibCRC.wrt_bytes_little_e(crc, pg.dat[-4:], 4)
+            logger.debug(f"Updated page CRC: {crc:08x}")
 
 
     class _CRCHandler:
