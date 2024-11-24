@@ -51,9 +51,9 @@ def journal(mock_sim_disk, mock_change_log, mock_status, mock_crash_chk, temp_jo
 
 @pytest.fixture
 def mock_change_log(mocker):
-    mock = mocker.Mock(spec=ChangeLog)  # Use spec to ensure it behaves like a ChangeLog
-    mock.the_log = {}  # Empty dictionary
-    mock.cg_line_ct = 0  # Any other necessary attributes
+    mock = mocker.Mock(spec=ChangeLog)
+    mock.the_log = {}
+    mock.cg_line_ct = 0
     return mock
 
 
@@ -92,15 +92,24 @@ def test_write_field(journal):
     assert journal.js.tell() == Journal.META_LEN + 4
 
 
-def test_write_change_log(journal, mock_change_log):
-    print(f"Journal file path: {journal.f_name}")
+def test_write_change_log(journal, mock_change_log, mocker, caplog):
     change1 = Change(1)
     change1.add_line(0, b'A' * u32Const.BYTES_PER_LINE.value)
     mock_change_log.the_log = {1: [change1]}
     mock_change_log.cg_line_ct = 1
 
-    journal.wrt_cg_log_to_jrnl(mock_change_log)
+    # Mock get_cur_time to return a fixed value
+    mocker.patch('journal.get_cur_time', return_value=12345)
 
+    with caplog.at_level(logging.DEBUG):
+        journal.wrt_cg_log_to_jrnl(mock_change_log)
+
+    # Verify logging output
+    assert "Saving change log:" in caplog.text
+    assert "Change log written to journal at time 12345" in caplog.text
+    assert any("journal.ttl_bytes_written =" in record.message for record in caplog.records)
+
+    # Verify journal state
     journal.js.seek(0)
     journal.meta_get, journal.meta_put, journal.meta_sz = journal._metadata.read()
     assert journal.meta_get >= Journal.META_LEN
@@ -116,7 +125,9 @@ def test_write_change_log(journal, mock_change_log):
         8  # CRC (4) + Padding (4)
     )
     assert journal.ttl_bytes_written == expected_bytes
-    print(f"DEBUG: journal.ttl_bytes_written = {journal.ttl_bytes_written}")
+
+    # Verify that the mock_change_log was cleared
+    assert mock_change_log.cg_line_ct == 0
 
 
 def test_is_in_journal(journal):
