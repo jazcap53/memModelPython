@@ -8,6 +8,10 @@ from ajTypes import u32Const, bNum_tConst
 from myMemory import Page
 from ajCrc import AJZlibCRC
 import struct
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 
 @pytest.fixture
@@ -17,13 +21,6 @@ def mock_sim_disk(mocker):
     mock_ds.read.return_value = b'\x00' * u32Const.BLOCK_BYTES.value
     mock.get_ds.return_value = mock_ds
     return mock
-
-
-# @pytest.fixture
-# def mock_change_log(mocker):
-#     mock = mocker.Mock(spec=ChangeLog)
-#     mock.cg_line_ct = 0
-#     return mock
 
 
 @pytest.fixture
