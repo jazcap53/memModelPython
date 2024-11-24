@@ -222,6 +222,7 @@ def test_purge_journal(journal, mock_change_log, mocker, caplog):
 
     with caplog.at_level(logging.DEBUG):
         # Write to journal and then purge
+        ct_bytes = journal._change_log_handler.calculate_ct_bytes_to_write(mock_change_log)
         journal.wrt_cg_log_to_jrnl(mock_change_log)
 
         # Verify journal state after write
