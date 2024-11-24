@@ -8,6 +8,10 @@ import io
 import sys
 from ajTypes import bNum_t, u32Const, bNum_tConst, SENTINEL_BNUM
 from freeList import FreeList
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 
 @pytest.fixture
@@ -106,22 +110,29 @@ class TestFreeList:
         free_list.refresh()
         assert free_list.bitsFrm.all()
 
-    def test_file_persistence(self, free_list):
+    def test_file_persistence(self, free_list, caplog):
         """Test that the free list state is properly saved and loaded."""
-        # Modify the free list state
-        blocks = [free_list.get_blk() for _ in range(5)]
-        for b in blocks:
-            free_list.put_blk(b)
+        with caplog.at_level(logging.INFO):
+            # Modify the free list state
+            blocks = [free_list.get_blk() for _ in range(5)]
+            for b in blocks:
+                free_list.put_blk(b)
 
-        # Store and recreate
-        free_list.store_lst()
-        temp_filename = free_list.ffn
-        del free_list
+            # Store and recreate
+            free_list.store_lst()
+            temp_filename = free_list.ffn
+            logger.info(f"Stored free list to {temp_filename}")
+            del free_list
 
-        # Load and verify
-        new_free_list = FreeList(temp_filename)
-        for b in blocks:
-            assert new_free_list.bitsTo.test(b)
+            # Load and verify
+            new_free_list = FreeList(temp_filename)
+            logger.info(f"Loaded free list from {temp_filename}")
+            for b in blocks:
+                assert new_free_list.bitsTo.test(b)
+
+        # Check that the storing and loading was logged
+        assert "Stored free list to" in caplog.text
+        assert "Loaded free list from" in caplog.text
 
     def test_error_conditions(self, free_list):
         """Test error conditions and edge cases."""
@@ -150,15 +161,21 @@ class TestFreeList:
 
         assert free_list.fromPosn == 0  # fromPosn should reset to the first available block
 
-    def test_debug_free_list(self, free_list):
+    def test_debug_free_list(self, free_list, caplog):
         """Debug method to inspect FreeList state."""
-        print(f"fromPosn: {free_list.fromPosn}")
-        print(f"bitsFrm sample: {free_list.bitsFrm.to_bytes()[:10].hex()}")
+        with caplog.at_level(logging.DEBUG):
+            logger.debug(f"fromPosn: {free_list.fromPosn}")
+            logger.debug(f"bitsFrm sample: {free_list.bitsFrm.to_bytes()[:10].hex()}")
 
-        # Try to get blocks and print results
-        for _ in range(10):
-            block = free_list.get_blk()
-            print(f"Got block: {block}")
-            if block == 0:  # If we keep getting 0, there's a problem
-                print(f"fromPosn after get: {free_list.fromPosn}")
-                break
+            # Try to get blocks and log results
+            for _ in range(10):
+                block = free_list.get_blk()
+                logger.debug(f"Got block: {block}")
+                if block == 0:  # If we keep getting 0, there's a problem
+                    logger.debug(f"fromPosn after get: {free_list.fromPosn}")
+                    break
+
+        # Add assertions to check the logged output
+        assert "fromPosn:" in caplog.text
+        assert "bitsFrm sample:" in caplog.text
+        assert "Got block:" in caplog.text

@@ -2,6 +2,10 @@ import struct
 from ajTypes import u32Const, bNum_t, SENTINEL_BNUM, bNum_tConst
 from ajUtils import Tabber
 from arrBit import ArrBit
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 
 class FreeList:
@@ -49,7 +53,7 @@ class FreeList:
         self.frs.write(self.bitsTo.to_bytes())
         self.frs.write(struct.pack('<I', self.fromPosn))
         if not self.quiet:
-            print(f"\nFree list stored.")
+            logger.info("Free list stored.")
 
     def get_blk(self) -> bNum_t:
         if self.fromPosn == bNum_tConst.NUM_DISK_BLOCKS.value:
@@ -62,8 +66,10 @@ class FreeList:
             found = True
             self.fromPosn +=  1  # NEW
 
-        # return self.fromPosn if found else SENTINEL_BNUM
-        return self.fromPosn - 1 if found else SENTINEL_BNUM
+        result = self.fromPosn - 1 if found else SENTINEL_BNUM
+        logger.debug(f"Got block: {result}")
+        logger.debug(f"fromPosn after get: {self.fromPosn}")
+        return result
 
     def refresh(self):
         self.bitsFrm |= self.bitsTo
