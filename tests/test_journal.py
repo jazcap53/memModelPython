@@ -36,11 +36,12 @@ def mock_crash_chk(mocker):
 
 
 @pytest.fixture
-def temp_journal_file(tmp_path):
+def temp_journal_file(tmp_path, caplog):
     file_path = tmp_path / "test_journal.bin"
-    print(f"Journal file path: {file_path}")
+    logger.debug(f"Creating temporary journal file: {file_path}")
     yield str(file_path)
     if os.path.exists(file_path):
+        logger.debug(f"Cleaning up temporary journal file: {file_path}")
         os.remove(file_path)
 
 
