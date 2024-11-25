@@ -115,6 +115,8 @@ def test_write_field(journal):
 
 
 def test_write_change_log(journal, mock_change_log, mocker, caplog):
+    """Test writing to the change log."""
+    # Setup
     change1 = Change(1)
     change1.add_line(0, b'A' * u32Const.BYTES_PER_LINE.value)
     mock_change_log.the_log = {1: [change1]}
@@ -123,14 +125,13 @@ def test_write_change_log(journal, mock_change_log, mocker, caplog):
     mocker.patch('journal.get_cur_time', return_value=12345)
 
     with caplog.at_level(logging.DEBUG):
-        # Use _change_log_handler directly instead of deprecated method
         ct_bytes = journal._change_log_handler.calculate_ct_bytes_to_write(mock_change_log)
         journal.wrt_cg_log_to_jrnl(mock_change_log)
 
     # Verify logging output
-    assert "Entering wrt_cg_log_to_jrnl with 1 blocks in change log" in caplog.text
-    assert f"Calculated bytes to write: {ct_bytes}" in caplog.text
-    assert "Exiting wrt_cg_log_to_jrnl. Wrote" in caplog.text
+    debug_messages = [record.message for record in caplog.records if record.levelno == logging.DEBUG]
+    assert any(f"Calculated bytes to write: {ct_bytes}" in msg for msg in debug_messages)
+    assert any("Writing 1 change log entries to journal" in msg for msg in debug_messages)
 
     # Verify journal state
     journal.js.seek(0)
@@ -222,7 +223,7 @@ def test_purge_journal(journal, mock_change_log, mocker, caplog):
     initial_meta_sz = journal._metadata.meta_sz
 
     with caplog.at_level(logging.DEBUG):
-        # Write to journal and then purge
+        # Write to journal
         ct_bytes = journal._change_log_handler.calculate_ct_bytes_to_write(mock_change_log)
         journal.wrt_cg_log_to_jrnl(mock_change_log)
 
@@ -233,9 +234,12 @@ def test_purge_journal(journal, mock_change_log, mocker, caplog):
         # Purge the journal
         journal.purge_jrnl(True, False)
 
-    # Verify logging
-    assert any("Purging journal" in record.message for record in caplog.records)
-    assert any("Block 1: 1 changes" in record.message for record in caplog.records)
+    # Verify logging output
+    info_messages = [record.message for record in caplog.records if record.levelno == logging.INFO]
+    debug_messages = [record.message for record in caplog.records if record.levelno == logging.DEBUG]
+
+    assert any("Purging journal" in msg for msg in info_messages)
+    assert any("Block 1: 1 changes" in msg for msg in debug_messages)
 
     # Verify journal state after purge
     assert not any(journal.blks_in_jrnl)  # All blocks should be marked as not in journal
