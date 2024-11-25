@@ -142,8 +142,8 @@ class Journal:
 
         self.ttl_bytes_written = 0  # Reset here
 
-        # Calculate ct_bytes_to_write before writing anything
-        self.ct_bytes_to_write = self.calculate_ct_bytes_to_write(r_cg_log)
+        # Use the nested class method
+        self.ct_bytes_to_write = self._change_log_handler.calculate_ct_bytes_to_write(r_cg_log)
         logger.debug(f"Calculated bytes to write: {self.ct_bytes_to_write}")
 
         # Write start tag and ct_bytes_to_write (don't count these in ttl_bytes_written)
@@ -364,7 +364,7 @@ class Journal:
 
                 prv_blk_num = cur_blk_num
 
-                self.wrt_cg_to_pg(cg, pg)
+                self._change_log_handler.wrt_cg_to_pg(cg, pg)  # Updated
 
         return ctr, prv_blk_num, cur_blk_num, pg
 
@@ -375,7 +375,7 @@ class Journal:
         p_buf[ctr] = (cur_blk_num, pg)
         ctr += 1
 
-        self.wrt_cg_to_pg(cg, pg)
+        self._change_log_handler.wrt_cg_to_pg(cg, pg)
 
         crc = AJZlibCRC.get_code(pg.dat, u32Const.BYTES_PER_PAGE.value)
         print(
