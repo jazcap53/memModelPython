@@ -209,7 +209,7 @@ def test_crc_check_pg(journal):
     assert result is True
 
 
-def test_purge_journal(journal, mock_change_log, mocker):
+def test_purge_journal(journal, mock_change_log, mocker, caplog):
     """Test journal purging functionality."""
     # Setup
     change1 = Change(1)
@@ -230,8 +230,12 @@ def test_purge_journal(journal, mock_change_log, mocker):
     assert journal.blks_in_jrnl[1] is True
     assert journal._metadata.meta_sz > 0
 
-    # Purge the journal
-    journal.purge_jrnl(True, False)
+    with caplog.at_level(logging.INFO):
+        # Purge the journal
+        journal.purge_jrnl(True, False)
+
+    # Verify log messages
+    assert any("Purging journal" in record.message for record in caplog.records)
 
     # Verify post-purge state
     assert not any(journal.blks_in_jrnl)  # All blocks should be marked as not in journal
@@ -247,7 +251,7 @@ def test_purge_journal(journal, mock_change_log, mocker):
     assert journal.js.tell() == u32Const.JRNL_SIZE.value
 
 
-def test_do_wipe_routine(journal, mocker, mock_change_log):
+def test_do_wipe_routine(journal, mocker, mock_change_log, caplog):
     # Mock file manager
     mock_file_man = mocker.Mock()
 
@@ -260,13 +264,67 @@ def test_do_wipe_routine(journal, mocker, mock_change_log):
     # Assign mock change log to journal
     journal.p_cL = mock_change_log
 
-    # Call the method
-    journal.do_wipe_routine(1, mock_file_man)
+    with caplog.at_level(logging.INFO):
+        # Call the method
+        journal.do_wipe_routine(1, mock_file_man)
+
+    # Verify log messages
+    assert any("Saving change log and purging journal" in record.message for record in caplog.records)
 
     # Assertions
     mock_file_man.do_store_inodes.assert_called_once()
     mock_file_man.do_store_free_list.assert_called_once()
     mock_wipers.clear_array.assert_called_once()
 
-    # You might also want to assert that wrt_cg_log_to_jrnl and purge_jrnl were called
-    # This depends on how you've set up your mocking for the Journal class
+
+def test_empty_purge_jrnl_buf(journal, mocker, caplog):
+    # Setup
+    mock_page = Page()
+    mock_page.dat = bytearray(u32Const.BLOCK_BYTES.value)
+    page_tuple = (1, mock_page)
+
+    # Mock wipers
+    mock_wipers = mocker.Mock()
+    mock_wipers.is_dirty.return_value = False
+    journal.wipers = mock_wipers
+
+    with caplog.at_level(logging.DEBUG):
+        result = journal.empty_purge_jrnl_buf([page_tuple], 1)
+
+    assert result is True
+    assert any("Writing page   1 to disk" in record.message for record in caplog.records)
+
+    # Test with dirty block
+    mock_wipers.is_dirty.return_value = True
+
+    with caplog.at_level(logging.DEBUG):
+        result = journal.empty_purge_jrnl_buf([page_tuple], 1)
+
+    assert result is True
+    assert any("Overwriting dirty block 1" in record.message for record in caplog.records)
+
+
+def test_r_and_wb_last(journal, mocker, caplog):
+    """Test r_and_wb_last with controlled logging."""
+    # Setup
+    cg = Change(1)
+    cg.add_line(0, b'A' * u32Const.BYTES_PER_LINE.value)
+    pg = Page()
+    p_buf = []
+
+    # Mock empty_purge_jrnl_buf to avoid actual disk writes
+    journal.empty_purge_jrnl_buf = mocker.Mock()
+
+    # Set logging level to WARNING to suppress DEBUG messages
+    with caplog.at_level(logging.WARNING):
+        journal.r_and_wb_last(cg, p_buf, 0, 1, pg)
+
+    # Instead of checking for the presence of CRC messages,
+    # we'll verify that the function did its job without asserting specific log messages
+    journal.empty_purge_jrnl_buf.assert_called_once()
+
+    # If you need to verify CRC calculations were done correctly,
+    # check the actual CRC values rather than log messages
+    stored_crc = int.from_bytes(pg.dat[-4:], 'little')
+    calculated_crc = AJZlibCRC.get_code(pg.dat[:-4], len(pg.dat) - 4)
+    assert stored_crc == calculated_crc

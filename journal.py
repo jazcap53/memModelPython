@@ -270,7 +270,7 @@ class Journal:
         if self.wipers.is_dirty(b_num) or self.wipers.is_ripe():
             p_f_m.do_store_inodes()
             p_f_m.do_store_free_list()
-            print(f"\n{self.tabs(1)}Saving change log and purging journal before adding new block")
+            logger.info("Saving change log and purging journal before adding new block")
             self.wrt_cg_log_to_jrnl(self.p_cL)
             self.purge_jrnl(True, False)
             self.wipers.clear_array()
@@ -377,11 +377,15 @@ class Journal:
 
         self._change_log_handler.wrt_cg_to_pg(cg, pg)
 
+        # Calculate and store CRC
         crc = AJZlibCRC.get_code(pg.dat, u32Const.BYTES_PER_PAGE.value)
-        print(
-            f"Calculated CRC of entire Page for block {cur_blk_num}: {format_hex_like_hexdump(to_bytes_64bit(crc)[:4])}")
         stored_crc = int.from_bytes(pg.dat[-4:], 'little')
-        print(f"Stored CRC in Page for block {cur_blk_num}: {format_hex_like_hexdump(to_bytes_64bit(stored_crc)[:4])}")
+
+        # Use TRACE level (even more detailed than DEBUG)
+        logger.log(5,
+                   f"Calculated CRC of entire Page for block {cur_blk_num}: {format_hex_like_hexdump(to_bytes_64bit(crc)[:4])}")
+        logger.log(5,
+                   f"Stored CRC in Page for block {cur_blk_num}: {format_hex_like_hexdump(to_bytes_64bit(stored_crc)[:4])}")
 
         self.empty_purge_jrnl_buf(p_buf, ctr, True)
 
@@ -549,17 +553,17 @@ class Journal:
 
             if self.wipers.is_dirty(cursor[0]):
                 self.p_d.get_ds().write(temp)
-                print(f"{self.tabs(3, True)}Overwriting dirty block {cursor[0]}")
+                logger.debug(f"Overwriting dirty block {cursor[0]}")
             else:
                 self.p_d.get_ds().write(cursor[1].dat)
-                print(f"{self.tabs(3, True)}Writing page {cursor[0]:3} to disk")
+                logger.debug(f"Writing page {cursor[0]:3} to disk")
 
         if not is_end:
-            print()
+            logger.debug("Finished writing batch of pages")
 
         ok_val = True
         if not self.p_d.get_ds():
-            print(f"ERROR: Error writing to {self.p_d.get_d_file_name()}")
+            logger.error(f"Error writing to {self.p_d.get_d_file_name()}")
             ok_val = False
 
         return ok_val
