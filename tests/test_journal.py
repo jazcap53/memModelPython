@@ -114,7 +114,7 @@ def test_write_field(journal):
     assert journal.js.tell() == Journal.META_LEN + 4
 
 
-def test_write_change_log(journal, mock_change_log, mocker):
+def test_write_change_log(journal, mock_change_log, mocker, caplog):
     """Test writing to the change log."""
     # Setup
     change1 = Change(1)
@@ -124,9 +124,14 @@ def test_write_change_log(journal, mock_change_log, mocker):
 
     mocker.patch('journal.get_cur_time', return_value=12345)
 
-    # Write to journal using the non-deprecated method
-    journal._change_log_handler.calculate_ct_bytes_to_write(mock_change_log)
-    journal.wrt_cg_log_to_jrnl(mock_change_log)
+    with caplog.at_level(logging.DEBUG):
+        # Write to journal using the non-deprecated method
+        journal._change_log_handler.calculate_ct_bytes_to_write(mock_change_log)
+        journal.wrt_cg_log_to_jrnl(mock_change_log)
+
+    # Verify log messages
+    assert any("Writing change log to journal" in record.message for record in caplog.records)
+    assert any("Change log written at time 12345" in record.message for record in caplog.records)
 
     # Verify journal state
     journal.js.seek(0)
@@ -142,11 +147,11 @@ def test_write_change_log(journal, mock_change_log, mocker):
 
     # Verify exact byte count
     expected_bytes = (
-        8 +  # Block number
-        8 +  # Timestamp
-        8 +  # Selector
-        64 +  # Data line
-        8   # CRC (4) + Padding (4)
+            8 +  # Block number
+            8 +  # Timestamp
+            8 +  # Selector
+            64 +  # Data line
+            8  # CRC (4) + Padding (4)
     )
     assert journal.ttl_bytes_written == expected_bytes
 

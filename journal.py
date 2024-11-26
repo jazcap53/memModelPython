@@ -137,8 +137,8 @@ class Journal:
         if not r_cg_log.cg_line_ct:
             return
 
-        print("\n\tSaving change log:\n")
-        r_cg_log.print()
+        logger.info("Writing change log to journal")
+        r_cg_log.print()  # This might need to be updated in ChangeLog class
 
         self.ttl_bytes_written = 0  # Reset here
 
@@ -175,7 +175,7 @@ class Journal:
                      f"put: {self._metadata.meta_put}, "
                      f"size: {self._metadata.meta_sz}")
 
-        print(f"\tChange log written to journal at time {get_cur_time()}")
+        logger.info(f"Change log written at time {get_cur_time()}")
         r_cg_log.cg_line_ct = 0
         self.p_stt.wrt("Change log written")
 
