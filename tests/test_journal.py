@@ -310,7 +310,9 @@ def test_r_and_wb_last(journal, mocker, caplog):
     cg = Change(1)
     cg.add_line(0, b'A' * u32Const.BYTES_PER_LINE.value)
     pg = Page()
-    p_buf = []
+
+    # Initialize p_buf with None values up to NUM_PGS_JRNL_BUF
+    p_buf = [None] * journal.NUM_PGS_JRNL_BUF
 
     # Mock empty_purge_jrnl_buf to avoid actual disk writes
     journal.empty_purge_jrnl_buf = mocker.Mock()
@@ -319,9 +321,11 @@ def test_r_and_wb_last(journal, mocker, caplog):
     with caplog.at_level(logging.WARNING):
         journal.r_and_wb_last(cg, p_buf, 0, 1, pg)
 
-    # Instead of checking for the presence of CRC messages,
-    # we'll verify that the function did its job without asserting specific log messages
-    journal.empty_purge_jrnl_buf.assert_called_once()
+    # Verify the buffer was updated correctly
+    assert p_buf[0] == (1, pg)
+
+    # Verify empty_purge_jrnl_buf was called with the correct parameters
+    journal.empty_purge_jrnl_buf.assert_called_once_with(p_buf, 1, True)
 
     # If you need to verify CRC calculations were done correctly,
     # check the actual CRC values rather than log messages
