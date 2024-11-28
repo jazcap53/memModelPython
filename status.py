@@ -8,6 +8,8 @@ This module provides the Status class for reading and writing status messages to
 
 import os
 from fileShifter import FileShifter
+import logging
+
 
 class Status:
     """
@@ -55,7 +57,7 @@ class Status:
 
         # Check if we have write permission before attempting to write
         if os.path.exists(self.file_name) and not os.access(self.file_name, os.W_OK):
-            print(f"ERROR: No write permission for file {self.file_name}")
+            logging.error(f"No write permission for file {self.file_name}")
             return -1
 
         try:
@@ -67,7 +69,7 @@ class Status:
                 with open(self.file_name, 'w') as f:
                     f.write(f"{msg}\n")
             except (IOError, PermissionError):
-                print(f"ERROR: Can't open file {self.file_name} for write of message {msg}")
+                logging.error(f"Can't open file {self.file_name} for write of message {msg}")
                 had_error = -1
 
         return had_error

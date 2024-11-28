@@ -1,8 +1,10 @@
 # tests/test_status.py
+
 import os
 import pytest
 import tempfile
 from status import Status
+import logging
 
 
 @pytest.fixture
@@ -126,7 +128,7 @@ def test_status_with_special_characters(temp_status_file):
         assert f.read().strip() == special_message
 
 
-def test_write_permission_error(tmp_path):
+def test_write_permission_error(tmp_path, caplog):
     """Test writing to a file without write permissions."""
     # Create a read-only file
     no_write_file = tmp_path / "no_write_status.txt"
@@ -137,3 +139,5 @@ def test_write_permission_error(tmp_path):
 
     # We expect a non-zero error code
     assert result != 0
+    # Verify the error was logged
+    assert "No write permission for file" in caplog.text
