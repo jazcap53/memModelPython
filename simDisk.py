@@ -7,6 +7,8 @@ from myMemory import Page
 from status import Status
 from journal import Journal
 from inodeTable import InodeTable
+import logging
+
 
 class SimSector:
     def __init__(self):
@@ -42,7 +44,7 @@ class SimDisk:
         if success_disk and success_jrnl and success_free and success_node:
             self.ds = open(self.dFileName, "r+b")
             if not self.ds:
-                print(f"ERROR: Error opening file {self.dFileName} for update (r/w) in SimDisk::init()")
+                logging.error(f"Error opening file {self.dFileName} for update (r/w) in SimDisk::init()")
                 exit(1)
         else:
             exit(1)
@@ -59,7 +61,7 @@ class SimDisk:
     def read_or_create(self, fName: str, fSz: int, rWSz: bNum_t, fType: str) -> bool:
         if os.path.exists(fName):
             if os.path.getsize(fName) != fSz:
-                print(f"ERROR: Bad file size for {fName} in SimDisk::readOrCreate()")
+                logging.error(f"Bad file size for {fName} in SimDisk::readOrCreate()")
                 return False
             else:
                 return self.try_read(fName, fSz, rWSz, fType)
@@ -72,7 +74,7 @@ class SimDisk:
             if fType == "disk":
                 self.err_scan(ifs, rWSz)
                 if ifs.tell() != fSz:
-                    print(f"ERROR: Read error on disk file in SimDisk::tryRead()")
+                    logging.error(f"Read error on disk file in SimDisk::tryRead()")
                     success = False
                 if self.errBlocks:
                     self.process_errors()
@@ -177,8 +179,7 @@ class SimDisk:
 
     def process_errors(self):
         for bN in self.errBlocks:
-            print(f"WARNING: Found data error in block {bN} on startup.")
-        print()
+            logging.warning(f"Found data error in block {bN} on startup.")
 
 def cleanup_output_files(disk_file, jrnl_file, free_file, node_file):
     for file in [disk_file, jrnl_file, free_file, node_file]:

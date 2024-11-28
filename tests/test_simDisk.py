@@ -6,11 +6,15 @@ import struct
 from simDisk import SimDisk
 from ajTypes import u32Const, bNum_tConst, lNum_tConst
 from ajCrc import AJZlibCRC
+import logging
+
+
+logging.basicConfig(level=logging.WARNING)
 
 
 class MockStatus:
     def wrt(self, msg):
-        print(f"Mock Status: {msg}")
+        logging.info(f"Mock Status: {msg}")
 
 
 @pytest.fixture
