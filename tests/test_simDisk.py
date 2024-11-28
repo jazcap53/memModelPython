@@ -166,7 +166,7 @@ def test_error_handling(temp_files):
         assert err_block == i * 10, f"Expected error in block {i * 10}, got {err_block}"
 
 
-def test_file_permissions(tmpdir, capsys):
+def test_file_permissions(tmpdir, caplog):
     """Test file permission errors."""
     disk_file = tmpdir.join("test_disk.bin")
     disk_file.write("")
@@ -183,8 +183,8 @@ def test_file_permissions(tmpdir, capsys):
 
     assert excinfo.value.code == 1
 
-    captured = capsys.readouterr()
-    assert "ERROR: Bad file size" in captured.out
+    # Check for the error message in the log
+    assert "Bad file size" in caplog.text
 
 
 def test_create_j_file(tmpdir):
