@@ -188,18 +188,6 @@ class Journal:
         print("DEPRECATED: Use self._change_log_handler.write_change() instead")
         return self._change_log_handler.write_change(cg)
 
-
-    # def write_change(self, cg: Change) -> int:
-    #     bytes_written = 0
-    #     bytes_written += self._file_io.wrt_field(to_bytes_64bit(cg.block_num), 8, True)
-    #     bytes_written += self._file_io.wrt_field(to_bytes_64bit(cg.time_stamp), 8, True)
-    #     for s in cg.selectors:
-    #         bytes_written += self._file_io.wrt_field(s.to_bytearray(), self.sz, True)
-    #     for d in cg.new_data:
-    #         bytes_written += self._file_io.wrt_field(d if isinstance(d, bytes) else bytes(d), u32Const.BYTES_PER_LINE.value,
-    #                                         True)
-    #     return bytes_written
-
     def purge_jrnl(self, keep_going: bool, had_crash: bool):
         logger.debug(f"Entering purge_jrnl(keep_going={keep_going}, had_crash={had_crash})")
 
