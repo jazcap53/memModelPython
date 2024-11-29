@@ -114,6 +114,36 @@ def test_write_field(journal):
     assert journal.js.tell() == Journal.META_LEN + 4
 
 
+def test_write_change(journal, mocker):
+    # Create a mock Change object
+    mock_change = mocker.Mock(spec=Change)
+    mock_change.block_num = 1
+    mock_change.time_stamp = 12345
+    mock_change.selectors = [mocker.Mock(to_bytearray=mocker.Mock(return_value=b'selector'))]
+    mock_change.new_data = [b'data1', b'data2']
+
+    # Mock the wrt_field method
+    mock_wrt_field = mocker.Mock(side_effect=[8, 8, 8, 16, 16])  # Return values for each call
+    journal._file_io.wrt_field = mock_wrt_field
+
+    # Call the method
+    bytes_written = journal._change_log_handler.write_change(mock_change)
+
+    # Assertions
+    assert bytes_written == 56  # Sum of all returned values from wrt_field
+    assert mock_wrt_field.call_count == 5  # Called for block_num, timestamp, selector, and two data items
+
+    # Verify call arguments
+    calls = [
+        mocker.call(mocker.ANY, 8, True),  # block_num
+        mocker.call(mocker.ANY, 8, True),  # timestamp
+        mocker.call(b'selector', journal.sz, True),  # selector
+        mocker.call(b'data1', u32Const.BYTES_PER_LINE.value, True),  # data1
+        mocker.call(b'data2', u32Const.BYTES_PER_LINE.value, True)   # data2
+    ]
+    mock_wrt_field.assert_has_calls(calls)
+
+
 def test_write_change_log(journal, mock_change_log, mocker, caplog):
     """Test writing to the change log."""
     # Setup
