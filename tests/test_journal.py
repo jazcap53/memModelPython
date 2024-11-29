@@ -334,6 +334,40 @@ def test_empty_purge_jrnl_buf(journal, mocker, caplog):
     assert any("Overwriting dirty block 1" in record.message for record in caplog.records)
 
 
+def test_r_and_wrt_back(journal, mocker):
+    # Mock dependencies
+    mock_j_cg_log = mocker.Mock(spec=ChangeLog)
+    mock_change1 = mocker.Mock(spec=Change)
+    mock_change1.block_num = 1
+    mock_j_cg_log.the_log = {1: [mock_change1]}
+
+    mock_pg = mocker.Mock(spec=Page)
+    mock_pg.dat = bytearray(u32Const.BLOCK_BYTES.value)
+
+    # Mock methods
+    mocker.patch.object(journal, 'empty_purge_jrnl_buf')
+    mocker.patch.object(journal.p_d, 'get_ds')
+    journal.p_d.get_ds().read.return_value = b'\0' * u32Const.BLOCK_BYTES.value
+    mocker.patch.object(journal._change_log_handler, 'wrt_cg_to_pg')
+
+    # Initialize test variables
+    p_buf = [None] * journal.NUM_PGS_JRNL_BUF
+    ctr = 0
+    prv_blk_num = None
+    cur_blk_num = None
+
+    # Call the method
+    ctr, prv_blk_num, cur_blk_num, pg = journal._change_log_handler.rd_and_wrt_back(
+        mock_j_cg_log, p_buf, ctr, prv_blk_num, cur_blk_num, mock_pg
+    )
+
+    # Assertions
+    assert ctr == 1
+    assert prv_blk_num == 1
+    assert cur_blk_num == 1
+    journal._change_log_handler.wrt_cg_to_pg.assert_called_once_with(mock_change1, mock_pg)
+
+
 def test_r_and_wb_last(journal, mocker, caplog):
     """Test r_and_wb_last with controlled logging."""
     # Setup

@@ -219,8 +219,10 @@ class Journal:
                     curr_blk_num = prev_blk_num = None
                 pg = Page()
 
-                ctr, prev_blk_num, curr_blk_num, pg = self.rd_and_wrt_back(j_cg_log, self.p_buf, ctr, prev_blk_num,
-                                                                           curr_blk_num, pg)
+                ctr, prev_blk_num, curr_blk_num, pg = self._change_log_handler.rd_and_wrt_back(j_cg_log,
+                                                                                               self.p_buf, ctr,
+                                                                                               prev_blk_num,
+                                                                                               curr_blk_num, pg)
 
                 if curr_blk_num in j_cg_log.the_log and j_cg_log.the_log[curr_blk_num]:
                     cg = j_cg_log.the_log[curr_blk_num][-1]
@@ -255,6 +257,11 @@ class Journal:
     def wrt_cg_to_pg(self, cg: Change, pg: Page):
         print("DEPRECATED: Use self._change_log_handler.wrt_cg_to_pg() instead")
         return self._change_log_handler.wrt_cg_to_pg(cg, pg)
+
+    def rd_and_wrt_back(self, j_cg_log: ChangeLog, p_buf: List, ctr: int, prv_blk_num: bNum_t, cur_blk_num: bNum_t,
+                        pg: Page):
+        print("DEPRECATED: Use self._change_log_handler.rd_and_wrt_back() instead")
+        return self._change_log_handler.rd_and_wrt_back(j_cg_log, p_buf, ctr, prv_blk_num, cur_blk_num, pg)
 
     def is_in_jrnl(self, b_num: bNum_t) -> bool:
         return self.blks_in_jrnl[b_num]
@@ -338,28 +345,28 @@ class Journal:
         )
         return self._file_io.advance_strm(*args, **kwargs)
 
-    def rd_and_wrt_back(self, j_cg_log: ChangeLog, p_buf: List, ctr: int, prv_blk_num: bNum_t, cur_blk_num: bNum_t,
-                        pg: Page):
-        for blk_num, changes in j_cg_log.the_log.items():
-            for idx, cg in enumerate(changes):
-                cur_blk_num = cg.block_num
-                if cur_blk_num != prv_blk_num:
-                    if prv_blk_num is not None:
-                        if ctr == self.NUM_PGS_JRNL_BUF:
-                            self.empty_purge_jrnl_buf(p_buf, ctr)
-
-                        p_buf[ctr] = (prv_blk_num, pg)
-                        ctr += 1
-
-                    pg = Page()
-                    self.p_d.get_ds().seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
-                    pg.dat = bytearray(self.p_d.get_ds().read(u32Const.BLOCK_BYTES.value))
-
-                prv_blk_num = cur_blk_num
-
-                self._change_log_handler.wrt_cg_to_pg(cg, pg)  # Updated
-
-        return ctr, prv_blk_num, cur_blk_num, pg
+    # def rd_and_wrt_back(self, j_cg_log: ChangeLog, p_buf: List, ctr: int, prv_blk_num: bNum_t, cur_blk_num: bNum_t,
+    #                     pg: Page):
+    #     for blk_num, changes in j_cg_log.the_log.items():
+    #         for idx, cg in enumerate(changes):
+    #             cur_blk_num = cg.block_num
+    #             if cur_blk_num != prv_blk_num:
+    #                 if prv_blk_num is not None:
+    #                     if ctr == self.NUM_PGS_JRNL_BUF:
+    #                         self.empty_purge_jrnl_buf(p_buf, ctr)
+    #
+    #                     p_buf[ctr] = (prv_blk_num, pg)
+    #                     ctr += 1
+    #
+    #                 pg = Page()
+    #                 self.p_d.get_ds().seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
+    #                 pg.dat = bytearray(self.p_d.get_ds().read(u32Const.BLOCK_BYTES.value))
+    #
+    #             prv_blk_num = cur_blk_num
+    #
+    #             self._change_log_handler.wrt_cg_to_pg(cg, pg)  # Updated
+    #
+    #     return ctr, prv_blk_num, cur_blk_num, pg
 
     def r_and_wb_last(self, cg: Change, p_buf: List, ctr: int, cur_blk_num: bNum_t, pg: Page):
         if ctr == self.NUM_PGS_JRNL_BUF:
@@ -922,6 +929,30 @@ class Journal:
             crc = AJZlibCRC.get_code(pg.dat[:-4], u32Const.BYTES_PER_PAGE.value - 4)
             pg.dat[-4:] = AJZlibCRC.wrt_bytes_little_e(crc, pg.dat[-4:], 4)
             logger.debug(f"Updated page CRC: {crc:08x}")
+
+        def rd_and_wrt_back(self, j_cg_log: ChangeLog, p_buf: List, ctr: int, prv_blk_num: bNum_t, cur_blk_num: bNum_t,
+                            pg: Page):
+            for blk_num, changes in j_cg_log.the_log.items():
+                for idx, cg in enumerate(changes):
+                    cur_blk_num = cg.block_num
+                    if cur_blk_num != prv_blk_num:
+                        if prv_blk_num is not None:
+                            if ctr == self._journal.NUM_PGS_JRNL_BUF:
+                                self._journal.empty_purge_jrnl_buf(p_buf, ctr)
+
+                            p_buf[ctr] = (prv_blk_num, pg)
+                            ctr += 1
+
+                        pg = Page()
+                        self._journal.p_d.get_ds().seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
+                        pg.dat = bytearray(self._journal.p_d.get_ds().read(u32Const.BLOCK_BYTES.value))
+
+                    prv_blk_num = cur_blk_num
+
+                    self.wrt_cg_to_pg(cg, pg)  # This method is already in _ChangeLogHandler
+
+            return ctr, prv_blk_num, cur_blk_num, pg
+
 
 
     class _CRCHandler:
