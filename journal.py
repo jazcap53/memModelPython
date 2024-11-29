@@ -932,16 +932,23 @@ class Journal:
 
         def rd_and_wrt_back(self, j_cg_log: ChangeLog, p_buf: List, ctr: int, prv_blk_num: bNum_t, cur_blk_num: bNum_t,
                             pg: Page):
+            if not j_cg_log.the_log:  # Check if the log is empty
+                return ctr, prv_blk_num, cur_blk_num, pg
+
             for blk_num, changes in j_cg_log.the_log.items():
+                logger.debug(f"Processing block {blk_num} with {len(changes)} changes")
                 for idx, cg in enumerate(changes):
                     cur_blk_num = cg.block_num
                     if cur_blk_num != prv_blk_num:
                         if prv_blk_num is not None:
+                            logger.debug(f"New block encountered. ctr before: {ctr}")
                             if ctr == self._journal.NUM_PGS_JRNL_BUF:
                                 self._journal.empty_purge_jrnl_buf(p_buf, ctr)
+                                ctr = 0  # Reset counter after emptying buffer
 
                             p_buf[ctr] = (prv_blk_num, pg)
                             ctr += 1
+                            logger.debug(f"ctr after incrementing: {ctr}")
 
                         pg = Page()
                         self._journal.p_d.get_ds().seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
@@ -949,10 +956,9 @@ class Journal:
 
                     prv_blk_num = cur_blk_num
 
-                    self.wrt_cg_to_pg(cg, pg)  # This method is already in _ChangeLogHandler
+                    self.wrt_cg_to_pg(cg, pg)
 
             return ctr, prv_blk_num, cur_blk_num, pg
-
 
 
     class _CRCHandler:

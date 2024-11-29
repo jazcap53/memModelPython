@@ -334,7 +334,9 @@ def test_empty_purge_jrnl_buf(journal, mocker, caplog):
     assert any("Overwriting dirty block 1" in record.message for record in caplog.records)
 
 
-def test_r_and_wrt_back(journal, mocker):
+def test_rd_and_wrt_back(journal, mocker, caplog):
+    caplog.set_level(logging.DEBUG)
+
     # Mock dependencies
     mock_j_cg_log = mocker.Mock(spec=ChangeLog)
     mock_change1 = mocker.Mock(spec=Change)
@@ -361,8 +363,12 @@ def test_r_and_wrt_back(journal, mocker):
         mock_j_cg_log, p_buf, ctr, prv_blk_num, cur_blk_num, mock_pg
     )
 
+    # Debug information
+    for record in caplog.records:
+        print(record.message)
+
     # Assertions
-    assert ctr == 1
+    assert ctr == 1, f"Expected ctr to be 1, but got {ctr}"
     assert prv_blk_num == 1
     assert cur_blk_num == 1
     journal._change_log_handler.wrt_cg_to_pg.assert_called_once_with(mock_change1, mock_pg)
