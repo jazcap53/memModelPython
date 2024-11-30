@@ -127,18 +127,6 @@ class Journal:
     def init(self):
         self._metadata.init()
 
-    def calculate_ct_bytes_to_write(self, r_cg_log: ChangeLog) -> int:
-        print("DEPRECATED: Use self._change_log_handler.calculate_ct_bytes_to_write() instead")
-        return self._change_log_handler.calculate_ct_bytes_to_write(r_cg_log)
-
-    def wrt_cg_log_to_jrnl(self, r_cg_log: ChangeLog):
-        print("DEPRECATED: Use self._change_log_handler.wrt_cg_log_to_jrnl() instead")
-        return self._change_log_handler.wrt_cg_log_to_jrnl(r_cg_log)
-
-    def write_change(self, cg: Change) -> int:
-        print("DEPRECATED: Use self._change_log_handler.write_change() instead")
-        return self._change_log_handler.write_change(cg)
-
     def purge_jrnl(self, keep_going: bool, had_crash: bool):
         logger.debug(f"Entering purge_jrnl(keep_going={keep_going}, had_crash={had_crash})")
 
@@ -196,15 +184,6 @@ class Journal:
             f"After reset - meta_get: {self._metadata.meta_get}, meta_put: {self._metadata.meta_put}, meta_sz: {self._metadata.meta_sz}")
 
         self.p_stt.wrt("Purged journal" if keep_going else "Finishing")
-
-    def wrt_cg_to_pg(self, cg: Change, pg: Page):
-        print("DEPRECATED: Use self._change_log_handler.wrt_cg_to_pg() instead")
-        return self._change_log_handler.wrt_cg_to_pg(cg, pg)
-
-    def rd_and_wrt_back(self, j_cg_log: ChangeLog, p_buf: List, ctr: int, prv_blk_num: bNum_t, cur_blk_num: bNum_t,
-                        pg: Page):
-        print("DEPRECATED: Use self._change_log_handler.rd_and_wrt_back() instead")
-        return self._change_log_handler.rd_and_wrt_back(j_cg_log, p_buf, ctr, prv_blk_num, cur_blk_num, pg)
 
     def is_in_jrnl(self, b_num: bNum_t) -> bool:
         return self.blks_in_jrnl[b_num]
@@ -278,19 +257,6 @@ class Journal:
 
         self._journal.final_p_pos = self._journal.js.tell()
         return bytes_written
-
-    def advance_strm(self, *args, **kwargs):
-        import warnings
-        warnings.warn(
-            "advance_strm is deprecated. Use self._file_io.advance_strm() instead.",
-            DeprecationWarning,
-            stacklevel=2
-        )
-        return self._file_io.advance_strm(*args, **kwargs)
-
-    def r_and_wb_last(self, cg: Change, p_buf: List, ctr: int, cur_blk_num: bNum_t, pg: Page):
-        print("DEPRECATED: Use self._change_log_handler.r_and_wb_last() instead")
-        return self._change_log_handler.r_and_wb_last(cg, p_buf, ctr, cur_blk_num, pg)
 
     def rd_last_jrnl(self, r_j_cg_log: ChangeLog):
         logger.debug("Entering rd_last_jrnl")
@@ -424,19 +390,6 @@ class Journal:
 
         return ck_end_tag
 
-    def get_num_data_lines(self, r_cg: Change) -> int:
-        print("DEPRECATED: Use self._change_log_handler.get_num_data_lines() instead")
-        return self._change_log_handler.get_num_data_lines(r_cg)
-
-    def rd_field(self, *args, **kwargs):
-        import warnings
-        warnings.warn(
-            "rd_field is deprecated. Use self._file_io.rd_field() instead.",
-            DeprecationWarning,
-            stacklevel=2
-        )
-        return self._file_io.rd_field(*args, **kwargs)
-
     def empty_purge_jrnl_buf(self, p_pg_pr: List[Tuple[bNum_t, Page]], p_ctr: int, is_end: bool = False) -> bool:
         temp = bytearray(u32Const.BLOCK_BYTES.value)
         self.p_d.do_create_block(temp, u32Const.BLOCK_BYTES.value)
@@ -488,19 +441,6 @@ class Journal:
             return False
 
         return True
-
-    def get_next_lin_num(self, cg: Change) -> lNum_t:
-        print("DEPRECATED: Use self._change_log_handler.get_next_lin_num() instead")
-        return self._change_log_handler.get_next_lin_num(cg)
-
-    def reset_file(self, *args, **kwargs):
-        import warnings
-        warnings.warn(
-            "reset_file is deprecated. Use self._file_io.reset_file() instead.",
-            DeprecationWarning,
-            stacklevel=2
-        )
-        return self._file_io.reset_file(*args, **kwargs)
 
     def verify_bytes_read(self):
         expected_bytes = self.ct_bytes_to_write + self.META_LEN
