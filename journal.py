@@ -337,29 +337,6 @@ class Journal:
         )
         return self._file_io.advance_strm(*args, **kwargs)
 
-    # def rd_and_wrt_back(self, j_cg_log: ChangeLog, p_buf: List, ctr: int, prv_blk_num: bNum_t, cur_blk_num: bNum_t,
-    #                     pg: Page):
-    #     for blk_num, changes in j_cg_log.the_log.items():
-    #         for idx, cg in enumerate(changes):
-    #             cur_blk_num = cg.block_num
-    #             if cur_blk_num != prv_blk_num:
-    #                 if prv_blk_num is not None:
-    #                     if ctr == self.NUM_PGS_JRNL_BUF:
-    #                         self.empty_purge_jrnl_buf(p_buf, ctr)
-    #
-    #                     p_buf[ctr] = (prv_blk_num, pg)
-    #                     ctr += 1
-    #
-    #                 pg = Page()
-    #                 self.p_d.get_ds().seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
-    #                 pg.dat = bytearray(self.p_d.get_ds().read(u32Const.BLOCK_BYTES.value))
-    #
-    #             prv_blk_num = cur_blk_num
-    #
-    #             self._change_log_handler.wrt_cg_to_pg(cg, pg)  # Updated
-    #
-    #     return ctr, prv_blk_num, cur_blk_num, pg
-
     def r_and_wb_last(self, cg: Change, p_buf: List, ctr: int, cur_blk_num: bNum_t, pg: Page):
         if ctr == self.NUM_PGS_JRNL_BUF:
             self.empty_purge_jrnl_buf(p_buf, ctr)
