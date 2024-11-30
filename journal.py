@@ -927,12 +927,13 @@ class Journal:
             if not j_cg_log.the_log:  # Check if the log is empty
                 return ctr, prv_blk_num, cur_blk_num, pg
 
+            first_iteration = True
             for blk_num, changes in j_cg_log.the_log.items():
                 logger.debug(f"Processing block {blk_num} with {len(changes)} changes")
                 for idx, cg in enumerate(changes):
                     cur_blk_num = cg.block_num
-                    if cur_blk_num != prv_blk_num:
-                        if prv_blk_num is not None:
+                    if cur_blk_num != prv_blk_num or first_iteration:
+                        if not first_iteration:  # Don't try to write previous block on first iteration
                             logger.debug(f"New block encountered. ctr before: {ctr}")
                             if ctr == self._journal.NUM_PGS_JRNL_BUF:
                                 self._journal.empty_purge_jrnl_buf(p_buf, ctr)
@@ -945,10 +946,20 @@ class Journal:
                         # Use the provided pg instead of creating a new one
                         self._journal.p_d.get_ds().seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
                         pg.dat = bytearray(self._journal.p_d.get_ds().read(u32Const.BLOCK_BYTES.value))
+                        first_iteration = False
 
                     prv_blk_num = cur_blk_num
-
                     self.wrt_cg_to_pg(cg, pg)
+
+            # Handle the last block
+            if not first_iteration:  # Only if we've processed at least one block
+                logger.debug(f"Processing final block. ctr before: {ctr}")
+                if ctr == self._journal.NUM_PGS_JRNL_BUF:
+                    self._journal.empty_purge_jrnl_buf(p_buf, ctr)
+                    ctr = 0
+                p_buf[ctr] = (prv_blk_num, pg)
+                ctr += 1
+                logger.debug(f"ctr after final increment: {ctr}")
 
             return ctr, prv_blk_num, cur_blk_num, pg
 
