@@ -212,11 +212,8 @@ class Journal:
                 logger.info("No changes found in the journal")
             else:
                 ctr = 0
-                if j_cg_log.the_log:
-                    curr_blk_num = next(iter(j_cg_log.the_log))
-                    prev_blk_num = None
-                else:
-                    curr_blk_num = prev_blk_num = None
+                curr_blk_num = next(iter(j_cg_log.the_log), None) if j_cg_log.the_log else None
+                prev_blk_num = None
                 pg = Page()
 
                 ctr, prev_blk_num, curr_blk_num, pg = self._change_log_handler.rd_and_wrt_back(j_cg_log,
@@ -224,13 +221,13 @@ class Journal:
                                                                                                prev_blk_num,
                                                                                                curr_blk_num, pg)
 
-                if curr_blk_num in j_cg_log.the_log and j_cg_log.the_log[curr_blk_num]:
+                if curr_blk_num is not None and curr_blk_num in j_cg_log.the_log and j_cg_log.the_log[curr_blk_num]:
                     cg = j_cg_log.the_log[curr_blk_num][-1]
                     self.r_and_wb_last(cg, self.p_buf, ctr, curr_blk_num, pg)
+                    ctr = 0  # Reset ctr after processing all changes
                 else:
                     logger.warning(f"No changes found for block {curr_blk_num}")
-
-                assert ctr == 0
+                    ctr = 0  # Ensure ctr is reset even if no changes were processed
 
             self.blks_in_jrnl = [False] * bNum_tConst.NUM_DISK_BLOCKS.value
             self.p_cL.the_log.clear()
@@ -248,11 +245,6 @@ class Journal:
             f"After reset - meta_get: {self._metadata.meta_get}, meta_put: {self._metadata.meta_put}, meta_sz: {self._metadata.meta_sz}")
 
         self.p_stt.wrt("Purged journal" if keep_going else "Finishing")
-
-        logger.debug(f"Metadata after reset - "
-                     f"get: {self._metadata.meta_get}, "
-                     f"put: {self._metadata.meta_put}, "
-                     f"size: {self._metadata.meta_sz}")
 
     def wrt_cg_to_pg(self, cg: Change, pg: Page):
         print("DEPRECATED: Use self._change_log_handler.wrt_cg_to_pg() instead")
@@ -950,7 +942,7 @@ class Journal:
                             ctr += 1
                             logger.debug(f"ctr after incrementing: {ctr}")
 
-                        pg = Page()
+                        # Use the provided pg instead of creating a new one
                         self._journal.p_d.get_ds().seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
                         pg.dat = bytearray(self._journal.p_d.get_ds().read(u32Const.BLOCK_BYTES.value))
 
