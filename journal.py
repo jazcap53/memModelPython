@@ -132,57 +132,8 @@ class Journal:
         return self._change_log_handler.calculate_ct_bytes_to_write(r_cg_log)
 
     def wrt_cg_log_to_jrnl(self, r_cg_log: ChangeLog):
-        logger.debug(f"Entering wrt_cg_log_to_jrnl with {len(r_cg_log.the_log)} blocks in change log")
-
-        if not r_cg_log.cg_line_ct:
-            return
-
-        logger.info("Writing change log to journal")
-        r_cg_log.print()  # This might need to be updated in ChangeLog class
-
-        self.ttl_bytes_written = 0  # Reset here
-
-        # Use the nested class method
-        self.ct_bytes_to_write = self._change_log_handler.calculate_ct_bytes_to_write(r_cg_log)
-        logger.debug(f"Calculated bytes to write: {self.ct_bytes_to_write}")
-
-        # Write start tag and ct_bytes_to_write (don't count these in ttl_bytes_written)
-        self._file_io.write_start_tag()
-        self._file_io.write_ct_bytes(self.ct_bytes_to_write)
-
-        # Write changes and count bytes
-        self._file_io.wrt_cgs_to_jrnl(r_cg_log)
-        logger.debug(f"Actual bytes written: {self.ttl_bytes_written}")
-
-        # Write end tag (don't count)
-        self._file_io.write_end_tag()
-
-        # Update metadata
-        new_g_pos = Journal.META_LEN  # Start reading from META_LEN
-        new_p_pos = self.js.tell()
-        ttl_bytes = self.ct_bytes_to_write + Journal.META_LEN
-
-        # Update both instance and file metadata
-        self._metadata.meta_get = new_g_pos
-        self._metadata.meta_put = new_p_pos
-        self._metadata.meta_sz = ttl_bytes
-        self._metadata.write(new_g_pos, new_p_pos, ttl_bytes)
-
-        self.js.flush()
-        os.fsync(self.js.fileno())
-
-        logger.debug(f"Metadata after write - get: {self._metadata.meta_get}, "
-                     f"put: {self._metadata.meta_put}, "
-                     f"size: {self._metadata.meta_sz}")
-
-        logger.info(f"Change log written at time {get_cur_time()}")
-        r_cg_log.cg_line_ct = 0
-        self.p_stt.wrt("Change log written")
-
-        logger.debug(f"Exiting wrt_cg_log_to_jrnl. Wrote {self.ttl_bytes_written} bytes. Final metadata - "
-                     f"get: {self._metadata.meta_get}, "
-                     f"put: {self._metadata.meta_put}, "
-                     f"size: {self._metadata.meta_sz}")
+        print("DEPRECATED: Use self._change_log_handler.wrt_cg_log_to_jrnl() instead")
+        return self._change_log_handler.wrt_cg_log_to_jrnl(r_cg_log)
 
     def write_change(self, cg: Change) -> int:
         print("DEPRECATED: Use self._change_log_handler.write_change() instead")
@@ -263,7 +214,7 @@ class Journal:
             p_f_m.do_store_inodes()
             p_f_m.do_store_free_list()
             logger.info("Saving change log and purging journal before adding new block")
-            self.wrt_cg_log_to_jrnl(self.p_cL)
+            self._change_log_handler.wrt_cg_log_to_jrnl(self.p_cL)
             self.purge_jrnl(True, False)
             self.wipers.clear_array()
 
@@ -943,6 +894,59 @@ class Journal:
                        f"Stored CRC in Page for block {cur_blk_num}: {format_hex_like_hexdump(to_bytes_64bit(stored_crc)[:4])}")
 
             self._journal.empty_purge_jrnl_buf(p_buf, ctr, True)
+
+        def wrt_cg_log_to_jrnl(self, r_cg_log: ChangeLog):
+            logger.debug(f"Entering wrt_cg_log_to_jrnl with {len(r_cg_log.the_log)} blocks in change log")
+
+            if not r_cg_log.cg_line_ct:
+                return
+
+            logger.info("Writing change log to journal")
+            r_cg_log.print()  # This might need to be updated in ChangeLog class
+
+            self._journal.ttl_bytes_written = 0  # Reset here
+
+            # Calculate bytes to write
+            self._journal.ct_bytes_to_write = self.calculate_ct_bytes_to_write(r_cg_log)
+            logger.debug(f"Calculated bytes to write: {self._journal.ct_bytes_to_write}")
+
+            # Write start tag and ct_bytes_to_write (don't count these in ttl_bytes_written)
+            self._journal._file_io.write_start_tag()
+            self._journal._file_io.write_ct_bytes(self._journal.ct_bytes_to_write)
+
+            # Write changes and count bytes
+            self._journal._file_io.wrt_cgs_to_jrnl(r_cg_log)
+            logger.debug(f"Actual bytes written: {self._journal.ttl_bytes_written}")
+
+            # Write end tag (don't count)
+            self._journal._file_io.write_end_tag()
+
+            # Update metadata
+            new_g_pos = Journal.META_LEN  # Start reading from META_LEN
+            new_p_pos = self._journal.js.tell()
+            ttl_bytes = self._journal.ct_bytes_to_write + Journal.META_LEN
+
+            # Update both instance and file metadata
+            self._journal._metadata.meta_get = new_g_pos
+            self._journal._metadata.meta_put = new_p_pos
+            self._journal._metadata.meta_sz = ttl_bytes
+            self._journal._metadata.write(new_g_pos, new_p_pos, ttl_bytes)
+
+            self._journal.js.flush()
+            os.fsync(self._journal.js.fileno())
+
+            logger.debug(f"Metadata after write - get: {self._journal._metadata.meta_get}, "
+                         f"put: {self._journal._metadata.meta_put}, "
+                         f"size: {self._journal._metadata.meta_sz}")
+
+            logger.info(f"Change log written at time {get_cur_time()}")
+            r_cg_log.cg_line_ct = 0
+            self._journal.p_stt.wrt("Change log written")
+
+            logger.debug(f"Exiting wrt_cg_log_to_jrnl. Wrote {self._journal.ttl_bytes_written} bytes. Final metadata - "
+                         f"get: {self._journal._metadata.meta_get}, "
+                         f"put: {self._journal._metadata.meta_put}, "
+                         f"size: {self._journal._metadata.meta_sz}")
 
 
     class _CRCHandler:

@@ -155,9 +155,10 @@ def test_write_change_log(journal, mock_change_log, mocker, caplog):
     mocker.patch('journal.get_cur_time', return_value=12345)
 
     with caplog.at_level(logging.DEBUG):
-        # Write to journal using the non-deprecated method
+        # Write to journal using non-deprecated methods
         journal._change_log_handler.calculate_ct_bytes_to_write(mock_change_log)
-        journal.wrt_cg_log_to_jrnl(mock_change_log)
+        journal._change_log_handler.wrt_cg_log_to_jrnl(mock_change_log)
+
 
     # Verify log messages
     assert any("Writing change log to journal" in record.message for record in caplog.records)
@@ -252,9 +253,9 @@ def test_purge_journal(journal, mock_change_log, mocker, caplog):
     mock_change_log.the_log = mock_dict
     mock_change_log.cg_line_ct = 1
 
-    # Write to journal using non-deprecated method
+    # Write to journal using non-deprecated methods
     journal._change_log_handler.calculate_ct_bytes_to_write(mock_change_log)
-    journal.wrt_cg_log_to_jrnl(mock_change_log)
+    journal._change_log_handler.wrt_cg_log_to_jrnl(mock_change_log)
 
     # Verify pre-purge state
     assert journal.blks_in_jrnl[1] is True
