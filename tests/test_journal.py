@@ -389,7 +389,7 @@ def test_r_and_wb_last(journal, mocker, caplog):
 
     # Set logging level to WARNING to suppress DEBUG messages
     with caplog.at_level(logging.WARNING):
-        journal.r_and_wb_last(cg, p_buf, 0, 1, pg)
+        journal._change_log_handler.r_and_wb_last(cg, p_buf, 0, 1, pg)
 
     # Verify the buffer was updated correctly
     assert p_buf[0] == (1, pg)

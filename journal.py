@@ -223,7 +223,7 @@ class Journal:
 
                 if curr_blk_num is not None and curr_blk_num in j_cg_log.the_log and j_cg_log.the_log[curr_blk_num]:
                     cg = j_cg_log.the_log[curr_blk_num][-1]
-                    self.r_and_wb_last(cg, self.p_buf, ctr, curr_blk_num, pg)
+                    self._change_log_handler.r_and_wb_last(cg, self.p_buf, ctr, curr_blk_num, pg)
                     ctr = 0  # Reset ctr after processing all changes
                 else:
                     logger.warning(f"No changes found for block {curr_blk_num}")
@@ -338,25 +338,8 @@ class Journal:
         return self._file_io.advance_strm(*args, **kwargs)
 
     def r_and_wb_last(self, cg: Change, p_buf: List, ctr: int, cur_blk_num: bNum_t, pg: Page):
-        if ctr == self.NUM_PGS_JRNL_BUF:
-            self.empty_purge_jrnl_buf(p_buf, ctr)
-
-        p_buf[ctr] = (cur_blk_num, pg)
-        ctr += 1
-
-        self._change_log_handler.wrt_cg_to_pg(cg, pg)
-
-        # Calculate and store CRC
-        crc = AJZlibCRC.get_code(pg.dat, u32Const.BYTES_PER_PAGE.value)
-        stored_crc = int.from_bytes(pg.dat[-4:], 'little')
-
-        # Use TRACE level (even more detailed than DEBUG)
-        logger.log(5,
-                   f"Calculated CRC of entire Page for block {cur_blk_num}: {format_hex_like_hexdump(to_bytes_64bit(crc)[:4])}")
-        logger.log(5,
-                   f"Stored CRC in Page for block {cur_blk_num}: {format_hex_like_hexdump(to_bytes_64bit(stored_crc)[:4])}")
-
-        self.empty_purge_jrnl_buf(p_buf, ctr, True)
+        print("DEPRECATED: Use self._change_log_handler.r_and_wb_last() instead")
+        return self._change_log_handler.r_and_wb_last(cg, p_buf, ctr, cur_blk_num, pg)
 
     def rd_last_jrnl(self, r_j_cg_log: ChangeLog):
         logger.debug("Entering rd_last_jrnl")
@@ -939,6 +922,27 @@ class Journal:
                 logger.debug(f"ctr after final increment: {ctr}")
 
             return ctr, prv_blk_num, cur_blk_num, pg
+
+        def r_and_wb_last(self, cg: Change, p_buf: List, ctr: int, cur_blk_num: bNum_t, pg: Page):
+            if ctr == self._journal.NUM_PGS_JRNL_BUF:
+                self._journal.empty_purge_jrnl_buf(p_buf, ctr)
+
+            p_buf[ctr] = (cur_blk_num, pg)
+            ctr += 1
+
+            self.wrt_cg_to_pg(cg, pg)
+
+            # Calculate and store CRC
+            crc = AJZlibCRC.get_code(pg.dat, u32Const.BYTES_PER_PAGE.value)
+            stored_crc = int.from_bytes(pg.dat[-4:], 'little')
+
+            # Use TRACE level (even more detailed than DEBUG)
+            logger.log(5,
+                       f"Calculated CRC of entire Page for block {cur_blk_num}: {format_hex_like_hexdump(to_bytes_64bit(crc)[:4])}")
+            logger.log(5,
+                       f"Stored CRC in Page for block {cur_blk_num}: {format_hex_like_hexdump(to_bytes_64bit(stored_crc)[:4])}")
+
+            self._journal.empty_purge_jrnl_buf(p_buf, ctr, True)
 
 
     class _CRCHandler:
