@@ -364,15 +364,17 @@ def test_rd_and_wrt_back(journal, mocker, caplog):
         mock_j_cg_log, p_buf, ctr, prv_blk_num, cur_blk_num, mock_pg
     )
 
-    # Debug information
-    for record in caplog.records:
-        print(record.message)
-
     # Assertions
     assert ctr == 1, f"Expected ctr to be 1, but got {ctr}"
     assert prv_blk_num == 1
     assert cur_blk_num == 1
     journal._change_log_handler.wrt_cg_to_pg.assert_called_once_with(mock_change1, mock_pg)
+
+    # Check log messages without printing them
+    log_messages = [record.message for record in caplog.records]
+    assert "Processing block 1 with 1 changes" in log_messages
+    assert "Processing final block. ctr before: 0" in log_messages
+    assert "ctr after final increment: 1" in log_messages
 
 
 def test_r_and_wb_last(journal, mocker, caplog):
