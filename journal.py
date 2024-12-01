@@ -1,3 +1,18 @@
+"""Journal module for managing disk write operations and crash recovery.
+
+This module provides a journaling system to ensure data consistency in case of
+system crashes during disk writes. It maintains a log of changes, allowing for
+recovery and rollback of incomplete operations.
+
+The journal operates by:
+1. Recording changes before they are written to disk
+2. Providing crash recovery by replaying or rolling back incomplete changes
+3. Managing the lifecycle of journal entries
+
+Classes:
+    Journal: Main class handling journal operations
+    NoSelectorsAvailableError: Custom exception for selector exhaustion
+"""
 from ajTypes import write_64bit, read_64bit, write_32bit, read_32bit, to_bytes_64bit, from_bytes_64bit
 import struct
 from typing import List, Dict, Tuple, Optional
@@ -24,6 +39,22 @@ class NoSelectorsAvailableError(Exception):
 
 
 class Journal:
+    """Manages the journaling system for disk write operations.
+
+    The Journal class handles recording, tracking, and recovering changes to disk.
+    It uses a file-based approach to maintain consistency and provide crash recovery.
+
+    Attributes:
+        START_TAG (int): Marker indicating the start of a journal entry
+        END_TAG (int): Marker indicating the end of a journal entry
+        META_LEN (int): Length of metadata in bytes
+        NUM_PGS_JRNL_BUF (int): Number of pages in journal buffer
+
+    Properties:
+        meta_get (int): Current read position in journal
+        meta_put (int): Current write position in journal
+        meta_sz (int): Current size of journal data
+    """
     # Constants and class-level attributes
     START_TAG = 0x4f6df70c778691f1
     END_TAG = 0xae0da05e65275d3a
@@ -60,6 +91,19 @@ class Journal:
         self._metadata.meta_sz = value
 
     def __init__(self, f_name: str, sim_disk, change_log, status, crash_chk, debug=False):
+        """Initialize the Journal instance.
+
+        Args:
+            f_name: Name of the journal file
+            sim_disk: Simulated disk instance
+            change_log: Change tracking log
+            status: Status tracking instance
+            crash_chk: Crash checking utility
+            debug: Enable debug mode if True
+
+        Raises:
+            RuntimeError: If journal file size doesn't match expected size
+        """
         # Basic instance variables
         self.debug = debug
         self.f_name = f_name
@@ -454,19 +498,41 @@ class Journal:
 
     # Nested classes
     class _Metadata:
+        """Handles journal metadata operations.
+
+        This inner class manages reading and writing of journal metadata,
+        including positions for reading and writing, and total bytes stored.
+        """
         def __init__(self, journal_instance):
+            """Initialize metadata handler.
+
+            Args:
+                journal_instance: Parent Journal instance
+            """
             self._journal = journal_instance
             self.meta_get = 0
             self.meta_put = 0
             self.meta_sz = 0
 
         def read(self):
+            """Read metadata from journal file.
+
+            Returns:
+                Tuple of (read position, write position, total bytes)
+            """
             self._journal.js.seek(0)
             self.meta_get, self.meta_put, self.meta_sz = struct.unpack('<qqq',
                 self._journal.js.read(24))
             return self.meta_get, self.meta_put, self.meta_sz
 
         def write(self, new_g_pos: int, new_p_pos: int, u_ttl_bytes_written: int):
+            """Write metadata to journal file.
+
+            Args:
+                new_g_pos: New read position
+                new_p_pos: New write position
+                u_ttl_bytes_written: Updated total bytes written
+            """
             self._journal.js.seek(0)
             metadata = struct.pack('<qqq', new_g_pos, new_p_pos, u_ttl_bytes_written)
             self._journal.js.write(metadata)
@@ -479,10 +545,32 @@ class Journal:
             self._journal.js.write(struct.pack('<qqq', rd_pt, wrt_pt, bytes_stored))
 
     class _FileIO:
+        """Handles file I/O operations for the journal.
+
+        This inner class manages reading from and writing to the journal file,
+        handling wraparound when reaching file boundaries.
+                """
         def __init__(self, journal_instance):
+            """Initialize file I/O handler.
+
+            Args:
+                journal_instance: Parent Journal instance
+            """
             self._journal = journal_instance
 
         def wrt_field(self, data: bytes, dat_len: int, do_ct: bool) -> int:
+            """Write a field to the journal file.
+
+            Handles wraparound if writing would exceed file boundaries.
+
+            Args:
+                data: Bytes to write
+                dat_len: Length of data to write
+                do_ct: Whether to count bytes in total
+
+            Returns:
+                Number of bytes written
+            """
             bytes_written = 0
             p_pos = self._journal.js.tell()
             buf_sz = u32Const.JRNL_SIZE.value
@@ -661,7 +749,17 @@ class Journal:
             logger.debug(f"Exiting _FileIO.wrt_cgs_to_jrnl. Total bytes written: {self._journal.ttl_bytes_written}")
 
     class _ChangeLogHandler:
+        """Manages change log operations for the journal.
+
+        This inner class handles writing changes to the journal and
+        processing them during recovery.
+        """
         def __init__(self, journal_instance):
+            """Initialize change log handler.
+
+            Args:
+                journal_instance: Parent Journal instance
+            """
             self._journal = journal_instance
 
         def get_num_data_lines(self, r_cg: Change) -> int:
@@ -834,6 +932,18 @@ class Journal:
             self._journal.empty_purge_jrnl_buf(p_buf, ctr, True)
 
         def wrt_cg_log_to_jrnl(self, r_cg_log: ChangeLog):
+            """Write entire change log to journal.
+
+            Args:
+                r_cg_log: Change log to write
+
+            This method handles:
+            1. Calculating total bytes to write
+            2. Writing start tag and metadata
+            3. Writing all changes
+            4. Writing end tag
+            5. Updating journal metadata
+            """
             logger.debug(f"Entering wrt_cg_log_to_jrnl with {len(r_cg_log.the_log)} blocks in change log")
 
             if not r_cg_log.cg_line_ct:
