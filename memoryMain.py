@@ -27,6 +27,23 @@ from memMan import MemMan
 from fileMan import FileMan
 from client import Client
 
+# TODO: to implement centralized logging, comment in these lines and add the lines
+# TODO:     below # ============== to each module, replacing its current scheme
+#
+# from logging_config import setup_logging, get_logger
+#
+# # Set up logging at the start of your program
+# setup_logging()
+#
+# # Get a logger for this module
+# logger = get_logger(__name__)
+# ========================
+# from logging_config import get_logger
+#
+# logger = get_logger(__name__)
+
+
+
 
 def main(argv):
     # Initialize crash checker to help system recover gracefully from a crash
