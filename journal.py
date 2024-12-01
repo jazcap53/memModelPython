@@ -160,6 +160,7 @@ class Journal:
         self.init()
 
     def __del__(self):
+        """Clean up resources by closing the journal file."""
         try:
             if hasattr(self, 'js') and self.js and not self.js.closed:
                 self.js.close()
@@ -167,9 +168,28 @@ class Journal:
             print(f"Error closing journal file in __del__: {e}")
 
     def init(self):
+        """Initialize journal metadata to default values.
+
+        Sets read position to -1, write position to 24, and size to 0.
+        """
         self._metadata.init()
 
     def purge_jrnl(self, keep_going: bool, had_crash: bool):
+        """Purge the journal, optionally handling crash recovery.
+
+        This method clears the journal, writing any pending changes to disk.
+        It handles both normal purges and crash recovery scenarios.
+
+        Args:
+            keep_going: If True, continue normal operation after purge
+            had_crash: If True, treat this as crash recovery
+
+        Side effects:
+            - Updates journal file
+            - Resets journal metadata
+            - Modifies self.blks_in_jrnl
+            - Clears self.p_cL.the_log
+            - Updates status        """
         logger.debug(f"Entering purge_jrnl(keep_going={keep_going}, had_crash={had_crash})")
 
         if self.debug:
@@ -228,9 +248,31 @@ class Journal:
         self.p_stt.wrt("Purged journal" if keep_going else "Finishing")
 
     def is_in_jrnl(self, b_num: bNum_t) -> bool:
+        """Check if a block number is currently in the journal.
+
+        Args:
+            b_num: Block number to check
+
+        Returns:
+            True if the block is in the journal, False otherwise
+        """
         return self.blks_in_jrnl[b_num]
 
     def do_wipe_routine(self, b_num: bNum_t, p_f_m):
+        """Perform the wipe routine for a given block.
+
+        This method handles the process of preparing a block for a new write
+        operation, including storing inodes and the free list if necessary.
+
+        Args:
+            b_num: Block number to process
+            p_f_m: File manager instance
+
+        Side effects:
+            - May trigger journal purge
+            - May update inodes and free list
+            - Clears wiper array after operation
+        """
         if self.wipers.is_dirty(b_num) or self.wipers.is_ripe():
             p_f_m.do_store_inodes()
             p_f_m.do_store_free_list()
@@ -240,6 +282,27 @@ class Journal:
             self.wipers.clear_array()
 
     def wrt_field(self, data: bytes, dat_len: int, do_ct: bool) -> int:
+        """Write a field to the journal file.
+
+        Handles writing data to the journal, managing wraparound at file boundaries.
+
+        Args:
+            data: The bytes to write
+            dat_len: Length of data to write
+            do_ct: Whether to count bytes in total
+
+        Returns:
+            int: Number of bytes written
+
+        Side effects:
+            - Writes to journal file
+            - Updates self.ttl_bytes_written if do_ct is True
+            - Updates self.final_p_pos
+
+        Note:
+            If writing would exceed file boundaries, the write operation wraps
+            around to the beginning of the file (after metadata).
+        """
         start_pos = self._journal.js.tell()
         bytes_written = 0
         p_pos = self._journal.js.tell()
@@ -301,6 +364,22 @@ class Journal:
         return bytes_written
 
     def rd_last_jrnl(self, r_j_cg_log: ChangeLog):
+        """Read the last journal entry into a change log.
+
+        This method reads the most recent changes from the journal file and
+        populates the provided change log with the data.
+
+        Args:
+            r_j_cg_log: ChangeLog instance to populate with journal data
+
+        Raises:
+            ValueError: If start or end tags don't match expected values
+
+        Side effects:
+            - Updates file pointer position
+            - Modifies r_j_cg_log
+            - Updates the provide
+        """
         logger.debug("Entering rd_last_jrnl")
 
         with self.track_position("rd_last_jrnl"):
@@ -332,6 +411,28 @@ class Journal:
                          f"size: {self.meta_sz}")
 
     def rd_jrnl(self, r_j_cg_log: ChangeLog, start_pos: int) -> Tuple[int, int, int]:
+        """Read journal contents from a given position.
+
+        This method reads and processes journal entries, including start tag,
+        change data, and end tag.
+
+        Args:
+            r_j_cg_log: ChangeLog to populate with read data
+            start_pos: Position in journal file to start reading from
+
+        Returns:
+            Tuple[int, int, int]: Start tag, end tag, and total bytes read
+
+        Side effects:
+            - Updates file pointer position
+            - Modifies r_j_cg_log
+
+        This method is responsible for:
+        1. Reading and verifying the start tag
+        2. Reading the number of bytes to process
+        3. Reading all changes between the tags
+        4. Reading and verifying the end tag
+        """
         with self.track_position("read_start_tag"):
             ck_start_tag = self._file_io.read_start_tag()
 
@@ -347,9 +448,33 @@ class Journal:
         return ck_start_tag, ck_end_tag, bytes_read
 
     def _read_start_tag(self) -> int:
+        """Read and return the start tag from the journal file.
+
+        Returns:
+            int: The start tag value read from the file
+
+        This method is used internally to verify the beginning of a journal entry.
+        """
         return read_64bit(self.js)
 
     def _read_changes(self, r_j_cg_log: ChangeLog, ct_bytes_to_write: int) -> int:
+        """Read changes from the journal and populate the change log.
+
+        Args:
+            r_j_cg_log: ChangeLog to populate with read changes
+            ct_bytes_to_write: Number of bytes to read
+
+        Returns:
+            int: Total number of bytes read
+
+        Side effects:
+            - Updates file pointer position
+            - Modifies r_j_cg_log
+
+        This method reads individual changes from the journal file and adds them
+        to the provided change log until all specified bytes are processed or
+        the end of the journal is reached.
+        """
         bytes_read = 0
         while bytes_read < ct_bytes_to_write:
             if self._check_journal_end(bytes_read, ct_bytes_to_write):
@@ -366,9 +491,35 @@ class Journal:
         return bytes_read
 
     def _check_journal_end(self, bytes_read: int, ct_bytes_to_write: int) -> bool:
+        """Check if the end of the journal has been reached.
+
+        Args:
+            bytes_read: Number of bytes read so far
+            ct_bytes_to_write: Total number of bytes to write
+
+        Returns:
+            bool: True if end of journal is reached, False otherwise
+
+        This method checks if we've reached the end of the journal file or
+        if we've read all the bytes we need to.
+        """
         return (self.js.tell() + 16 > u32Const.JRNL_SIZE.value) or (bytes_read >= ct_bytes_to_write)
 
     def _read_single_change(self, bytes_read: int) -> Tuple[Optional[Change], int]:
+        """Read a single change from the journal file.
+
+        Args:
+            bytes_read: Number of bytes read so far
+
+        Returns:
+            Tuple[Optional[Change], int]: The read Change object (if any) and updated bytes read
+
+        Side effects:
+            - Updates file pointer position
+
+        This method reads a single change entry from the journal, including
+        block number, timestamp, and all associated selectors and data.
+        """
         b_num = read_64bit(self.js)
         bytes_read += 8
         if bytes_read > self.ct_bytes_to_write:
@@ -398,6 +549,20 @@ class Journal:
         return cg, bytes_read
 
     def _read_selector(self, bytes_read: int) -> Tuple[Optional[Select], int]:
+        """Read a selector from the journal file.
+
+        Args:
+            bytes_read: Current count of bytes read from journal
+
+        Returns:
+            Tuple containing:
+            - Select object if successfully read, None if at file boundary
+            - Number of bytes read (always 8 if successful)
+
+        This method reads an 8-byte selector from the current file position.
+        It checks for file boundaries and ensures we haven't exceeded our
+        read limit before attempting to read the selector.
+        """
         if self.js.tell() + 8 > u32Const.JRNL_SIZE.value:
             return None, 0
 
@@ -408,6 +573,20 @@ class Journal:
         return Select.from_bytes(selector_data), 8
 
     def _read_data_for_selector(self, selector: Select, cg: Change, bytes_read: int) -> int:
+        """Read data lines for a given selector.
+
+        Args:
+            selector: Select object indicating which lines to read
+            cg: Change object to populate with read data
+            bytes_read: Current count of bytes read from journal
+
+        Returns:
+            int: Number of bytes read for this selector
+
+        This method reads the data lines indicated by the selector's set bits.
+        It handles file boundaries and ensures we don't exceed our read limit.
+        For each line read, it appends the data to the Change object's new_data list.
+        """
         data_bytes_read = 0
         for i in range(63):  # Process up to 63 lines (excluding MSB)
             if not selector.is_set(i):
@@ -424,6 +603,17 @@ class Journal:
         return data_bytes_read
 
     def _read_end_tag(self) -> int:
+        """Read and verify the end tag from the journal file.
+
+        Returns:
+            int: The end tag value read from the file
+
+        Raises:
+            ValueError: If the read end tag doesn't match the expected value
+
+        This method reads an 8-byte end tag and verifies it matches the expected
+        END_TAG value, ensuring the journal entry was properly terminated.
+        """
         current_pos = self.js.tell()
         ck_end_tag = read_64bit(self.js)
 
@@ -433,6 +623,29 @@ class Journal:
         return ck_end_tag
 
     def empty_purge_jrnl_buf(self, p_pg_pr: List[Tuple[bNum_t, Page]], p_ctr: int, is_end: bool = False) -> bool:
+        """Empty the journal's purge buffer by writing pages to disk.
+
+        This method processes the buffer of pages that need to be written back to disk
+        during a journal purge operation.
+
+        Args:
+            p_pg_pr: List of tuples containing block numbers and corresponding pages
+            p_ctr: Counter indicating number of valid entries in p_pg_pr
+            is_end: Flag indicating if this is the final buffer emptying
+
+        Returns:
+            bool: True if all writes were successful, False otherwise
+
+        Side effects:
+            - Writes pages to disk
+            - Updates CRC for each page
+            - Logs debug information about writes
+
+        For each page in the buffer:
+        1. Calculates a new CRC
+        2. Writes the CRC to the page
+        3. Either writes the page to disk or overwrites with zeros if marked dirty
+        """
         temp = bytearray(u32Const.BLOCK_BYTES.value)
         self.p_d.do_create_block(temp, u32Const.BLOCK_BYTES.value)
 
@@ -466,13 +679,20 @@ class Journal:
 
         return ok_val
 
-    def crc_check_pg(self, p_pr: Tuple[bNum_t, Page]):
+    def crc_check_pg(self, p_pr: Tuple[bNum_t, Page]) -> bool:
+        """Verify the CRC of a page.
+
+        Args:
+            p_pr: Tuple of (block number, Page)
+
+        Returns:
+            bool: True if CRC matches, False otherwise
+
+        Prints a warning if CRC mismatch is detected.
+        """
         block_num, page = p_pr
 
-        # Read the stored CRC directly from page.dat
         stored_crc = int.from_bytes(page.dat[-u32Const.CRC_BYTES.value:], 'little')
-
-        # Calculate the CRC directly from page.dat
         calculated_crc = AJZlibCRC.get_code(page.dat[:-u32Const.CRC_BYTES.value],
                                             u32Const.BYTES_PER_PAGE.value - u32Const.CRC_BYTES.value)
 
@@ -485,16 +705,35 @@ class Journal:
         return True
 
     def verify_bytes_read(self):
+        """Verify that the number of bytes read matches the expected count.
+
+        Raises:
+            AssertionError: If actual bytes read doesn't match expected bytes
+
+        Used for internal consistency checking during journal operations.
+        """
         expected_bytes = self.ct_bytes_to_write + self.META_LEN
-        actual_bytes = self.js.tell() - self.META_LEN  # Assuming we start reading after metadata
+        actual_bytes = self.js.tell() - self.META_LEN
         assert expected_bytes == actual_bytes, f"Byte mismatch: expected {expected_bytes}, got {actual_bytes}"
 
     @contextmanager
-    def track_position(self, operation_name):
+    def track_position(self, operation_name: str):
+        """Context manager to track file position changes during operations.
+
+        Args:
+            operation_name: Name of the operation being tracked
+
+        Yields:
+            None
+
+        Use to wrap specific file operations for debugging position changes.
+        """
         start_pos = self.js.tell()
         yield
         end_pos = self.js.tell()
         bytes_read = end_pos - start_pos
+        # TODO: This method doesn't currently use operation_name or bytes_read.
+        # TODO: Consider adding logging or analysis using these values if needed.
 
     # Nested classes
     class _Metadata:
