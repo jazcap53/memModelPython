@@ -107,8 +107,6 @@ class Journal:
         self._metadata = self._Metadata(self)
         self._file_io = self._FileIO(self)
         self._change_log_handler = self._ChangeLogHandler(self)
-        self._crc_handler = self._CRCHandler(self)
-        self._purge_handler = self._PurgeHandler(self)
 
         # Check last status and call init()
         last_status = self.p_cck.get_last_status()
@@ -887,17 +885,6 @@ class Journal:
                          f"get: {self._journal._metadata.meta_get}, "
                          f"put: {self._journal._metadata.meta_put}, "
                          f"size: {self._journal._metadata.meta_sz}")
-
-
-    class _CRCHandler:
-        def __init__(self, journal_instance):
-            self._journal = journal_instance
-            # Stub methods will be added here
-
-    class _PurgeHandler:
-        def __init__(self, journal_instance):
-            self._journal = journal_instance
-            # Stub methods will be added here
 
 
 if __name__ == "__main__":
