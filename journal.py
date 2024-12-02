@@ -26,11 +26,10 @@ from myMemory import Page
 import os
 from contextlib import contextmanager
 import logging
+from logging_config import get_logger
 
 
-# Configure logging
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class NoSelectorsAvailableError(Exception):
