@@ -437,7 +437,7 @@ class Journal:
             ck_start_tag = self._file_io.read_start_tag()
 
         with self.track_position("read_ct_bytes_to_write"):
-            ct_bytes_to_write = int.from_bytes(self._file_io.rd_field(8), 'little')
+            ct_bytes_to_write = self._file_io.read_ct_bytes()
 
         with self.track_position("read_changes"):
             bytes_read = self._read_changes(r_j_cg_log, ct_bytes_to_write)
@@ -739,9 +739,15 @@ class Journal:
     class _Metadata:
         """Handles journal metadata operations.
 
-        This inner class manages reading and writing of journal metadata,
+        This inner class manages reading, writing, and initialization of journal metadata,
         including positions for reading and writing, and total bytes stored.
+
+        Attributes:
+            meta_get (int): Current read position in journal
+            meta_put (int): Current write position in journal
+            meta_sz (int): Current size of journal data
         """
+
         def __init__(self, journal_instance):
             """Initialize metadata handler.
 
@@ -757,11 +763,11 @@ class Journal:
             """Read metadata from journal file.
 
             Returns:
-                Tuple of (read position, write position, total bytes)
+                tuple: A tuple containing (read position, write position, total bytes)
             """
             self._journal.js.seek(0)
             self.meta_get, self.meta_put, self.meta_sz = struct.unpack('<qqq',
-                self._journal.js.read(24))
+                                                                       self._journal.js.read(24))
             return self.meta_get, self.meta_put, self.meta_sz
 
         def write(self, new_g_pos: int, new_p_pos: int, u_ttl_bytes_written: int):
@@ -771,12 +777,22 @@ class Journal:
                 new_g_pos: New read position
                 new_p_pos: New write position
                 u_ttl_bytes_written: Updated total bytes written
+
+            Side effects:
+                Updates the journal file's metadata section
             """
             self._journal.js.seek(0)
             metadata = struct.pack('<qqq', new_g_pos, new_p_pos, u_ttl_bytes_written)
             self._journal.js.write(metadata)
 
         def init(self):
+            """Initialize metadata to default values.
+
+            Sets read point to -1, write point to 24, and bytes stored to 0.
+
+            Side effects:
+                Updates the journal file's metadata section
+            """
             rd_pt = -1
             wrt_pt = 24
             bytes_stored = 0
@@ -787,8 +803,10 @@ class Journal:
         """Handles file I/O operations for the journal.
 
         This inner class manages reading from and writing to the journal file,
-        handling wraparound when reaching file boundaries.
-                """
+        handling wraparound when reaching file boundaries and ensuring consistent
+        data formats.
+        """
+
         def __init__(self, journal_instance):
             """Initialize file I/O handler.
 
@@ -800,15 +818,17 @@ class Journal:
         def wrt_field(self, data: bytes, dat_len: int, do_ct: bool) -> int:
             """Write a field to the journal file.
 
-            Handles wraparound if writing would exceed file boundaries.
-
             Args:
                 data: Bytes to write
                 dat_len: Length of data to write
                 do_ct: Whether to count bytes in total
 
             Returns:
-                Number of bytes written
+                int: Number of bytes written
+
+            Side effects:
+                - Updates file pointer position
+                - May update journal's total bytes written if do_ct is True
             """
             bytes_written = 0
             p_pos = self._journal.js.tell()
@@ -874,6 +894,18 @@ class Journal:
             return bytes_written
 
         def rd_field(self, dat_len: int) -> bytes:
+            """Read a field from the journal file.
+
+            Args:
+                dat_len: Number of bytes to read
+
+            Returns:
+                bytes: Data read from journal file
+
+            Side effects:
+                - Updates file pointer position
+                - Updates journal's total bytes written
+            """
             g_pos = self._journal.js.tell()
             buf_sz = u32Const.JRNL_SIZE.value
             end_pt = g_pos + dat_len
@@ -915,6 +947,14 @@ class Journal:
             return data
 
         def advance_strm(self, length: int):
+            """Advance the file stream position, handling wraparound.
+
+            Args:
+                length: Number of bytes to advance
+
+            Side effects:
+                Updates file pointer position, wrapping around to metadata end if necessary
+            """
             new_pos = self._journal.js.tell() + length
             if new_pos >= u32Const.JRNL_SIZE.value:
                 new_pos -= u32Const.JRNL_SIZE.value
@@ -922,26 +962,86 @@ class Journal:
             self._journal.js.seek(new_pos)
 
         def reset_file(self):
+            """Reset the journal file to initial state.
+
+            Side effects:
+                - Closes and reopens the journal file
+                - Resets file pointer to beginning
+            """
             self._journal.js.close()
             self._journal.js = open(self._journal.f_name, "rb+")
             self._journal.js.seek(0)
 
         def write_start_tag(self):
+            """Write the start tag to the journal file.
+
+            Side effects:
+                Writes 8 bytes to current file position
+            """
             write_64bit(self._journal.js, self._journal.START_TAG)
 
         def write_end_tag(self):
+            """Write the end tag to the journal file.
+
+            Side effects:
+                Writes 8 bytes to current file position
+            """
             write_64bit(self._journal.js, self._journal.END_TAG)
 
         def write_ct_bytes(self, ct_bytes):
+            """Write the count of bytes to the journal file.
+
+            Args:
+                ct_bytes: Number of bytes to be written
+
+            Side effects:
+                Writes 8 bytes to current file position
+            """
             write_64bit(self._journal.js, ct_bytes)
 
         def read_start_tag(self):
+            """Read the start tag from the journal file.
+
+            Returns:
+                int: The start tag value
+
+            Side effects:
+                Updates file pointer position
+            """
             return read_64bit(self._journal.js)
 
         def read_end_tag(self):
+            """Read the end tag from the journal file.
+
+            Returns:
+                int: The end tag value
+
+            Side effects:
+                Updates file pointer position
+            """
+            return read_64bit(self._journal.js)
+
+        def read_ct_bytes(self):
+            """Read the count of bytes from the journal file.
+
+            Returns:
+                int: Number of bytes to be read
+
+            Side effects:
+                Updates file pointer position
+            """
             return read_64bit(self._journal.js)
 
         def wrt_cgs_to_jrnl(self, r_cg_log: ChangeLog):
+            """Write changes from a change log to the journal.
+
+            Args:
+                r_cg_log: Change log containing changes to write
+
+            Side effects:
+                - Updates journal file contents
+                - Updates journal's blocks in journal tracking
+            """
             logger.debug(f"Writing {len(r_cg_log.the_log)} change log entries to journal")
 
             for blk_num, changes in r_cg_log.the_log.items():
@@ -985,14 +1085,13 @@ class Journal:
             self._journal.js.flush()
             logger.debug(f"Total bytes written: {self._journal.ttl_bytes_written}")
 
-            logger.debug(f"Exiting _FileIO.wrt_cgs_to_jrnl. Total bytes written: {self._journal.ttl_bytes_written}")
-
     class _ChangeLogHandler:
         """Manages change log operations for the journal.
 
-        This inner class handles writing changes to the journal and
-        processing them during recovery.
+        This inner class handles the processing, writing, and recovery of change logs,
+        including calculating space requirements and managing data integrity.
         """
+
         def __init__(self, journal_instance):
             """Initialize change log handler.
 
@@ -1002,6 +1101,14 @@ class Journal:
             self._journal = journal_instance
 
         def get_num_data_lines(self, r_cg: Change) -> int:
+            """Calculate the number of data lines in a change.
+
+            Args:
+                r_cg: Change object to analyze
+
+            Returns:
+                int: Number of data lines (maximum 63)
+            """
             num_data_lines = 0
             temp_sel = bytearray(b'\xff' * 8)
             setback = 1
@@ -1020,6 +1127,17 @@ class Journal:
             return min(num_data_lines, 63)  # Ensure we don't exceed 63 lines
 
         def get_next_lin_num(self, cg: Change) -> lNum_t:
+            """Get the next line number from a change's selectors.
+
+            Args:
+                cg: Change object to process
+
+            Returns:
+                lNum_t: Next line number or 0xFF if none available
+
+            Side effects:
+                May update cg's arr_next and selectors
+            """
             if not cg.selectors:
                 return 0xFF  # Return sentinel value immediately if no selectors
 
@@ -1041,6 +1159,14 @@ class Journal:
             return self.get_next_lin_num(cg)  # Recursive call to check next selector
 
         def calculate_ct_bytes_to_write(self, r_cg_log: ChangeLog) -> int:
+            """Calculate total bytes needed to write a change log.
+
+            Args:
+                r_cg_log: Change log to analyze
+
+            Returns:
+                int: Total number of bytes required
+            """
             total_bytes = 0
             for blk_num, changes in r_cg_log.the_log.items():
                 for cg in changes:
@@ -1069,6 +1195,17 @@ class Journal:
             return total_bytes
 
         def write_change(self, cg: Change) -> int:
+            """Write a single change to the journal.
+
+            Args:
+                cg: Change to write
+
+            Returns:
+                int: Number of bytes written
+
+            Side effects:
+                Updates journal file contents
+            """
             bytes_written = 0
             bytes_written += self._journal._file_io.wrt_field(to_bytes_64bit(cg.block_num), 8, True)
             bytes_written += self._journal._file_io.wrt_field(to_bytes_64bit(cg.time_stamp), 8, True)
@@ -1083,7 +1220,16 @@ class Journal:
             return bytes_written
 
         def wrt_cg_to_pg(self, cg: Change, pg: Page):
-            """Write changes to a page."""
+            """Write changes to a page.
+
+            Args:
+                cg: Change containing modifications
+                pg: Page to update
+
+            Side effects:
+                - Updates page contents
+                - Updates page CRC
+            """
             logger.debug("Writing change to page")
             cg.arr_next = 0
             try:
@@ -1108,8 +1254,25 @@ class Journal:
             pg.dat[-4:] = AJZlibCRC.wrt_bytes_little_e(crc, pg.dat[-4:], 4)
             logger.debug(f"Updated page CRC: {crc:08x}")
 
-        def rd_and_wrt_back(self, j_cg_log: ChangeLog, p_buf: List, ctr: int, prv_blk_num: bNum_t, cur_blk_num: bNum_t,
-                            pg: Page):
+        def rd_and_wrt_back(self, j_cg_log: ChangeLog, p_buf: List, ctr: int,
+                            prv_blk_num: bNum_t, cur_blk_num: bNum_t, pg: Page):
+            """Read changes from log and write them back to disk.
+
+            Args:
+                j_cg_log: Change log to process
+                p_buf: Buffer for pages
+                ctr: Current count of pages in buffer
+                prv_blk_num: Previous block number processed
+                cur_blk_num: Current block number being processed
+                pg: Page instance for temporary storage
+
+            Returns:
+                tuple: Updated (ctr, prv_blk_num, cur_blk_num, pg)
+
+            Side effects:
+                - May update disk contents
+                - Updates page buffer
+            """
             if not j_cg_log.the_log:  # Check if the log is empty
                 return ctr, prv_blk_num, cur_blk_num, pg
 
@@ -1149,7 +1312,21 @@ class Journal:
 
             return ctr, prv_blk_num, cur_blk_num, pg
 
-        def r_and_wb_last(self, cg: Change, p_buf: List, ctr: int, cur_blk_num: bNum_t, pg: Page):
+        def r_and_wb_last(self, cg: Change, p_buf: List, ctr: int,
+                          cur_blk_num: bNum_t, pg: Page):
+            """Process the last change in a series.
+
+            Args:
+                cg: Last change to process
+                p_buf: Buffer for pages
+                ctr: Current count of pages in buffer
+                cur_blk_num: Current block number being processed
+                pg: Page instance for temporary storage
+
+            Side effects:
+                - Updates page buffer
+                - May trigger buffer purge to disk
+            """
             if ctr == self._journal.NUM_PGS_JRNL_BUF:
                 self._journal.empty_purge_jrnl_buf(p_buf, ctr)
 
@@ -1176,12 +1353,10 @@ class Journal:
             Args:
                 r_cg_log: Change log to write
 
-            This method handles:
-            1. Calculating total bytes to write
-            2. Writing start tag and metadata
-            3. Writing all changes
-            4. Writing end tag
-            5. Updating journal metadata
+            Side effects:
+                - Updates journal file contents
+                - Updates journal metadata
+                - Clears change log line count
             """
             logger.debug(f"Entering wrt_cg_log_to_jrnl with {len(r_cg_log.the_log)} blocks in change log")
 
