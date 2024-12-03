@@ -1,9 +1,9 @@
 import os
 from typing import Callable
-import logging
+from logging_config import get_logger
 
-# Configure logging
-logger = logging.getLogger(__name__)
+
+logger = get_logger(__name__)
 
 
 class FileShifter:

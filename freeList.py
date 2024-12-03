@@ -2,10 +2,10 @@ import struct
 from ajTypes import u32Const, bNum_t, SENTINEL_BNUM, bNum_tConst
 from ajUtils import Tabber
 from arrBit import ArrBit
-import logging
+from logging_config import get_logger
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class FreeList:
