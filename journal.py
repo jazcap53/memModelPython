@@ -25,7 +25,6 @@ from change import Change, ChangeLog, Select
 from myMemory import Page
 import os
 from contextlib import contextmanager
-import logging
 from logging_config import get_logger
 
 
