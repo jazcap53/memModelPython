@@ -89,7 +89,7 @@ def main(argv):
     logger.info("Beginning client requests processing")
     client.make_requests()
     logger.info("Program execution completed")
-    
+
 
 if __name__ == "__main__":
     main(sys.argv)
