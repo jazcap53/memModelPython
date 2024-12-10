@@ -267,10 +267,101 @@ class Journal:
         Returns:
             int: Number of bytes written
         """
-        start_pos = self.js.tell()
-        bytes_written = self._write_data(data, dat_len, do_ct)
-        self._update_final_position(start_pos, bytes_written, data, do_ct)
+        p_pos = self._journal.js.tell()
+        buf_sz = u32Const.JRNL_SIZE.value
+        end_pt = p_pos + dat_len
+
+        if end_pt > buf_sz:
+            return self._write_with_wraparound(data, dat_len, do_ct, buf_sz, end_pt)
+        else:
+            return self._write_without_wraparound(data, dat_len, do_ct)
+
+    def _write_with_wraparound(self, data: bytes, dat_len: int, do_ct: bool,
+                               buf_sz: int, end_pt: int) -> int:
+        """Write data that needs to wrap around the journal boundary."""
+        over = end_pt - buf_sz
+        under = dat_len - over
+
+        if dat_len == 8:
+            return self._write_64bit_wraparound(data, under, over, do_ct)
+        elif dat_len == 4:
+            return self._write_32bit_wraparound(data, under, over, do_ct)
+        else:
+            return self._write_generic_wraparound(data, under, over, do_ct)
+
+    def _write_64bit_wraparound(self, data: bytes, under: int, over: int,
+                                do_ct: bool) -> int:
+        """Write a 64-bit value that wraps around in the journal."""
+        bytes_written = 0
+
+        self._journal.js.write(data[:under])
+        bytes_written += under
+        self._update_bytes_written(under, do_ct)
+
+        self._journal.js.seek(self._journal.META_LEN)
+        self._journal.js.write(data[under:])
+        bytes_written += over
+        self._update_bytes_written(over, do_ct)
+
         return bytes_written
+
+    def _write_32bit_wraparound(self, data: bytes, under: int, over: int,
+                                do_ct: bool) -> int:
+        """Write a 32-bit value that wraps around in the journal."""
+        bytes_written = 0
+        value = int.from_bytes(data, byteorder='little')
+
+        write_32bit(self._journal.js, value & ((1 << (under * 8)) - 1))
+        bytes_written += under
+        self._update_bytes_written(under, do_ct)
+
+        self._journal.js.seek(self._journal.META_LEN)
+        write_32bit(self._journal.js, value >> (under * 8))
+        bytes_written += over
+        self._update_bytes_written(over, do_ct)
+
+        return bytes_written
+
+    def _write_generic_wraparound(self, data: bytes, under: int, over: int,
+                                  do_ct: bool) -> int:
+        """Write generic data that wraps around in the journal."""
+        bytes_written = 0
+
+        self._journal.js.write(data[:under])
+        bytes_written += under
+        self._update_bytes_written(under, do_ct)
+
+        self._journal.js.seek(self._journal.META_LEN)
+        self._journal.js.write(data[under:])
+        bytes_written += over
+        self._update_bytes_written(over, do_ct)
+
+        return bytes_written
+
+    def _write_without_wraparound(self, data: bytes, dat_len: int, do_ct: bool) -> int:
+        """Write data that fits within the current journal space."""
+        if dat_len == 8:
+            write_64bit(self._journal.js, from_bytes_64bit(data))
+        elif dat_len == 4:
+            write_32bit(self._journal.js, int.from_bytes(data, byteorder='little'))
+        else:
+            self._journal.js.write(data)
+
+        self._update_bytes_written(dat_len, do_ct)
+        return dat_len
+
+    def _update_bytes_written(self, count: int, do_ct: bool):
+        """Update the total bytes written counter if needed."""
+        if do_ct:
+            self._journal.ttl_bytes_written += count
+
+    def _log_write_operation(self, start_pos: int, data: bytes, do_ct: bool):
+        """Log debug information about the write operation if needed."""
+        if do_ct:
+            end_pos = self._journal.js.tell()
+            actual_bytes_written = end_pos - start_pos
+            logger.debug(f"Wrote {actual_bytes_written} bytes for {data[:10]}...")
+            self._journal.final_p_pos = end_pos
 
     def _write_data(self, data: bytes, dat_len: int, do_ct: bool) -> int:
         """Write data to the journal file, handling wraparound if necessary.
