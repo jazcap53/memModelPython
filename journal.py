@@ -800,42 +800,71 @@ class Journal:
 
             for blk_num, changes in r_cg_log.the_log.items():
                 for cg in changes:
-                    logger.debug(f"Writing block number: {cg.block_num}")
-                    self.wrt_field(to_bytes_64bit(cg.block_num), 8, True)
-                    self._journal.blks_in_jrnl[cg.block_num] = True
+                    self._write_change_to_journal(cg)
 
-                    logger.debug(f"Writing timestamp: {cg.time_stamp}")
-                    self.wrt_field(to_bytes_64bit(cg.time_stamp), 8, True)
+            self._finalize_journal_write()
 
-                    page_data = bytearray(u32Const.BYTES_PER_PAGE.value)
+        def _write_change_to_journal(self, cg: Change):
+            """Write a single change to the journal."""
+            self._write_change_header(cg)
+            page_data = self._write_change_data(cg)
+            self._write_change_footer(page_data)
 
-                    for selector in cg.selectors:
-                        logger.debug(f"Writing selector: {selector.value}")
-                        self.wrt_field(selector.to_bytes(), 8, True)
+        def _write_change_header(self, cg: Change):
+            """Write the header information for a change."""
+            logger.debug(f"Writing block number: {cg.block_num}")
+            self.wrt_field(to_bytes_64bit(cg.block_num), 8, True)
+            self._journal.blks_in_jrnl[cg.block_num] = True
 
-                        for i in range(63):  # Process up to 63 lines (excluding MSB)
-                            if not selector.is_set(i):
-                                continue
+            logger.debug(f"Writing timestamp: {cg.time_stamp}")
+            self.wrt_field(to_bytes_64bit(cg.time_stamp), 8, True)
 
-                            if not cg.new_data:
-                                logger.warning(f"No data available for set bit {i} in selector")
-                                continue
+        def _write_change_data(self, cg: Change) -> bytearray:
+            """Write the data for a change and return the accumulated page data."""
+            page_data = bytearray(u32Const.BYTES_PER_PAGE.value)
 
-                            data = cg.new_data.popleft()
-                            data_bytes = data if isinstance(data, bytes) else bytes(data)
-                            logger.debug(f"Writing data line: {data_bytes[:10]}...")
-                            self.wrt_field(data_bytes, u32Const.BYTES_PER_LINE.value, True)
-                            start = i * u32Const.BYTES_PER_LINE.value
-                            end = start + u32Const.BYTES_PER_LINE.value
-                            page_data[start:end] = data_bytes
+            for selector in cg.selectors:
+                self._write_selector_and_data(selector, cg, page_data)
 
-                    # Calculate and write CRC
-                    crc = AJZlibCRC.get_code(page_data[:-4], u32Const.BYTES_PER_PAGE.value - 4)
-                    logger.debug(f"Writing CRC: {crc:08x}")
-                    self.wrt_field(struct.pack('<I', crc), 4, True)
-                    logger.debug("Writing padding")
-                    self.wrt_field(b'\0\0\0\0', 4, True)
+            return page_data
 
+        def _write_selector_and_data(self, selector: Select, cg: Change, page_data: bytearray):
+            """Write a selector and its associated data."""
+            logger.debug(f"Writing selector: {selector.value}")
+            self.wrt_field(selector.to_bytes(), 8, True)
+
+            for i in range(63):  # Process up to 63 lines (excluding MSB)
+                if not selector.is_set(i):
+                    continue
+
+                self._write_data_line(i, cg, page_data)
+
+        def _write_data_line(self, line_num: int, cg: Change, page_data: bytearray):
+            """Write a single line of data."""
+            if not cg.new_data:
+                logger.warning(f"No data available for set bit {line_num} in selector")
+                return
+
+            data = cg.new_data.popleft()
+            data_bytes = data if isinstance(data, bytes) else bytes(data)
+            logger.debug(f"Writing data line: {data_bytes[:10]}...")
+            self.wrt_field(data_bytes, u32Const.BYTES_PER_LINE.value, True)
+
+            start = line_num * u32Const.BYTES_PER_LINE.value
+            end = start + u32Const.BYTES_PER_LINE.value
+            page_data[start:end] = data_bytes
+
+        def _write_change_footer(self, page_data: bytearray):
+            """Write the CRC and padding for a change."""
+            crc = AJZlibCRC.get_code(page_data[:-4], u32Const.BYTES_PER_PAGE.value - 4)
+            logger.debug(f"Writing CRC: {crc:08x}")
+            self.wrt_field(struct.pack('<I', crc), 4, True)
+
+            logger.debug("Writing padding")
+            self.wrt_field(b'\0\0\0\0', 4, True)
+
+        def _finalize_journal_write(self):
+            """Finalize the journal write operation."""
             self._journal.js.flush()
             logger.debug(f"Total bytes written: {self._journal.ttl_bytes_written}")
 
