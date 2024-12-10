@@ -715,46 +715,85 @@ class Journal:
             return bytes_written
 
         def rd_field(self, dat_len: int) -> bytes:
-            """Read a field from the journal file."""
+            """Read a field from the journal file.
+
+            Args:
+                dat_len: Number of bytes to read
+
+            Returns:
+                bytes: Data read from journal file
+            """
             g_pos = self._journal.js.tell()
             buf_sz = u32Const.JRNL_SIZE.value
             end_pt = g_pos + dat_len
 
             if end_pt > buf_sz:
-                over = end_pt - buf_sz
-                under = dat_len - over
-
-                if dat_len == 8:  # 64-bit value
-                    low_bits = read_64bit(self._journal.js)
-                    self._journal.ttl_bytes_written += under
-                    self._journal.js.seek(self._journal.META_LEN)
-                    high_bits = read_64bit(self._journal.js)
-                    value = (high_bits << (under * 8)) | low_bits
-                    data = to_bytes_64bit(value)
-                elif dat_len == 4:  # 32-bit value
-                    low_bits = read_32bit(self._journal.js)
-                    self._journal.ttl_bytes_written += under
-                    self._journal.js.seek(self._journal.META_LEN)
-                    high_bits = read_32bit(self._journal.js)
-                    value = (high_bits << (under * 8)) | low_bits
-                    data = value.to_bytes(4, byteorder='little')
-                else:
-                    data = self._journal.js.read(under)
-                    self._journal.ttl_bytes_written += under
-                    self._journal.js.seek(self._journal.META_LEN)
-                    data += self._journal.js.read(over)
-
-                self._journal.ttl_bytes_written += over
+                return self._read_with_wraparound(dat_len, buf_sz, end_pt)
             else:
-                if dat_len == 8:
-                    data = to_bytes_64bit(read_64bit(self._journal.js))
-                elif dat_len == 4:
-                    data = read_32bit(self._journal.js).to_bytes(4, byteorder='little')
-                else:
-                    data = self._journal.js.read(dat_len)
-                self._journal.ttl_bytes_written += dat_len
+                return self._read_without_wraparound(dat_len)
+
+        def _read_with_wraparound(self, dat_len: int, buf_sz: int, end_pt: int) -> bytes:
+            """Read data that wraps around the journal boundary."""
+            over = end_pt - buf_sz
+            under = dat_len - over
+
+            if dat_len == 8:
+                return self._read_64bit_wraparound(under)
+            elif dat_len == 4:
+                return self._read_32bit_wraparound(under)
+            else:
+                return self._read_generic_wraparound(under, over)
+
+        def _read_64bit_wraparound(self, under: int) -> bytes:
+            """Read a 64-bit value that wraps around in the journal."""
+            low_bits = read_64bit(self._journal.js)
+            self._update_bytes_read(under)
+
+            self._journal.js.seek(self._journal.META_LEN)
+            high_bits = read_64bit(self._journal.js)
+            self._update_bytes_read(8 - under)
+
+            value = (high_bits << (under * 8)) | low_bits
+            return to_bytes_64bit(value)
+
+        def _read_32bit_wraparound(self, under: int) -> bytes:
+            """Read a 32-bit value that wraps around in the journal."""
+            low_bits = read_32bit(self._journal.js)
+            self._update_bytes_read(under)
+
+            self._journal.js.seek(self._journal.META_LEN)
+            high_bits = read_32bit(self._journal.js)
+            self._update_bytes_read(4 - under)
+
+            value = (high_bits << (under * 8)) | low_bits
+            return value.to_bytes(4, byteorder='little')
+
+        def _read_generic_wraparound(self, under: int, over: int) -> bytes:
+            """Read generic data that wraps around in the journal."""
+            data = self._journal.js.read(under)
+            self._update_bytes_read(under)
+
+            self._journal.js.seek(self._journal.META_LEN)
+            data += self._journal.js.read(over)
+            self._update_bytes_read(over)
 
             return data
+
+        def _read_without_wraparound(self, dat_len: int) -> bytes:
+            """Read data that fits within the current journal space."""
+            if dat_len == 8:
+                data = to_bytes_64bit(read_64bit(self._journal.js))
+            elif dat_len == 4:
+                data = read_32bit(self._journal.js).to_bytes(4, byteorder='little')
+            else:
+                data = self._journal.js.read(dat_len)
+
+            self._update_bytes_read(dat_len)
+            return data
+
+        def _update_bytes_read(self, count: int):
+            """Update the total bytes read counter."""
+            self._journal.ttl_bytes_written += count
 
         def advance_strm(self, length: int):
             """Advance the file stream position, handling wraparound."""
