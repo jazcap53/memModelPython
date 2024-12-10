@@ -407,41 +407,121 @@ class Journal:
         self.verify_bytes_read()
 
     def rd_jrnl(self, r_j_cg_log: ChangeLog, start_pos: int) -> Tuple[int, int, int]:
-        """Read journal contents from a given position.
+        """Read journal contents from a given position."""
+        self.js.seek(start_pos)
 
-        This method reads and processes journal entries, including start tag,
-        change data, and end tag.
-
-        Args:
-            r_j_cg_log: ChangeLog to populate with read data
-            start_pos: Position in journal file to start reading from
-
-        Returns:
-            Tuple[int, int, int]: Start tag, end tag, and total bytes read
-
-        Side effects:
-            - Updates file pointer position
-            - Modifies r_j_cg_log
-
-        This method is responsible for:
-        1. Reading and verifying the start tag
-        2. Reading the number of bytes to process
-        3. Reading all changes between the tags
-        4. Reading and verifying the end tag
-        """
         with self.track_position("read_start_tag"):
-            ck_start_tag = self._file_io.read_start_tag()
+            ck_start_tag = self._read_start_tag()
 
         with self.track_position("read_ct_bytes_to_write"):
-            ct_bytes_to_write = self._file_io.read_ct_bytes()
+            ct_bytes_to_write = self._read_ct_bytes_to_write()
 
         with self.track_position("read_changes"):
             bytes_read = self._read_changes(r_j_cg_log, ct_bytes_to_write)
 
         with self.track_position("read_end_tag"):
-            ck_end_tag = self._file_io.read_end_tag()
+            ck_end_tag = self._read_end_tag()
 
         return ck_start_tag, ck_end_tag, bytes_read
+
+    def _read_start_tag(self) -> int:
+        """Read and return the start tag from the journal file."""
+        return read_64bit(self.js)
+
+    def _read_ct_bytes_to_write(self) -> int:
+        """Read and return the count of bytes to write from the journal file."""
+        return read_64bit(self.js)
+
+    def _read_changes(self, r_j_cg_log: ChangeLog, ct_bytes_to_write: int) -> int:
+        """Read changes from the journal and populate the change log."""
+        bytes_read = 0
+        while bytes_read < ct_bytes_to_write:
+            if self._check_journal_end(bytes_read, ct_bytes_to_write):
+                break
+
+            with self.track_position("read_single_change"):
+                cg, bytes_read = self._read_single_change(bytes_read)
+
+            if cg:
+                r_j_cg_log.add_to_log(cg)
+
+            with self.track_position("read_crc_and_padding"):
+                bytes_read = self._read_crc_and_padding(bytes_read, ct_bytes_to_write)
+
+        return bytes_read
+
+    def _check_journal_end(self, bytes_read: int, ct_bytes_to_write: int) -> bool:
+        """Check if the end of the journal has been reached."""
+        return (self.js.tell() + 16 > u32Const.JRNL_SIZE.value) or (bytes_read >= ct_bytes_to_write)
+
+    def _read_single_change(self, bytes_read: int) -> Tuple[Optional[Change], int]:
+        """Read a single change from the journal file."""
+        b_num = read_64bit(self.js)
+        bytes_read += 8
+        if bytes_read > self.ct_bytes_to_write:
+            return None, bytes_read
+
+        timestamp = read_64bit(self.js)
+        bytes_read += 8
+        if bytes_read > self.ct_bytes_to_write:
+            return None, bytes_read
+
+        cg = Change(b_num)
+        cg.time_stamp = timestamp
+
+        while bytes_read < self.ct_bytes_to_write:
+            selector, selector_bytes_read = self._read_selector(bytes_read)
+            if not selector:
+                break
+            bytes_read += selector_bytes_read
+            cg.selectors.append(selector)
+
+            data_bytes_read = self._read_data_for_selector(selector, cg, bytes_read)
+            bytes_read += data_bytes_read
+
+            if selector.is_last_block():
+                break
+
+        return cg, bytes_read
+
+    def _read_selector(self, bytes_read: int) -> Tuple[Optional[Select], int]:
+        """Read a selector from the journal file."""
+        if self.js.tell() + 8 > u32Const.JRNL_SIZE.value:
+            return None, 0
+
+        selector_data = self.js.read(8)
+        if bytes_read + 8 > self.ct_bytes_to_write:
+            return None, 8
+
+        return Select.from_bytes(selector_data), 8
+
+    def _read_data_for_selector(self, selector: Select, cg: Change, bytes_read: int) -> int:
+        """Read data lines for a given selector."""
+        data_bytes_read = 0
+        for i in range(63):  # Process up to 63 lines (excluding MSB)
+            if not selector.is_set(i):
+                continue
+            if bytes_read + data_bytes_read + u32Const.BYTES_PER_LINE.value > self.ct_bytes_to_write:
+                break
+            if self.js.tell() + u32Const.BYTES_PER_LINE.value > u32Const.JRNL_SIZE.value:
+                break
+
+            line_data = self.js.read(u32Const.BYTES_PER_LINE.value)
+            data_bytes_read += u32Const.BYTES_PER_LINE.value
+            cg.new_data.append(line_data)
+
+        return data_bytes_read
+
+    def _read_crc_and_padding(self, bytes_read: int, ct_bytes_to_write: int) -> int:
+        """Read CRC and padding if there's enough space."""
+        if bytes_read + 8 <= ct_bytes_to_write:
+            self.js.read(8)  # Read CRC (4 bytes) and padding (4 bytes)
+            bytes_read += 8
+        return bytes_read
+
+    def _read_end_tag(self) -> int:
+        """Read and return the end tag from the journal file."""
+        return read_64bit(self.js)
 
     def _read_start_tag(self) -> int:
         """Read and return the start tag from the journal file.
