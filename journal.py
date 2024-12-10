@@ -168,41 +168,65 @@ class Journal:
 
         logger.info(f"Purging journal{'(after crash)' if had_crash else ''}")
 
-        if not any(self.blks_in_jrnl) and not had_crash:
+        if self._is_journal_empty() and not had_crash:
             logger.info("Journal is empty: nothing to purge")
         else:
-            j_cg_log = ChangeLog()
+            self._process_journal_changes(had_crash)
 
-            self.rd_last_jrnl(j_cg_log)
+        self._reset_metadata()
+        self._update_status(keep_going)
 
-            for block, changes in j_cg_log.the_log.items():
-                logger.debug(f"Block {block}: {len(changes)} changes")
+    def _is_journal_empty(self) -> bool:
+        """Check if the journal is empty."""
+        return not any(self.blks_in_jrnl)
 
-            if not j_cg_log.the_log:
-                logger.info("No changes found in the journal")
-            else:
-                ctr = 0
-                curr_blk_num = next(iter(j_cg_log.the_log), None) if j_cg_log.the_log else None
-                prev_blk_num = None
-                pg = Page()
+    def _process_journal_changes(self, had_crash: bool):
+        """Process changes in the journal."""
+        j_cg_log = ChangeLog()
+        self.rd_last_jrnl(j_cg_log)
 
-                ctr, prev_blk_num, curr_blk_num, pg = self._change_log_handler.rd_and_wrt_back(j_cg_log,
-                                                                                               self.p_buf, ctr,
-                                                                                               prev_blk_num,
-                                                                                               curr_blk_num, pg)
+        self._log_change_summary(j_cg_log)
 
-                if curr_blk_num is not None and curr_blk_num in j_cg_log.the_log and j_cg_log.the_log[curr_blk_num]:
-                    cg = j_cg_log.the_log[curr_blk_num][-1]
-                    self._change_log_handler.r_and_wb_last(cg, self.p_buf, ctr, curr_blk_num, pg)
-                    ctr = 0  # Reset ctr after processing all changes
-                else:
-                    logger.warning(f"No changes found for block {curr_blk_num}")
-                    ctr = 0  # Ensure ctr is reset even if no changes were processed
+        if not j_cg_log.the_log:
+            logger.info("No changes found in the journal")
+        else:
+            self._apply_changes(j_cg_log)
 
-            self.blks_in_jrnl = [False] * bNum_tConst.NUM_DISK_BLOCKS.value
-            self.p_cL.the_log.clear()
+        self._clear_journal_state()
 
-        # Reset metadata
+    def _log_change_summary(self, j_cg_log: ChangeLog):
+        """Log a summary of changes in the journal."""
+        for block, changes in j_cg_log.the_log.items():
+            logger.debug(f"Block {block}: {len(changes)} changes")
+
+    def _apply_changes(self, j_cg_log: ChangeLog):
+        """Apply changes from the journal to the disk."""
+        ctr = 0
+        curr_blk_num = next(iter(j_cg_log.the_log), None) if j_cg_log.the_log else None
+        prev_blk_num = None
+        pg = Page()
+
+        ctr, prev_blk_num, curr_blk_num, pg = self._change_log_handler.rd_and_wrt_back(
+            j_cg_log, self.p_buf, ctr, prev_blk_num, curr_blk_num, pg
+        )
+
+        self._process_final_change(j_cg_log, ctr, curr_blk_num, pg)
+
+    def _process_final_change(self, j_cg_log: ChangeLog, ctr: int, curr_blk_num: bNum_t, pg: Page):
+        """Process the final change in the journal."""
+        if curr_blk_num is not None and curr_blk_num in j_cg_log.the_log and j_cg_log.the_log[curr_blk_num]:
+            cg = j_cg_log.the_log[curr_blk_num][-1]
+            self._change_log_handler.r_and_wb_last(cg, self.p_buf, ctr, curr_blk_num, pg)
+        else:
+            logger.warning(f"No changes found for block {curr_blk_num}")
+
+    def _clear_journal_state(self):
+        """Clear the journal state after processing changes."""
+        self.blks_in_jrnl = [False] * bNum_tConst.NUM_DISK_BLOCKS.value
+        self.p_cL.the_log.clear()
+
+    def _reset_metadata(self):
+        """Reset the journal metadata."""
         logger.debug(
             f"Before reset - meta_get: {self._metadata.meta_get}, meta_put: {self._metadata.meta_put}, meta_sz: {self._metadata.meta_sz}")
 
@@ -214,6 +238,8 @@ class Journal:
         logger.debug(
             f"After reset - meta_get: {self._metadata.meta_get}, meta_put: {self._metadata.meta_put}, meta_sz: {self._metadata.meta_sz}")
 
+    def _update_status(self, keep_going: bool):
+        """Update the status after purging the journal."""
         self.p_stt.wrt("Purged journal" if keep_going else "Finishing")
 
     def is_in_jrnl(self, b_num: bNum_t) -> bool:
