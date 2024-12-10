@@ -362,51 +362,49 @@ class Journal:
         return bytes_written
 
     def rd_last_jrnl(self, r_j_cg_log: ChangeLog):
-        """Read the last journal entry into a change log.
-
-        This method reads the most recent changes from the journal file and
-        populates the provided change log with the data.
-
-        Args:
-            r_j_cg_log: ChangeLog instance to populate with journal data
-
-        Raises:
-            ValueError: If start or end tags don't match expected values
-
-        Side effects:
-            - Updates file pointer position
-            - Modifies r_j_cg_log
-            - Updates the provide
-        """
+        """Read the last journal entry into a change log."""
         logger.debug("Entering rd_last_jrnl")
 
         with self.track_position("rd_last_jrnl"):
-            self.meta_get, self.meta_put, self.meta_sz = self._metadata.read()
-
-            if self.meta_get == -1:
-                print("Warning: No metadata available. Journal might be empty.")
+            start_pos = self._read_journal_metadata()
+            if start_pos is None:
                 return
-            if self.meta_get < self.META_LEN or self.meta_get >= u32Const.JRNL_SIZE.value:
-                print(f"Error: Invalid metadata. meta_get={self.meta_get}")
-                return
-
-            start_pos = self.META_LEN if self.meta_get == -1 else self.meta_get
 
             with self.track_position("read_journal_entry"):
                 ck_start_tag, ck_end_tag, ttl_bytes = self.rd_jrnl(r_j_cg_log, start_pos)
 
-            if ck_start_tag != self.START_TAG:
-                raise ValueError(f"Start tag mismatch: expected {self.START_TAG:X}, got {ck_start_tag:X}")
-
-            if ck_end_tag != self.END_TAG:
-                raise ValueError(f"End tag mismatch: expected {self.END_TAG:X}, got {ck_end_tag:X}")
-
-            self.verify_bytes_read()
+            self._verify_journal_tags(ck_start_tag, ck_end_tag)
+            self._process_journal_entry(ttl_bytes)
 
             logger.debug(f"Exiting rd_last_jrnl. Read journal entries. Metadata - "
                          f"get: {self.meta_get}, "
                          f"put: {self.meta_put}, "
                          f"size: {self.meta_sz}")
+
+    def _read_journal_metadata(self):
+        """Read and validate journal metadata."""
+        self.meta_get, self.meta_put, self.meta_sz = self._metadata.read()
+
+        if self.meta_get == -1:
+            logger.warning("No metadata available. Journal might be empty.")
+            return None
+        if self.meta_get < self.META_LEN or self.meta_get >= u32Const.JRNL_SIZE.value:
+            logger.error(f"Invalid metadata. meta_get={self.meta_get}")
+            return None
+
+        return self.META_LEN if self.meta_get == -1 else self.meta_get
+
+    def _verify_journal_tags(self, ck_start_tag, ck_end_tag):
+        """Verify the start and end tags of the journal entry."""
+        if ck_start_tag != self.START_TAG:
+            raise ValueError(f"Start tag mismatch: expected {self.START_TAG:X}, got {ck_start_tag:X}")
+
+        if ck_end_tag != self.END_TAG:
+            raise ValueError(f"End tag mismatch: expected {self.END_TAG:X}, got {ck_end_tag:X}")
+
+    def _process_journal_entry(self, ttl_bytes):
+        """Process the journal entry after reading."""
+        self.verify_bytes_read()
 
     def rd_jrnl(self, r_j_cg_log: ChangeLog, start_pos: int) -> Tuple[int, int, int]:
         """Read journal contents from a given position.
