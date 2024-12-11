@@ -312,6 +312,13 @@ def test_empty_purge_jrnl_buf(journal, mocker, caplog):
     # Setup
     mock_page = Page()
     mock_page.dat = bytearray(u32Const.BLOCK_BYTES.value)
+
+    # Calculate correct CRC and write it to the page
+    crc = AJZlibCRC.get_code(mock_page.dat[:-u32Const.CRC_BYTES.value],
+                             u32Const.BYTES_PER_PAGE.value - u32Const.CRC_BYTES.value)
+    for i in range(u32Const.CRC_BYTES.value):
+        mock_page.dat[-u32Const.CRC_BYTES.value + i] = (crc >> (8 * i)) & 0xFF
+
     page_tuple = (1, mock_page)
 
     # Mock wipers

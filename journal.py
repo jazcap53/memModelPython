@@ -427,7 +427,15 @@ class Journal:
             p_ctr -= 1
             cursor = p_pg_pr[p_ctr]
 
-            # Calculate CRC for the page
+            if not self.verify_page_crc(cursor):
+                error_msg = f"CRC check failed for block {cursor[0]} before writing to disk"
+                logger.error(error_msg)
+                self.p_stt.wrt(f"Error: {error_msg}")
+                # Since this is a critical operation, we should abort
+                self.p_cck.set_last_status('C')  # Mark as crashed
+                raise ValueError(error_msg)
+
+                # Calculate CRC for the page
             crc = AJZlibCRC.get_code(cursor[1].dat[:-u32Const.CRC_BYTES.value],
                                      u32Const.BYTES_PER_PAGE.value - u32Const.CRC_BYTES.value)
 
@@ -465,6 +473,11 @@ class Journal:
         start_pos = self.js.tell()
         yield
         end_pos = self.js.tell()
+
+    def verify_page_crc(self, page_tuple: Tuple[bNum_t, Page]) -> bool:
+        """Verify the CRC of a page. Public interface for CRC checking."""
+        return self._file_io._crc_check_pg(page_tuple)
+
 
     class _Metadata:
         """Handles journal metadata operations."""
@@ -895,49 +908,50 @@ class Journal:
             pg.dat[-4:] = AJZlibCRC.wrt_bytes_little_e(crc, pg.dat[-4:], 4)
             logger.debug(f"Updated page CRC: {crc:08x}")
 
-
         def rd_and_wrt_back(self, j_cg_log: ChangeLog, p_buf: List, ctr: int,
                             prv_blk_num: bNum_t, cur_blk_num: bNum_t, pg: Page):
             """Read changes from log and write them back to disk."""
-            if not j_cg_log.the_log:  # Check if the log is empty
+            if not j_cg_log.the_log:
                 return ctr, prv_blk_num, cur_blk_num, pg
 
-            first_iteration = True
-            for blk_num, changes in j_cg_log.the_log.items():
-                logger.debug(f"Processing block {blk_num} with {len(changes)} changes")
-                for idx, cg in enumerate(changes):
-                    cur_blk_num = cg.block_num
-                    if cur_blk_num != prv_blk_num or first_iteration:
-                        if not first_iteration:  # Don't try to write previous block on first iteration
-                            logger.debug(f"New block encountered. ctr before: {ctr}")
-                            if ctr == self._journal.NUM_PGS_JRNL_BUF:
-                                self._journal.empty_purge_jrnl_buf(p_buf, ctr)
-                                ctr = 0  # Reset counter after emptying buffer
+            try:
+                first_iteration = True
+                for blk_num, changes in j_cg_log.the_log.items():
+                    logger.debug(f"Processing block {blk_num} with {len(changes)} changes")
+                    for idx, cg in enumerate(changes):
+                        cur_blk_num = cg.block_num
+                        if cur_blk_num != prv_blk_num or first_iteration:
+                            if not first_iteration:
+                                if ctr == self._journal.NUM_PGS_JRNL_BUF:
+                                    self._journal.empty_purge_jrnl_buf(p_buf, ctr)
+                                    ctr = 0
+                                p_buf[ctr] = (prv_blk_num, pg)
+                                ctr += 1
 
-                            p_buf[ctr] = (prv_blk_num, pg)
-                            ctr += 1
-                            logger.debug(f"ctr after incrementing: {ctr}")
+                            # Read new page from disk
+                            self._journal.p_d.get_ds().seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
+                            pg.dat = bytearray(self._journal.p_d.get_ds().read(u32Const.BLOCK_BYTES.value))
 
-                        # Use the provided pg instead of creating a new one
-                        self._journal.p_d.get_ds().seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
-                        pg.dat = bytearray(self._journal.p_d.get_ds().read(u32Const.BLOCK_BYTES.value))
-                        first_iteration = False
+                            if not self._journal.verify_page_crc((cur_blk_num, pg)):
+                                error_msg = f"CRC check failed for block {cur_blk_num} during recovery"
+                                logger.error(error_msg)
+                                self.p_stt.wrt(f"Error: {error_msg}")
+                                # Since we're already in recovery, we'll try to recover what we can
+                                # but mark the status as potentially corrupted
+                                self.p_cck.set_last_status('P')  # 'P' for Potentially corrupted
 
-                    prv_blk_num = cur_blk_num
-                    self.wrt_cg_to_pg(cg, pg)
+                            first_iteration = False
 
-            # Handle the last block
-            if not first_iteration:  # Only if we've processed at least one block
-                logger.debug(f"Processing final block. ctr before: {ctr}")
-                if ctr == self._journal.NUM_PGS_JRNL_BUF:
-                    self._journal.empty_purge_jrnl_buf(p_buf, ctr)
-                    ctr = 0
-                p_buf[ctr] = (prv_blk_num, pg)
-                ctr += 1
-                logger.debug(f"ctr after final increment: {ctr}")
+                        prv_blk_num = cur_blk_num
+                        self.wrt_cg_to_pg(cg, pg)
+
+            except Exception as e:
+                logger.error(f"Error during recovery: {str(e)}")
+                self._journal.p_stt.wrt("Recovery failed")
+                self._journal.p_cck.set_last_status('C')  # Mark as crashed
+                raise
 
             return ctr, prv_blk_num, cur_blk_num, pg
-
 
         def r_and_wb_last(self, cg: Change, p_buf: List, ctr: int,
                           cur_blk_num: bNum_t, pg: Page):
