@@ -453,22 +453,6 @@ class Journal:
 
         return ok_val
 
-    def crc_check_pg(self, p_pr: Tuple[bNum_t, Page]) -> bool:
-        """Verify the CRC of a page."""
-        block_num, page = p_pr
-
-        stored_crc = int.from_bytes(page.dat[-u32Const.CRC_BYTES.value:], 'little')
-        calculated_crc = AJZlibCRC.get_code(page.dat[:-u32Const.CRC_BYTES.value],
-                                            u32Const.BYTES_PER_PAGE.value - u32Const.CRC_BYTES.value)
-
-        if stored_crc != calculated_crc:
-            print(f"WARNING [crc_check_pg]: CRC mismatch for block {block_num}.")
-            print(f"  Stored:     {stored_crc:04x} {stored_crc >> 16:04x}")
-            print(f"  Calculated: {calculated_crc:04x} {calculated_crc >> 16:04x}")
-            return False
-
-        return True
-
     def verify_bytes_read(self):
         """Verify that the number of bytes read matches the expected count."""
         expected_bytes = self.ct_bytes_to_write + self.META_LEN
@@ -775,6 +759,24 @@ class Journal:
             """Finalize the journal write operation."""
             self._journal.js.flush()
             logger.debug(f"Total bytes written: {self._journal.ttl_bytes_written}")
+
+        @staticmethod
+        def _crc_check_pg(p_pr: Tuple[bNum_t, Page]) -> bool:
+            """Verify the CRC of a page."""
+            block_num, page = p_pr
+
+            stored_crc = int.from_bytes(page.dat[-u32Const.CRC_BYTES.value:], 'little')
+            calculated_crc = AJZlibCRC.get_code(page.dat[:-u32Const.CRC_BYTES.value],
+                                                u32Const.BYTES_PER_PAGE.value - u32Const.CRC_BYTES.value)
+
+            if stored_crc != calculated_crc:
+                logger.warning(f"CRC mismatch for block {block_num}.")
+                logger.warning(f"  Stored:     {stored_crc:04x} {stored_crc >> 16:04x}")
+                logger.warning(f"  Calculated: {calculated_crc:04x} {calculated_crc >> 16:04x}")
+                return False
+
+            return True
+
 
     class _ChangeLogHandler:
         """Manages change log operations for the journal."""
