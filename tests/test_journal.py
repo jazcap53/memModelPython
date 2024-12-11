@@ -236,7 +236,7 @@ def test_crc_check_pg(journal):
         page.dat[-u32Const.CRC_BYTES.value + i] = (crc >> (8 * i)) & 0xFF
 
     page_tuple = (1, page)
-    result = journal.crc_check_pg(page_tuple)
+    result = journal._file_io._crc_check_pg(page_tuple)
     assert result is True
 
 
