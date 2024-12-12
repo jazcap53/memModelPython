@@ -961,14 +961,6 @@ class Journal:
                         self.wrt_cg_to_pg(cg, pg)
                         last_change = cg
 
-                # Handle the last block if we have one
-                if last_change is not None:
-                    if buf_page_count == self._journal.NUM_PGS_JRNL_BUF:
-                        self._journal.empty_purge_jrnl_buf(p_buf, buf_page_count)
-                        buf_page_count = 0
-                    p_buf[buf_page_count] = (cur_blk_num, pg)
-                    buf_page_count += 1
-
             except Exception as e:
                 logger.error(f"Error during recovery: {str(e)}")
                 self._p_stt.wrt("Recovery failed")
