@@ -203,13 +203,14 @@ class Journal:
         """Apply changes from the journal to the disk."""
         ctr = 0
         curr_blk_num = next(iter(j_cg_log.the_log), None) if j_cg_log.the_log else None
-        prev_blk_num = None
+        prev_blk_num = SENTINEL_INUM  # Use sentinel value instead of None
         pg = Page()
 
         ctr, prev_blk_num, curr_blk_num, pg = self._change_log_handler.rd_and_wrt_back(
             j_cg_log, self.p_buf, ctr, prev_blk_num, curr_blk_num, pg
         )
 
+        # Always call this to handle any remaining changes
         self._process_final_change(j_cg_log, ctr, curr_blk_num, pg)
 
     def _process_final_change(self, j_cg_log: ChangeLog, ctr: int, curr_blk_num: bNum_t, pg: Page):
@@ -911,33 +912,20 @@ class Journal:
 
         def rd_and_wrt_back(self, j_cg_log: ChangeLog, p_buf: List, buf_page_count: int,
                             prv_blk_num: bNum_t, cur_blk_num: bNum_t, pg: Page):
-            """Read changes from log and write them back to disk.
-
-            Args:
-                j_cg_log: The change log to process
-                p_buf: Buffer to hold pages before writing to disk
-                buf_page_count: Number of pages currently in p_buf
-                prv_blk_num: Previous block number processed
-                cur_blk_num: Current block number being processed
-                pg: Page object to hold current page data
-
-            Returns:
-                Tuple of (buf_page_count, prv_blk_num, cur_blk_num, pg)
-            """
+            """Read changes from log and write them back to disk."""
             if not j_cg_log.the_log:
                 return buf_page_count, prv_blk_num, cur_blk_num, pg
 
             try:
-                last_change = None
                 for blk_num, changes in j_cg_log.the_log.items():
                     logger.debug(f"Processing block {blk_num} with {len(changes)} changes")
                     for cg in changes:
                         cur_blk_num = cg.block_num
 
                         # Handle block change or first block
-                        if cur_blk_num != prv_blk_num:
+                        if cur_blk_num != prv_blk_num or prv_blk_num == SENTINEL_INUM:
                             # If not first block, store previous block in buffer
-                            if prv_blk_num is not None:
+                            if prv_blk_num != SENTINEL_INUM:
                                 if buf_page_count == self._journal.NUM_PGS_JRNL_BUF:
                                     self._journal.empty_purge_jrnl_buf(p_buf, buf_page_count)
                                     buf_page_count = 0
@@ -957,9 +945,7 @@ class Journal:
 
                             prv_blk_num = cur_blk_num
 
-                        # Apply changes to current block
                         self.wrt_cg_to_pg(cg, pg)
-                        last_change = cg
 
             except Exception as e:
                 logger.error(f"Error during recovery: {str(e)}")

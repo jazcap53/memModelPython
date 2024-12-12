@@ -4,7 +4,7 @@ import pytest
 import os
 from journal import Journal
 from change import Change, ChangeLog
-from ajTypes import u32Const, bNum_tConst
+from ajTypes import u32Const, bNum_tConst, SENTINEL_INUM
 from myMemory import Page
 from ajCrc import AJZlibCRC
 import struct
@@ -346,21 +346,26 @@ def test_empty_purge_jrnl_buf(journal, mocker, caplog):
     assert any("Overwriting dirty block 1" in record.message for record in caplog.records)
 
 
-@pytest.mark.parametrize("num_blocks, expected_buf_count, expected_purge_calls", [
-    (1, 1, 0),  # Single block, added to buffer, no purge needed
-    (Journal.NUM_PGS_JRNL_BUF - 1, Journal.NUM_PGS_JRNL_BUF - 1, 0),  # One less than buffer size
-    (Journal.NUM_PGS_JRNL_BUF, 0, 1),  # Exactly fill buffer, one purge
-    (Journal.NUM_PGS_JRNL_BUF + 1, 1, 1),  # One more than buffer size, one purge plus one in buffer
-    (Journal.NUM_PGS_JRNL_BUF * 2, 0, 2),  # Two buffer fills, two purges
+@pytest.mark.parametrize("num_blocks, expected_intermediate_count, expected_final_count, expected_purge_calls", [
+    (1, 0, 1, 0),  # Single block: no intermediate purge, final block added
+    (Journal.NUM_PGS_JRNL_BUF - 1, Journal.NUM_PGS_JRNL_BUF - 1, 0, 1),  # One less than buffer size, purged in final
+    (Journal.NUM_PGS_JRNL_BUF, Journal.NUM_PGS_JRNL_BUF - 1, 0, 2),  # Full buffer purged once, then final purge
+    (Journal.NUM_PGS_JRNL_BUF + 1, 0, 0, 2),  # One purge at full, one in final
+    (Journal.NUM_PGS_JRNL_BUF * 2, Journal.NUM_PGS_JRNL_BUF - 1, 0, 3),  # Two full purges, one final
 ])
-def test_rd_and_wrt_back_one_or_more_blocks(journal, mocker, caplog, num_blocks, expected_buf_count,
-                                            expected_purge_calls):
+def test_rd_and_wrt_back_one_or_more_blocks(journal, mocker, caplog,
+                                            num_blocks, expected_intermediate_count,
+                                            expected_final_count, expected_purge_calls):
     """Test reading and writing back changes from the journal with varying block counts.
 
     Args:
+        journal: Journal instance to test
+        mocker: pytest mocker fixture
+        caplog: pytest logging capture fixture
         num_blocks: Number of blocks to process
-        expected_buf_count: Expected number of pages in buffer after processing
-        expected_purge_calls: Number of times empty_purge_jrnl_buf should be called
+        expected_intermediate_count: Expected buffer count after rd_and_wrt_back
+        expected_final_count: Expected buffer count after final processing
+        expected_purge_calls: Total number of purge calls expected
     """
     caplog.set_level(logging.DEBUG)
 
@@ -389,41 +394,48 @@ def test_rd_and_wrt_back_one_or_more_blocks(journal, mocker, caplog, num_blocks,
     # Initialize test variables
     p_buf = [None] * journal.NUM_PGS_JRNL_BUF
     initial_buf_page_count = 0
-    initial_prv_blk_num = None
+    initial_prv_blk_num = SENTINEL_INUM
     initial_cur_blk_num = None
 
-    # Call the method
-    final_buf_count, final_prv_blk_num, final_cur_blk_num, final_pg = journal._change_log_handler.rd_and_wrt_back(
+    # Call rd_and_wrt_back
+    intermediate_buf_count, prv_blk_num, cur_blk_num, pg = journal._change_log_handler.rd_and_wrt_back(
         mock_j_cg_log, p_buf, initial_buf_page_count, initial_prv_blk_num, initial_cur_blk_num, mock_pg
     )
 
-    # Assertions
-    assert final_buf_count == expected_buf_count, \
-        f"Expected final buf_page_count to be {expected_buf_count}, but got {final_buf_count}"
-    assert final_prv_blk_num == num_blocks - 1, \
-        f"Expected final previous block number to be {num_blocks - 1}, but got {final_prv_blk_num}"
-    assert final_cur_blk_num == num_blocks - 1, \
-        f"Expected final current block number to be {num_blocks - 1}, but got {final_cur_blk_num}"
+    # Verify intermediate state
+    assert intermediate_buf_count == expected_intermediate_count, \
+        f"Expected intermediate buf_page_count to be {expected_intermediate_count}, but got {intermediate_buf_count}"
+
+    # Process final change
+    if num_blocks > 0:
+        journal._process_final_change(mock_j_cg_log, intermediate_buf_count, cur_blk_num, pg)
+
+    # Count filled buffer slots after final processing
+    filled_slots = len([x for x in p_buf if x is not None])
+    assert filled_slots == expected_final_count, \
+        f"Expected {expected_final_count} filled buffer slots after final processing, but got {filled_slots}"
 
     # Verify method calls
-    assert mock_disk().seek.call_count == num_blocks
-    assert mock_disk().read.call_count == num_blocks
-    assert mock_wrt_cg.call_count == num_blocks
-    assert mock_empty_purge.call_count == expected_purge_calls
+    assert mock_disk().seek.call_count == num_blocks, \
+        f"Expected {num_blocks} seek calls, but got {mock_disk().seek.call_count}"
 
-    # Verify buffer state
-    filled_slots = sum(1 for x in p_buf if x is not None)
-    assert filled_slots == expected_buf_count, \
-        f"Expected {expected_buf_count} filled buffer slots, but got {filled_slots}"
+    assert mock_disk().read.call_count == num_blocks, \
+        f"Expected {num_blocks} read calls, but got {mock_disk().read.call_count}"
+
+    assert mock_wrt_cg.call_count == num_blocks + (1 if num_blocks > 0 else 0), \
+        f"Expected {num_blocks + (1 if num_blocks > 0 else 0)} write calls, but got {mock_wrt_cg.call_count}"
+
+    assert mock_empty_purge.call_count == expected_purge_calls, \
+        f"Expected {expected_purge_calls} purge calls, but got {mock_empty_purge.call_count}"
+
+    # Verify the last purge call was with is_end=True if there were any blocks
+    if num_blocks > 0:
+        mock_empty_purge.assert_called_with(p_buf, mocker.ANY, True)
 
     # Check log messages
     for i in range(num_blocks):
         assert any(f"Processing block {i} with 1 changes" in record.message
                    for record in caplog.records), f"Missing log message for block {i}"
-
-    # Verify purge calls
-    if expected_purge_calls > 0:
-        mock_empty_purge.assert_any_call(p_buf, journal.NUM_PGS_JRNL_BUF)
 
 
 def test_r_and_wb_last(journal, mocker, caplog):
