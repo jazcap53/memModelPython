@@ -796,6 +796,7 @@ class Journal:
 
         def __init__(self, journal_instance):
             self._journal = journal_instance
+            self._p_stt = journal_instance.p_stt
 
         def get_num_data_lines(self, r_cg: Change) -> int:
             """Calculate the number of data lines in a change."""
@@ -908,11 +909,23 @@ class Journal:
             pg.dat[-4:] = AJZlibCRC.wrt_bytes_little_e(crc, pg.dat[-4:], 4)
             logger.debug(f"Updated page CRC: {crc:08x}")
 
-        def rd_and_wrt_back(self, j_cg_log: ChangeLog, p_buf: List, ctr: int,
+        def rd_and_wrt_back(self, j_cg_log: ChangeLog, p_buf: List, buf_page_count: int,
                             prv_blk_num: bNum_t, cur_blk_num: bNum_t, pg: Page):
-            """Read changes from log and write them back to disk."""
+            """Read changes from log and write them back to disk.
+
+            Args:
+                j_cg_log: The change log to process
+                p_buf: Buffer to hold pages before writing to disk
+                buf_page_count: Number of pages currently in p_buf
+                prv_blk_num: Previous block number processed
+                cur_blk_num: Current block number being processed
+                pg: Page object to hold current page data
+
+            Returns:
+                Tuple of (buf_page_count, prv_blk_num, cur_blk_num, pg)
+            """
             if not j_cg_log.the_log:
-                return ctr, prv_blk_num, cur_blk_num, pg
+                return buf_page_count, prv_blk_num, cur_blk_num, pg
 
             try:
                 first_iteration = True
@@ -922,11 +935,11 @@ class Journal:
                         cur_blk_num = cg.block_num
                         if cur_blk_num != prv_blk_num or first_iteration:
                             if not first_iteration:
-                                if ctr == self._journal.NUM_PGS_JRNL_BUF:
-                                    self._journal.empty_purge_jrnl_buf(p_buf, ctr)
-                                    ctr = 0
-                                p_buf[ctr] = (prv_blk_num, pg)
-                                ctr += 1
+                                if buf_page_count == self._journal.NUM_PGS_JRNL_BUF:
+                                    self._journal.empty_purge_jrnl_buf(p_buf, buf_page_count)
+                                    buf_page_count = 0
+                                p_buf[buf_page_count] = (prv_blk_num, pg)
+                                buf_page_count += 1
 
                             # Read new page from disk
                             self._journal.p_d.get_ds().seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
@@ -935,23 +948,22 @@ class Journal:
                             if not self._journal.verify_page_crc((cur_blk_num, pg)):
                                 error_msg = f"CRC check failed for block {cur_blk_num} during recovery"
                                 logger.error(error_msg)
-                                self.p_stt.wrt(f"Error: {error_msg}")
-                                # Since we're already in recovery, we'll try to recover what we can
-                                # but mark the status as potentially corrupted
-                                self.p_cck.set_last_status('P')  # 'P' for Potentially corrupted
+                                self._p_stt.wrt(f"Error: {error_msg}")
+                                self._journal.p_cck.set_last_status('C')  # Mark as crashed
+                                raise ValueError(error_msg)
 
+                            prv_blk_num = cur_blk_num
                             first_iteration = False
 
-                        prv_blk_num = cur_blk_num
                         self.wrt_cg_to_pg(cg, pg)
 
             except Exception as e:
                 logger.error(f"Error during recovery: {str(e)}")
-                self._journal.p_stt.wrt("Recovery failed")
+                self._p_stt.wrt("Recovery failed")
                 self._journal.p_cck.set_last_status('C')  # Mark as crashed
                 raise
 
-            return ctr, prv_blk_num, cur_blk_num, pg
+            return buf_page_count, prv_blk_num, cur_blk_num, pg
 
         def r_and_wb_last(self, cg: Change, p_buf: List, ctr: int,
                           cur_blk_num: bNum_t, pg: Page):

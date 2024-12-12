@@ -242,6 +242,9 @@ def test_crc_check_pg(journal):
 
 def test_purge_journal(journal, mock_change_log, mocker, caplog):
     """Test journal purging functionality."""
+    # Mock CRC verification to always return True
+    mocker.patch.object(journal, 'verify_page_crc', return_value=True)
+
     # Setup
     change1 = Change(1)
     change1.add_line(0, b'A' * u32Const.BYTES_PER_LINE.value)
@@ -249,6 +252,7 @@ def test_purge_journal(journal, mock_change_log, mocker, caplog):
     mock_dict = mocker.MagicMock()
     mock_dict.items.return_value = {1: [change1]}.items()
     mock_dict.__getitem__.side_effect = lambda x: [change1] if x == 1 else KeyError()
+    mock_dict.clear = mocker.Mock()  # Ensure clear method is callable
 
     mock_change_log.the_log = mock_dict
     mock_change_log.cg_line_ct = 1
@@ -265,9 +269,6 @@ def test_purge_journal(journal, mock_change_log, mocker, caplog):
         # Purge the journal
         journal.purge_jrnl(True, False)
 
-    # Verify log messages
-    assert any("Purging journal" in record.message for record in caplog.records)
-
     # Verify post-purge state
     assert not any(journal.blks_in_jrnl)  # All blocks should be marked as not in journal
     mock_dict.clear.assert_called_once()  # Change log should be cleared
@@ -280,6 +281,9 @@ def test_purge_journal(journal, mock_change_log, mocker, caplog):
     # Verify journal file size remains correct
     journal.js.seek(0, 2)  # Seek to end
     assert journal.js.tell() == u32Const.JRNL_SIZE.value
+
+    # Verify log messages
+    assert any("Purging journal" in record.message for record in caplog.records)
 
 
 def test_do_wipe_routine(journal, mocker, mock_change_log, caplog):
@@ -342,46 +346,84 @@ def test_empty_purge_jrnl_buf(journal, mocker, caplog):
     assert any("Overwriting dirty block 1" in record.message for record in caplog.records)
 
 
-def test_rd_and_wrt_back(journal, mocker, caplog):
+@pytest.mark.parametrize("num_blocks, expected_buf_count, should_purge", [
+    (1, 0, False),  # Single block
+    (Journal.NUM_PGS_JRNL_BUF - 1, Journal.NUM_PGS_JRNL_BUF - 1, False),  # One less than buffer size
+    (Journal.NUM_PGS_JRNL_BUF, 0, True),  # Exactly fill buffer
+    (Journal.NUM_PGS_JRNL_BUF + 1, 1, True),  # One more than buffer size
+    (Journal.NUM_PGS_JRNL_BUF * 2, 0, True),  # Multiple buffer fills
+])
+def test_rd_and_wrt_back_one_or_more_blocks(journal, mocker, caplog, num_blocks, expected_buf_count, should_purge):
+    """Test reading and writing back changes from the journal with varying block counts.
+
+    Args:
+        num_blocks: Number of blocks to process
+        expected_buf_count: Expected number of pages in buffer after processing
+        should_purge: Whether empty_purge_jrnl_buf should be called
+    """
     caplog.set_level(logging.DEBUG)
 
-    # Mock dependencies
+    # Mock CRC verification to always return True
+    mocker.patch.object(journal, 'verify_page_crc', return_value=True)
+
+    # Create mock changes
+    mock_changes = {}
+    for i in range(num_blocks):
+        mock_change = mocker.Mock(spec=Change)
+        mock_change.block_num = i
+        mock_changes[i] = [mock_change]
+
     mock_j_cg_log = mocker.Mock(spec=ChangeLog)
-    mock_change1 = mocker.Mock(spec=Change)
-    mock_change1.block_num = 1
-    mock_j_cg_log.the_log = {1: [mock_change1]}
+    mock_j_cg_log.the_log = mock_changes
 
     mock_pg = mocker.Mock(spec=Page)
     mock_pg.dat = bytearray(u32Const.BLOCK_BYTES.value)
 
     # Mock methods
-    mocker.patch.object(journal, 'empty_purge_jrnl_buf')
-    mocker.patch.object(journal.p_d, 'get_ds')
-    journal.p_d.get_ds().read.return_value = b'\0' * u32Const.BLOCK_BYTES.value
-    mocker.patch.object(journal._change_log_handler, 'wrt_cg_to_pg')
+    mock_empty_purge = mocker.patch.object(journal, 'empty_purge_jrnl_buf')
+    mock_disk = mocker.patch.object(journal.p_d, 'get_ds')
+    mock_disk().read.return_value = b'\0' * u32Const.BLOCK_BYTES.value
+    mock_wrt_cg = mocker.patch.object(journal._change_log_handler, 'wrt_cg_to_pg')
 
     # Initialize test variables
     p_buf = [None] * journal.NUM_PGS_JRNL_BUF
-    ctr = 0
-    prv_blk_num = None
-    cur_blk_num = None
+    initial_buf_page_count = 0
+    initial_prv_blk_num = None
+    initial_cur_blk_num = None
 
     # Call the method
-    ctr, prv_blk_num, cur_blk_num, pg = journal._change_log_handler.rd_and_wrt_back(
-        mock_j_cg_log, p_buf, ctr, prv_blk_num, cur_blk_num, mock_pg
+    final_buf_count, final_prv_blk_num, final_cur_blk_num, final_pg = journal._change_log_handler.rd_and_wrt_back(
+        mock_j_cg_log, p_buf, initial_buf_page_count, initial_prv_blk_num, initial_cur_blk_num, mock_pg
     )
 
     # Assertions
-    assert ctr == 1, f"Expected ctr to be 1, but got {ctr}"
-    assert prv_blk_num == 1
-    assert cur_blk_num == 1
-    journal._change_log_handler.wrt_cg_to_pg.assert_called_once_with(mock_change1, mock_pg)
+    assert final_buf_count == expected_buf_count, \
+        f"Expected buf_page_count to be {expected_buf_count}, but got {final_buf_count}"
+    assert final_prv_blk_num == num_blocks - 1, \
+        f"Expected final previous block number to be {num_blocks - 1}, but got {final_prv_blk_num}"
+    assert final_cur_blk_num == num_blocks - 1, \
+        f"Expected final current block number to be {num_blocks - 1}, but got {final_cur_blk_num}"
 
-    # Check log messages without printing them
-    log_messages = [record.message for record in caplog.records]
-    assert "Processing block 1 with 1 changes" in log_messages
-    assert "Processing final block. ctr before: 0" in log_messages
-    assert "ctr after final increment: 1" in log_messages
+    # Verify method calls
+    assert mock_disk().seek.call_count == num_blocks
+    assert mock_disk().read.call_count == num_blocks
+    assert mock_wrt_cg.call_count == num_blocks
+
+    if should_purge:
+        purge_call_count = (num_blocks - 1) // journal.NUM_PGS_JRNL_BUF
+        mock_empty_purge.assert_has_calls([mocker.call(p_buf, journal.NUM_PGS_JRNL_BUF)] * purge_call_count)
+    else:
+        mock_empty_purge.assert_not_called()
+
+    # Verify buffer state
+    filled_slots = len([x for x in p_buf if x is not None])
+    assert filled_slots == expected_buf_count, \
+        f"Expected {expected_buf_count} filled buffer slots, but got {filled_slots}"
+
+    # Check log messages
+    for i in range(num_blocks):
+        assert any(f"Processing block {i} with 1 changes" in record.message
+                   for record in caplog.records)
 
 
 def test_r_and_wb_last(journal, mocker, caplog):
@@ -412,3 +454,26 @@ def test_r_and_wb_last(journal, mocker, caplog):
     stored_crc = int.from_bytes(pg.dat[-4:], 'little')
     calculated_crc = AJZlibCRC.get_code(pg.dat[:-4], len(pg.dat) - 4)
     assert stored_crc == calculated_crc
+
+
+def test_verify_page_crc(journal):
+    """Test CRC verification of a page."""
+    # Create a test page
+    test_page = Page()
+
+    # Fill page with test data
+    test_data = b'A' * (u32Const.BYTES_PER_PAGE.value - u32Const.CRC_BYTES.value)
+    test_page.dat[:-u32Const.CRC_BYTES.value] = test_data
+
+    # Calculate correct CRC
+    correct_crc = AJZlibCRC.get_code(test_data, len(test_data))
+
+    # Write correct CRC to page
+    test_page.dat[-u32Const.CRC_BYTES.value:] = correct_crc.to_bytes(u32Const.CRC_BYTES.value, 'little')
+
+    # Test with correct CRC
+    assert journal.verify_page_crc((1, test_page)) is True
+
+    # Test with incorrect CRC
+    test_page.dat[-1] ^= 0xFF  # Flip bits in last byte
+    assert journal.verify_page_crc((1, test_page)) is False
