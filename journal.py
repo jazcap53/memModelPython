@@ -911,44 +911,63 @@ class Journal:
 
         def rd_and_wrt_back(self, j_cg_log: ChangeLog, p_buf: List, buf_page_count: int,
                             prv_blk_num: bNum_t, cur_blk_num: bNum_t, pg: Page):
-            """Read changes from log and write them back to disk."""
+            """Read changes from log and write them back to disk.
+
+            Args:
+                j_cg_log: The change log to process
+                p_buf: Buffer to hold pages before writing to disk
+                buf_page_count: Number of pages currently in p_buf
+                prv_blk_num: Previous block number processed
+                cur_blk_num: Current block number being processed
+                pg: Page object to hold current page data
+
+            Returns:
+                Tuple of (buf_page_count, prv_blk_num, cur_blk_num, pg)
+            """
             if not j_cg_log.the_log:
                 return buf_page_count, prv_blk_num, cur_blk_num, pg
 
             try:
-                all_changes = []
+                last_change = None
                 for blk_num, changes in j_cg_log.the_log.items():
-                    all_changes.extend(changes)
+                    logger.debug(f"Processing block {blk_num} with {len(changes)} changes")
+                    for cg in changes:
+                        cur_blk_num = cg.block_num
 
-                for idx, cg in enumerate(all_changes[:-1]):  # Process all but the last change
-                    cur_blk_num = cg.block_num
-                    if cur_blk_num != prv_blk_num:
-                        if prv_blk_num is not None:
-                            if buf_page_count == self._journal.NUM_PGS_JRNL_BUF:
-                                self._journal.empty_purge_jrnl_buf(p_buf, buf_page_count)
-                                buf_page_count = 0
-                            p_buf[buf_page_count] = (prv_blk_num, pg)
-                            buf_page_count += 1
+                        # Handle block change or first block
+                        if cur_blk_num != prv_blk_num:
+                            # If not first block, store previous block in buffer
+                            if prv_blk_num is not None:
+                                if buf_page_count == self._journal.NUM_PGS_JRNL_BUF:
+                                    self._journal.empty_purge_jrnl_buf(p_buf, buf_page_count)
+                                    buf_page_count = 0
+                                p_buf[buf_page_count] = (prv_blk_num, pg)
+                                buf_page_count += 1
 
-                        # Read new page from disk
-                        self._journal.p_d.get_ds().seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
-                        pg.dat = bytearray(self._journal.p_d.get_ds().read(u32Const.BLOCK_BYTES.value))
+                            # Read new block from disk
+                            self._journal.p_d.get_ds().seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
+                            pg.dat = bytearray(self._journal.p_d.get_ds().read(u32Const.BLOCK_BYTES.value))
 
-                        if not self._journal.verify_page_crc((cur_blk_num, pg)):
-                            error_msg = f"CRC check failed for block {cur_blk_num} during recovery"
-                            logger.error(error_msg)
-                            self._p_stt.wrt(f"Error: {error_msg}")
-                            self._journal.p_cck.set_last_status('C')  # Mark as crashed
-                            raise ValueError(error_msg)
+                            if not self._journal.verify_page_crc((cur_blk_num, pg)):
+                                error_msg = f"CRC check failed for block {cur_blk_num} during recovery"
+                                logger.error(error_msg)
+                                self._p_stt.wrt(f"Error: {error_msg}")
+                                self._journal.p_cck.set_last_status('C')  # Mark as crashed
+                                raise ValueError(error_msg)
 
-                        prv_blk_num = cur_blk_num
+                            prv_blk_num = cur_blk_num
 
-                    self.wrt_cg_to_pg(cg, pg)
+                        # Apply changes to current block
+                        self.wrt_cg_to_pg(cg, pg)
+                        last_change = cg
 
-                # Process the last change
-                if all_changes:
-                    last_change = all_changes[-1]
-                    self.r_and_wb_last(last_change, p_buf, buf_page_count, last_change.block_num, pg)
+                # Handle the last block if we have one
+                if last_change is not None:
+                    if buf_page_count == self._journal.NUM_PGS_JRNL_BUF:
+                        self._journal.empty_purge_jrnl_buf(p_buf, buf_page_count)
+                        buf_page_count = 0
+                    p_buf[buf_page_count] = (cur_blk_num, pg)
+                    buf_page_count += 1
 
             except Exception as e:
                 logger.error(f"Error during recovery: {str(e)}")
