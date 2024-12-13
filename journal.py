@@ -213,13 +213,13 @@ class Journal:
         # Always call this to handle any remaining changes
         self._process_final_change(j_cg_log, ctr, curr_blk_num, pg)
 
-    def _process_final_change(self, j_cg_log: ChangeLog, ctr: int, curr_blk_num: bNum_t, pg: Page):
-        """Process the final change in the journal."""
-        if curr_blk_num is not None and curr_blk_num in j_cg_log.the_log and j_cg_log.the_log[curr_blk_num]:
-            cg = j_cg_log.the_log[curr_blk_num][-1]
-            self._change_log_handler.r_and_wb_last(cg, self.p_buf, ctr, curr_blk_num, pg)
+    def _process_final_change(self, j_cg_log: ChangeLog, ctr: int, cur_blk_num: bNum_t, pg: Page):
+        """Process the final change in a series."""
+        if cur_blk_num is not None and cur_blk_num in j_cg_log.the_log and j_cg_log.the_log[cur_blk_num]:
+            cg = j_cg_log.the_log[cur_blk_num][-1]
+            self._change_log_handler.r_and_wb_last(cg, self.p_buf, ctr, cur_blk_num, pg)
         else:
-            logger.warning(f"No changes found for block {curr_blk_num}")
+            logger.warning(f"No changes found for block {cur_blk_num}")
 
     def _clear_journal_state(self):
         """Clear the journal state after processing changes."""
@@ -918,7 +918,6 @@ class Journal:
 
             try:
                 for blk_num, changes in j_cg_log.the_log.items():
-                    logger.debug(f"Processing block {blk_num} with {len(changes)} changes")
                     for cg in changes:
                         cur_blk_num = cg.block_num
 
@@ -926,6 +925,7 @@ class Journal:
                         if cur_blk_num != prv_blk_num or prv_blk_num == SENTINEL_INUM:
                             # If not first block, store previous block in buffer
                             if prv_blk_num != SENTINEL_INUM:
+                                # Check if buffer is full
                                 if buf_page_count == self._journal.NUM_PGS_JRNL_BUF:
                                     self._journal.empty_purge_jrnl_buf(p_buf, buf_page_count)
                                     buf_page_count = 0
@@ -939,7 +939,7 @@ class Journal:
                             if not self._journal.verify_page_crc((cur_blk_num, pg)):
                                 error_msg = f"CRC check failed for block {cur_blk_num} during recovery"
                                 logger.error(error_msg)
-                                self._p_stt.wrt(f"Error: {error_msg}")
+                                self._journal.p_stt.wrt(f"Error: {error_msg}")
                                 self._journal.p_cck.set_last_status('C')  # Mark as crashed
                                 raise ValueError(error_msg)
 
@@ -949,7 +949,7 @@ class Journal:
 
             except Exception as e:
                 logger.error(f"Error during recovery: {str(e)}")
-                self._p_stt.wrt("Recovery failed")
+                self._journal.p_stt.wrt("Recovery failed")
                 self._journal.p_cck.set_last_status('C')  # Mark as crashed
                 raise
 
