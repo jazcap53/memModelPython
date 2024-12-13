@@ -1020,10 +1020,6 @@ class Journal:
             # Final purge (this handles both single-block and multi-block cases)
             self._journal.empty_purge_jrnl_buf(p_buf, ctr, True)
 
-            # Clear the buffer after final purge
-            for i in range(len(p_buf)):
-                p_buf[i] = None
-
         def wrt_cg_log_to_jrnl(self, r_cg_log: ChangeLog):
             """Write entire change log to journal."""
             logger.debug(f"Entering wrt_cg_log_to_jrnl with {len(r_cg_log.the_log)} blocks in change log")
