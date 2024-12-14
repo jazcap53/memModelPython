@@ -382,6 +382,9 @@ def test_rd_and_wrt_back_one_or_more_blocks(journal, mocker, caplog,
     mock_j_cg_log = mocker.Mock(spec=ChangeLog)
     mock_j_cg_log.the_log = mock_changes
 
+    # ensure the log is not considered empty
+    mock_j_cg_log.the_log.__bool__.return_value = bool(num_blocks > 0)
+
     mock_pg = mocker.Mock(spec=Page)
     mock_pg.dat = bytearray(u32Const.BLOCK_BYTES.value)
 

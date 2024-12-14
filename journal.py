@@ -939,6 +939,7 @@ class Journal:
                             prv_blk_num: bNum_t, cur_blk_num: bNum_t, pg: Page):
             """Read changes from log and write them back to disk."""
             if not j_cg_log.the_log:
+                logger.debug("Change log is empty, returning early")
                 return buf_page_count, prv_blk_num, cur_blk_num, pg
 
             try:
