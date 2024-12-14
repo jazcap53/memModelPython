@@ -428,64 +428,38 @@ class Journal:
         return read_64bit(self.js)
 
     def empty_purge_jrnl_buf(self, p_buf: List[Tuple[bNum_t, Page]], p_ctr: int, is_end: bool = False) -> bool:
-        """Empty the journal's purge buffer by writing pages to disk.
+        """Empty the journal's purge buffer by writing pages to disk."""
+        logger.debug(f"Entering empty_purge_jrnl_buf with {p_ctr} pages, is_end={is_end}")
 
-        Args:
-            p_buf: List of (block_number, Page) tuples to be written
-            p_ctr: Number of valid entries in p_buf
-            is_end: True if this is the final purge operation
-
-        Returns:
-            bool: True if all writes succeeded, False otherwise
-        """
         if p_ctr == 0 and not is_end:
+            logger.debug("Buffer empty and not final purge, returning early")
             return True
 
-        temp = bytearray(u32Const.BLOCK_BYTES.value)
-        self.p_d.do_create_block(temp, u32Const.BLOCK_BYTES.value)
-
-        while p_ctr:
-            p_ctr -= 1
-            cursor = p_buf[p_ctr]
+        # Process all valid entries
+        for i in range(p_ctr):
+            cursor = p_buf[i]
+            if not cursor:
+                continue
 
             if not self.verify_page_crc(cursor):
                 error_msg = f"CRC check failed for block {cursor[0]} before writing to disk"
                 logger.error(error_msg)
                 self.p_stt.wrt(f"Error: {error_msg}")
-                # Since this is a critical operation, we should abort
-                self.p_cck.set_last_status('C')  # Mark as crashed
+                self.p_cck.set_last_status('C')
                 raise ValueError(error_msg)
-
-            # Calculate CRC for the page
-            crc = AJZlibCRC.get_code(cursor[1].dat[:-u32Const.CRC_BYTES.value],
-                                     u32Const.BYTES_PER_PAGE.value - u32Const.CRC_BYTES.value)
-
-            # Write CRC to the last 4 bytes of the page
-            AJZlibCRC.wrt_bytes_little_e(crc, cursor[1].dat[-u32Const.CRC_BYTES.value:], u32Const.CRC_BYTES.value)
 
             self.p_d.get_ds().seek(cursor[0] * u32Const.BLOCK_BYTES.value)
 
             if self.wipers.is_dirty(cursor[0]):
-                self.p_d.get_ds().write(temp)
+                # Write zeros for dirty blocks
+                self.p_d.get_ds().write(b'\0' * u32Const.BLOCK_BYTES.value)
                 logger.debug(f"Overwriting dirty block {cursor[0]}")
             else:
                 self.p_d.get_ds().write(cursor[1].dat)
                 logger.debug(f"Writing page {cursor[0]:3} to disk")
 
-        if not is_end:
-            logger.debug("Finished writing batch of pages")
-        else:
-            # Clear the buffer after processing if it's the final purge
-            for i in range(len(p_buf)):
-                p_buf[i] = None
-            logger.debug("Final purge completed, buffer cleared")
-
-        ok_val = True
-        if not self.p_d.get_ds():
-            logger.error(f"Error writing to {self.p_d.get_d_file_name()}")
-            ok_val = False
-
-        return ok_val
+        logger.debug(f"Finished processing {p_ctr} pages in empty_purge_jrnl_buf")
+        return True
 
     def verify_bytes_read(self):
         """Verify that the number of bytes read matches the expected count."""
@@ -1003,36 +977,25 @@ class Journal:
 
         def r_and_wb_last(self, cg: Change, p_buf: List, ctr: int,
                           cur_blk_num: bNum_t, pg: Page):
-            """Process the final change and ensure proper buffer handling.
+            """Process the final change and ensure proper buffer handling."""
+            logger.debug(f"Entering r_and_wb_last for block {cur_blk_num}")
 
-            This method:
-            1. Writes the final change to the page
-            2. Adds the page to the buffer if there's space
-            3. Purges the buffer if it's full
-            4. Handles the special case of a single-block change
-
-            Args:
-                cg (Change): The final change to process
-                p_buf (List): The page buffer
-                ctr (int): Current buffer count
-                cur_blk_num (bNum_t): Current block number
-                pg (Page): Current page being processed
-            """
             # Write the final change to the page
             self.wrt_cg_to_pg(cg, pg)
-
-            # Handle buffer management
-            if ctr == self._journal.NUM_PGS_JRNL_BUF:
-                # Buffer is full, purge it before adding the final page
-                self._journal.empty_purge_jrnl_buf(p_buf, ctr)
-                ctr = 0
 
             # Add final page to buffer
             p_buf[ctr] = (cur_blk_num, pg)
             ctr += 1
 
-            # Final purge (this handles both single-block and multi-block cases)
+            # Always purge with is_end=True, regardless of buffer state
+            logger.debug(f"Purging buffer in r_and_wb_last, ctr={ctr}")
             self._journal.empty_purge_jrnl_buf(p_buf, ctr, True)
+
+            # Clear the buffer after final purge
+            for i in range(len(p_buf)):
+                p_buf[i] = None
+
+            logger.debug("Exiting r_and_wb_last, buffer cleared")
 
         def wrt_cg_log_to_jrnl(self, r_cg_log: ChangeLog):
             """Write entire change log to journal."""
