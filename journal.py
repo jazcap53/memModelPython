@@ -960,31 +960,8 @@ class Journal:
                 blocks = list(j_cg_log.the_log.items())
                 logger.debug(f"Blocks to process: {blocks}")
 
-                # Handle the case where there's only one block differently
-                if len(blocks) == 1:
-                    logger.debug("Only one block to process, handling separately")
-                    blk_num, changes = blocks[0]
-                    for cg in changes:
-                        cur_blk_num = cg.block_num
-                        logger.debug(f"Single block: Current block number: {cur_blk_num}")
-
-                        self._journal.p_d.get_ds().seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
-                        logger.debug(f"Sought to position: {cur_blk_num * u32Const.BLOCK_BYTES.value}")
-
-                        pg.dat = bytearray(self._journal.p_d.get_ds().read(u32Const.BLOCK_BYTES.value))
-                        logger.debug(f"Read {u32Const.BLOCK_BYTES.value} bytes from disk")
-
-                        self.wrt_cg_to_pg(cg, pg)
-
-                    # Add to buffer but don't process yet
-                    if buf_page_count < self._journal.NUM_PGS_JRNL_BUF:
-                        p_buf[buf_page_count] = (cur_blk_num, pg)
-                        buf_page_count += 1
-
-                    return buf_page_count, prv_blk_num, cur_blk_num, pg
-
-                # Process all blocks except the last one
-                for blk_num, changes in blocks[:-1]:
+                # Process all blocks (remove the special single-block handling)
+                for blk_num, changes in blocks:
                     logger.debug(f"Processing block {blk_num} with {len(changes)} changes")
                     for cg in changes:
                         cur_blk_num = cg.block_num
@@ -1013,14 +990,8 @@ class Journal:
 
                         self.wrt_cg_to_pg(cg, pg)
 
-                # Handle final block storage if needed
-                if prv_blk_num != SENTINEL_INUM:
-                    if buf_page_count == self._journal.NUM_PGS_JRNL_BUF:
-                        logger.debug("Buffer full before final block, purging")
-                        self._journal.empty_purge_jrnl_buf(p_buf, buf_page_count)
-                        buf_page_count = 0
-                    p_buf[buf_page_count] = (prv_blk_num, pg)
-                    buf_page_count += 1
+                # Don't add the final block to the buffer here
+                # It will be handled by the caller or in r_and_wb_last()
 
             except Exception as e:
                 logger.error(f"Error in rd_and_wrt_back: {str(e)}")

@@ -356,6 +356,17 @@ def test_empty_purge_jrnl_buf(journal, mocker, caplog):
 def test_rd_and_wrt_back_one_or_more_blocks(journal, mocker, caplog,
                                           num_blocks, expected_intermediate_count,
                                           expected_final_count, expected_purge_calls):
+    """Test reading and writing back changes from the journal with varying block counts.
+
+    Args:
+        journal: Journal instance to test
+        mocker: pytest mocker fixture
+        caplog: pytest logging capture fixture
+        num_blocks: Number of blocks to process
+        expected_intermediate_count: Expected buffer count after rd_and_wrt_back
+        expected_final_count: Expected buffer count after final processing
+        expected_purge_calls: Total number of purge calls expected
+    """
     caplog.set_level(logging.DEBUG)
 
     # Mock CRC verification to always return True
@@ -397,9 +408,13 @@ def test_rd_and_wrt_back_one_or_more_blocks(journal, mocker, caplog,
     assert intermediate_buf_count == expected_intermediate_count, \
         f"Expected intermediate buf_page_count to be {expected_intermediate_count}, but got {intermediate_buf_count}"
 
-    # Process final change
+    # Handle the final (or only) block if there are any blocks
     if num_blocks > 0:
-        journal._process_final_change(mock_j_cg_log, intermediate_buf_count, cur_blk_num, pg)
+        last_block_num = list(mock_changes.keys())[-1]
+        last_change = mock_changes[last_block_num][-1]
+        journal._change_log_handler.r_and_wb_last(
+            last_change, p_buf, intermediate_buf_count, last_block_num, pg
+        )
 
     # Count filled buffer slots after final processing
     filled_slots = len([x for x in p_buf if x is not None])
@@ -413,8 +428,8 @@ def test_rd_and_wrt_back_one_or_more_blocks(journal, mocker, caplog,
     assert mock_disk().read.call_count == num_blocks, \
         f"Expected {num_blocks} read calls, but got {mock_disk().read.call_count}"
 
-    assert mock_wrt_cg.call_count == num_blocks + (1 if num_blocks > 0 else 0), \
-        f"Expected {num_blocks + (1 if num_blocks > 0 else 0)} write calls, but got {mock_wrt_cg.call_count}"
+    assert mock_wrt_cg.call_count == num_blocks, \
+        f"Expected {num_blocks} write calls, but got {mock_wrt_cg.call_count}"
 
     assert mock_empty_purge.call_count == expected_purge_calls, \
         f"Expected {expected_purge_calls} purge calls, but got {mock_empty_purge.call_count}"
