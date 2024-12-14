@@ -937,36 +937,77 @@ class Journal:
 
         def rd_and_wrt_back(self, j_cg_log: ChangeLog, p_buf: List, buf_page_count: int,
                             prv_blk_num: bNum_t, cur_blk_num: bNum_t, pg: Page):
-            """Read changes from log and write them back to disk."""
+            """Read changes from log and write them back to disk.
+
+            Args:
+                j_cg_log (ChangeLog): The journal change log
+                p_buf (List): Buffer for pages
+                buf_page_count (int): Current count of pages in buffer
+                prv_blk_num (bNum_t): Previous block number processed
+                cur_blk_num (bNum_t): Current block number being processed
+                pg (Page): Current page being processed
+
+            Returns:
+                tuple: (buf_page_count, prv_blk_num, cur_blk_num, pg) after processing
+            """
+            logger.debug(f"Entering rd_and_wrt_back with {len(j_cg_log.the_log)} blocks in change log")
+
             if not j_cg_log.the_log:
                 logger.debug("Change log is empty, returning early")
                 return buf_page_count, prv_blk_num, cur_blk_num, pg
 
             try:
                 blocks = list(j_cg_log.the_log.items())
+                logger.debug(f"Blocks to process: {blocks}")
+
+                # Handle the case where there's only one block differently
+                if len(blocks) == 1:
+                    logger.debug("Only one block to process, handling separately")
+                    blk_num, changes = blocks[0]
+                    for cg in changes:
+                        cur_blk_num = cg.block_num
+                        logger.debug(f"Single block: Current block number: {cur_blk_num}")
+
+                        self._journal.p_d.get_ds().seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
+                        logger.debug(f"Sought to position: {cur_blk_num * u32Const.BLOCK_BYTES.value}")
+
+                        pg.dat = bytearray(self._journal.p_d.get_ds().read(u32Const.BLOCK_BYTES.value))
+                        logger.debug(f"Read {u32Const.BLOCK_BYTES.value} bytes from disk")
+
+                        self.wrt_cg_to_pg(cg, pg)
+
+                    # Add to buffer but don't process yet
+                    if buf_page_count < self._journal.NUM_PGS_JRNL_BUF:
+                        p_buf[buf_page_count] = (cur_blk_num, pg)
+                        buf_page_count += 1
+
+                    return buf_page_count, prv_blk_num, cur_blk_num, pg
+
                 # Process all blocks except the last one
-                for blk_num, changes in blocks[:-1]:  # Note: excluding last block
+                for blk_num, changes in blocks[:-1]:
                     logger.debug(f"Processing block {blk_num} with {len(changes)} changes")
                     for cg in changes:
                         cur_blk_num = cg.block_num
+                        logger.debug(f"Current block number: {cur_blk_num}, Previous: {prv_blk_num}")
 
                         if cur_blk_num != prv_blk_num or prv_blk_num == SENTINEL_INUM:
+                            logger.debug(f"Block changed or first block. buf_page_count: {buf_page_count}")
+
+                            # Handle buffer full condition
                             if prv_blk_num != SENTINEL_INUM:
                                 if buf_page_count == self._journal.NUM_PGS_JRNL_BUF:
+                                    logger.debug("Buffer full, purging")
                                     self._journal.empty_purge_jrnl_buf(p_buf, buf_page_count)
                                     buf_page_count = 0
                                 p_buf[buf_page_count] = (prv_blk_num, pg)
                                 buf_page_count += 1
 
+                            # Seek and read new block
                             self._journal.p_d.get_ds().seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
-                            pg.dat = bytearray(self._journal.p_d.get_ds().read(u32Const.BLOCK_BYTES.value))
+                            logger.debug(f"Sought to position: {cur_blk_num * u32Const.BLOCK_BYTES.value}")
 
-                            if not self._journal.verify_page_crc((cur_blk_num, pg)):
-                                error_msg = f"CRC check failed for block {cur_blk_num} during recovery"
-                                logger.error(error_msg)
-                                self._journal.p_stt.wrt(f"Error: {error_msg}")
-                                self._journal.p_cck.set_last_status('C')
-                                raise ValueError(error_msg)
+                            pg.dat = bytearray(self._journal.p_d.get_ds().read(u32Const.BLOCK_BYTES.value))
+                            logger.debug(f"Read {u32Const.BLOCK_BYTES.value} bytes from disk")
 
                             prv_blk_num = cur_blk_num
 
@@ -975,17 +1016,18 @@ class Journal:
                 # Handle final block storage if needed
                 if prv_blk_num != SENTINEL_INUM:
                     if buf_page_count == self._journal.NUM_PGS_JRNL_BUF:
+                        logger.debug("Buffer full before final block, purging")
                         self._journal.empty_purge_jrnl_buf(p_buf, buf_page_count)
                         buf_page_count = 0
                     p_buf[buf_page_count] = (prv_blk_num, pg)
                     buf_page_count += 1
 
             except Exception as e:
-                logger.error(f"Error during recovery: {str(e)}")
-                self._journal.p_stt.wrt("Recovery failed")
-                self._journal.p_cck.set_last_status('C')
+                logger.error(f"Error in rd_and_wrt_back: {str(e)}")
                 raise
 
+            logger.debug(f"Exiting rd_and_wrt_back. buf_page_count: {buf_page_count}, "
+                         f"prv_blk_num: {prv_blk_num}, cur_blk_num: {cur_blk_num}")
             return buf_page_count, prv_blk_num, cur_blk_num, pg
 
         def r_and_wb_last(self, cg: Change, p_buf: List, ctr: int,

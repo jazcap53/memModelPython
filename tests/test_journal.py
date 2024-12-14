@@ -354,8 +354,8 @@ def test_empty_purge_jrnl_buf(journal, mocker, caplog):
     (Journal.NUM_PGS_JRNL_BUF * 2, 0, 0, 3),  # Two full purges, one final
 ])
 def test_rd_and_wrt_back_one_or_more_blocks(journal, mocker, caplog,
-                                            num_blocks, expected_intermediate_count,
-                                            expected_final_count, expected_purge_calls):
+                                          num_blocks, expected_intermediate_count,
+                                          expected_final_count, expected_purge_calls):
     caplog.set_level(logging.DEBUG)
 
     # Mock CRC verification to always return True
@@ -368,15 +368,11 @@ def test_rd_and_wrt_back_one_or_more_blocks(journal, mocker, caplog,
         mock_change.block_num = i
         mock_changes[i] = [mock_change]
 
-    # Create the mock ChangeLog with a real dict
+    # Use the real dict directly
     mock_j_cg_log = mocker.Mock(spec=ChangeLog)
     mock_j_cg_log.the_log = mock_changes
 
-    # Add these lines to ensure dict-like behavior
-    mock_j_cg_log.the_log.items = mock_changes.items
-    mock_j_cg_log.the_log.__iter__ = mock_changes.__iter__
-    mock_j_cg_log.the_log.__getitem__ = mock_changes.__getitem__
-
+    # Rest of the test setup remains the same
     mock_pg = mocker.Mock(spec=Page)
     mock_pg.dat = bytearray(u32Const.BLOCK_BYTES.value)
 
