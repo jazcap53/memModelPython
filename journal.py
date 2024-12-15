@@ -911,19 +911,6 @@ class Journal:
 
         def rd_and_wrt_back(self, j_cg_log: ChangeLog, p_buf: List, buf_page_count: int,
                             prv_blk_num: bNum_t, cur_blk_num: bNum_t, pg: Page):
-            """Read changes from log and write them back to disk.
-
-            Args:
-                j_cg_log (ChangeLog): The journal change log
-                p_buf (List): Buffer for pages
-                buf_page_count (int): Current count of pages in buffer
-                prv_blk_num (bNum_t): Previous block number processed
-                cur_blk_num (bNum_t): Current block number being processed
-                pg (Page): Current page being processed
-
-            Returns:
-                tuple: (buf_page_count, prv_blk_num, cur_blk_num, pg) after processing
-            """
             logger.debug(f"Entering rd_and_wrt_back with {len(j_cg_log.the_log)} blocks in change log")
 
             if not j_cg_log.the_log:
@@ -934,9 +921,11 @@ class Journal:
                 blocks = list(j_cg_log.the_log.items())
                 logger.debug(f"Blocks to process: {blocks}")
 
-                # Process all blocks (remove the special single-block handling)
-                for blk_num, changes in blocks:
+                # Handle all blocks except the last one
+                for i in range(len(blocks) - 1):  # Change here: stop before the last block
+                    blk_num, changes = blocks[i]
                     logger.debug(f"Processing block {blk_num} with {len(changes)} changes")
+
                     for cg in changes:
                         cur_blk_num = cg.block_num
                         logger.debug(f"Current block number: {cur_blk_num}, Previous: {prv_blk_num}")
@@ -964,16 +953,14 @@ class Journal:
 
                         self.wrt_cg_to_pg(cg, pg)
 
-                # Don't add the final block to the buffer here
-                # It will be handled by the caller or in r_and_wb_last()
+                # Return without writing the last block
+                logger.debug(f"Exiting rd_and_wrt_back. buf_page_count: {buf_page_count}, "
+                             f"prv_blk_num: {prv_blk_num}, cur_blk_num: {cur_blk_num}")
+                return buf_page_count, prv_blk_num, cur_blk_num, pg
 
             except Exception as e:
                 logger.error(f"Error in rd_and_wrt_back: {str(e)}")
                 raise
-
-            logger.debug(f"Exiting rd_and_wrt_back. buf_page_count: {buf_page_count}, "
-                         f"prv_blk_num: {prv_blk_num}, cur_blk_num: {cur_blk_num}")
-            return buf_page_count, prv_blk_num, cur_blk_num, pg
 
         def r_and_wb_last(self, cg: Change, p_buf: List, ctr: int,
                           cur_blk_num: bNum_t, pg: Page):
