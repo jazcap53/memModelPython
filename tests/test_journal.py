@@ -380,7 +380,7 @@ def test_rd_and_wrt_back_one_or_more_blocks(journal, mocker, caplog,
     # Process changes
     journal._change_log_handler.process_changes(mock_j_cg_log)
 
-    # Verify intermediate state using the exposed count
+    # Verify intermediate state using the instance attribute
     assert journal._change_log_handler.intermediate_buf_count == expected_intermediate_count, \
         f"Expected intermediate buf_page_count to be {expected_intermediate_count}, but got {journal._change_log_handler.intermediate_buf_count}"
 

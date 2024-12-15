@@ -778,7 +778,8 @@ class Journal:
 
         def __init__(self, journal_instance):
             self._journal = journal_instance
-            self._p_stt = journal_instance.p_stt
+            self.p_buf = [None] * journal_instance.NUM_PGS_JRNL_BUF  # Make this an instance attribute
+            self.intermediate_buf_count = 0  # Also make this an instance attribute
 
         def get_num_data_lines(self, r_cg: Change) -> int:
             """Calculate the number of data lines in a change."""
@@ -1041,10 +1042,13 @@ class Journal:
                 return
 
             blocks = list(j_cg_log.the_log.items())
-            p_buf = [None] * self._journal.NUM_PGS_JRNL_BUF
             buf_page_count = 0
             prv_blk_num = SENTINEL_INUM
             pg = None
+
+            # Reset the buffer for each new process
+            for i in range(len(self.p_buf)):
+                self.p_buf[i] = None
 
             # Process all blocks except the last one
             for i in range(len(blocks) - 1):
@@ -1052,17 +1056,17 @@ class Journal:
                 logger.debug(f"Processing block {blk_num} with {len(changes)} changes")
 
                 buf_page_count, prv_blk_num, _, pg = self._process_block(
-                    changes, p_buf, buf_page_count, prv_blk_num, pg
+                    changes, self.p_buf, buf_page_count, prv_blk_num, pg
                 )
 
-            # For testing purposes, we need to expose the intermediate buffer count
+            # Store intermediate buffer count
             self.intermediate_buf_count = buf_page_count
 
             # Handle the last block separately
             if blocks:
                 last_blk_num, last_changes = blocks[-1]
                 logger.debug(f"Processing last block {last_blk_num} with {len(last_changes)} changes")
-                self._process_last_block(last_changes[-1], p_buf, buf_page_count, last_blk_num, pg)
+                self._process_last_block(last_changes[-1], self.p_buf, buf_page_count, last_blk_num, pg)
 
         def _process_block(self, changes: List[Change], p_buf: List,
                            buf_page_count: int, prv_blk_num: bNum_t, pg: Page):
