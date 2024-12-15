@@ -1055,6 +1055,9 @@ class Journal:
                     changes, p_buf, buf_page_count, prv_blk_num, pg
                 )
 
+            # For testing purposes, we need to expose the intermediate buffer count
+            self.intermediate_buf_count = buf_page_count
+
             # Handle the last block separately
             if blocks:
                 last_blk_num, last_changes = blocks[-1]
@@ -1068,11 +1071,14 @@ class Journal:
                 cur_blk_num = cg.block_num
 
                 if cur_blk_num != prv_blk_num or prv_blk_num == SENTINEL_INUM:
+                    # Always add the previous page to the buffer before processing a new block
                     if prv_blk_num != SENTINEL_INUM:
                         p_buf[buf_page_count] = (prv_blk_num, pg)
                         buf_page_count += 1
 
+                        # Check if buffer is full *after* adding the page
                         if buf_page_count == self._journal.NUM_PGS_JRNL_BUF:
+                            logger.debug(f"Buffer full ({buf_page_count}), purging")
                             self._journal.empty_purge_jrnl_buf(p_buf, buf_page_count)
                             buf_page_count = 0
 
@@ -1083,6 +1089,17 @@ class Journal:
                     prv_blk_num = cur_blk_num
 
                 self.wrt_cg_to_pg(cg, pg)
+
+            # Add the last processed page to the buffer
+            if cur_blk_num is not None and prv_blk_num != SENTINEL_INUM:
+                p_buf[buf_page_count] = (prv_blk_num, pg)
+                buf_page_count += 1
+
+                # Check if buffer is full after adding the final page
+                if buf_page_count == self._journal.NUM_PGS_JRNL_BUF:
+                    logger.debug(f"Buffer full at end ({buf_page_count}), purging")
+                    self._journal.empty_purge_jrnl_buf(p_buf, buf_page_count)
+                    buf_page_count = 0
 
             return buf_page_count, prv_blk_num, cur_blk_num, pg
 
