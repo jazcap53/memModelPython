@@ -201,25 +201,7 @@ class Journal:
 
     def _apply_changes(self, j_cg_log: ChangeLog):
         """Apply changes from the journal to the disk."""
-        ctr = 0
-        curr_blk_num = next(iter(j_cg_log.the_log), None) if j_cg_log.the_log else None
-        prev_blk_num = SENTINEL_INUM
-        pg = Page()
-
-        # Process all blocks except the last
-        ctr, prev_blk_num, curr_blk_num, pg = self._change_log_handler.rd_and_wrt_back(
-            j_cg_log, self.p_buf, ctr, prev_blk_num, curr_blk_num, pg
-        )
-
-        # Handle the last block
-        if curr_blk_num is not None:
-            self._change_log_handler.r_and_wb_last(
-                j_cg_log.the_log[curr_blk_num][-1],
-                self.p_buf,
-                ctr,
-                curr_blk_num,
-                pg
-            )
+        self._change_log_handler.process_changes(j_cg_log)
 
     def _process_final_change(self, j_cg_log: ChangeLog, ctr: int, cur_blk_num: bNum_t, pg: Page):
         """Process the final change in a series."""
@@ -1051,3 +1033,72 @@ class Journal:
                          f"get: {self._journal._metadata.meta_get}, "
                          f"put: {self._journal._metadata.meta_put}, "
                          f"size: {self._journal._metadata.meta_sz}")
+
+        def process_changes(self, j_cg_log: ChangeLog):
+            """Process all changes in the journal change log."""
+            if not j_cg_log.the_log:
+                logger.debug("Change log is empty, nothing to process")
+                return
+
+            blocks = list(j_cg_log.the_log.items())
+            p_buf = [None] * self._journal.NUM_PGS_JRNL_BUF
+            buf_page_count = 0
+            prv_blk_num = SENTINEL_INUM
+            pg = None
+
+            # Process all blocks except the last one
+            for i in range(len(blocks) - 1):
+                blk_num, changes = blocks[i]
+                logger.debug(f"Processing block {blk_num} with {len(changes)} changes")
+
+                buf_page_count, prv_blk_num, _, pg = self._process_block(
+                    changes, p_buf, buf_page_count, prv_blk_num, pg
+                )
+
+            # Handle the last block separately
+            if blocks:
+                last_blk_num, last_changes = blocks[-1]
+                logger.debug(f"Processing last block {last_blk_num} with {len(last_changes)} changes")
+                self._process_last_block(last_changes[-1], p_buf, buf_page_count, last_blk_num, pg)
+
+        def _process_block(self, changes: List[Change], p_buf: List,
+                           buf_page_count: int, prv_blk_num: bNum_t, pg: Page):
+            cur_blk_num = None
+            for cg in changes:
+                cur_blk_num = cg.block_num
+
+                if cur_blk_num != prv_blk_num or prv_blk_num == SENTINEL_INUM:
+                    if prv_blk_num != SENTINEL_INUM:
+                        p_buf[buf_page_count] = (prv_blk_num, pg)
+                        buf_page_count += 1
+
+                        if buf_page_count == self._journal.NUM_PGS_JRNL_BUF:
+                            self._journal.empty_purge_jrnl_buf(p_buf, buf_page_count)
+                            buf_page_count = 0
+
+                    # Seek and read new block
+                    self._journal.p_d.get_ds().seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
+                    pg = Page()
+                    pg.dat = bytearray(self._journal.p_d.get_ds().read(u32Const.BLOCK_BYTES.value))
+                    prv_blk_num = cur_blk_num
+
+                self.wrt_cg_to_pg(cg, pg)
+
+            return buf_page_count, prv_blk_num, cur_blk_num, pg
+
+        def _process_last_block(self, cg: Change, p_buf: List,
+                                buf_page_count: int, cur_blk_num: bNum_t, pg: Page):
+            logger.debug(f"Processing last block {cur_blk_num}")
+
+            # Seek and read the last block
+            self._journal.p_d.get_ds().seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
+            pg = Page()
+            pg.dat = bytearray(self._journal.p_d.get_ds().read(u32Const.BLOCK_BYTES.value))
+
+            # Write change to page
+            self.wrt_cg_to_pg(cg, pg)
+
+            # Add to buffer and purge
+            p_buf[buf_page_count] = (cur_blk_num, pg)
+            buf_page_count += 1
+            self._journal.empty_purge_jrnl_buf(p_buf, buf_page_count, True)
