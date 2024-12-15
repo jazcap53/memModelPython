@@ -954,14 +954,9 @@ class Journal:
                         self.wrt_cg_to_pg(cg, pg)
 
                 # Handle the last processed block (if any)
-                if len(blocks) > 1:
+                if len(blocks) > 1 and prv_blk_num != SENTINEL_INUM:
                     p_buf[buf_page_count] = (prv_blk_num, pg)
                     buf_page_count += 1
-
-                    if buf_page_count == self._journal.NUM_PGS_JRNL_BUF:
-                        logger.debug(f"Buffer full at end ({buf_page_count}), purging")
-                        self._journal.empty_purge_jrnl_buf(p_buf, buf_page_count)
-                        buf_page_count = 0
 
                 logger.debug(f"Exiting rd_and_wrt_back. buf_page_count: {buf_page_count}, "
                              f"prv_blk_num: {prv_blk_num}, cur_blk_num: {cur_blk_num}")
