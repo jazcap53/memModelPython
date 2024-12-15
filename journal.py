@@ -967,6 +967,13 @@ class Journal:
             """Process the final change and ensure proper buffer handling."""
             logger.debug(f"Entering r_and_wb_last for block {cur_blk_num}")
 
+            # Read the block from disk
+            self._journal.p_d.get_ds().seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
+            logger.debug(f"Sought to position: {cur_blk_num * u32Const.BLOCK_BYTES.value}")
+
+            pg.dat = bytearray(self._journal.p_d.get_ds().read(u32Const.BLOCK_BYTES.value))
+            logger.debug(f"Read {u32Const.BLOCK_BYTES.value} bytes from disk")
+
             # Write the final change to the page
             self.wrt_cg_to_pg(cg, pg)
 
