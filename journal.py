@@ -911,6 +911,7 @@ class Journal:
 
         def rd_and_wrt_back(self, j_cg_log: ChangeLog, p_buf: List, buf_page_count: int,
                             prv_blk_num: bNum_t, cur_blk_num: bNum_t, pg: Page):
+            """Read changes from log and write them back to disk."""
             logger.debug(f"Entering rd_and_wrt_back with {len(j_cg_log.the_log)} blocks in change log")
 
             if not j_cg_log.the_log:
@@ -921,8 +922,8 @@ class Journal:
                 blocks = list(j_cg_log.the_log.items())
                 logger.debug(f"Blocks to process: {blocks}")
 
-                # Handle all blocks except the last one
-                for i in range(len(blocks) - 1):  # Change here: stop before the last block
+                # Process all blocks except the last one
+                for i in range(len(blocks) - 1):
                     blk_num, changes = blocks[i]
                     logger.debug(f"Processing block {blk_num} with {len(changes)} changes")
 
@@ -931,21 +932,22 @@ class Journal:
                         logger.debug(f"Current block number: {cur_blk_num}, Previous: {prv_blk_num}")
 
                         if cur_blk_num != prv_blk_num or prv_blk_num == SENTINEL_INUM:
-                            logger.debug(f"Block changed or first block. buf_page_count: {buf_page_count}")
-
-                            # Handle buffer full condition
+                            # Handle the previous block before moving to the new one
                             if prv_blk_num != SENTINEL_INUM:
+                                p_buf[buf_page_count] = (prv_blk_num, pg)
+                                buf_page_count += 1
+
+                                # Check if buffer is full
                                 if buf_page_count == self._journal.NUM_PGS_JRNL_BUF:
                                     logger.debug("Buffer full, purging")
                                     self._journal.empty_purge_jrnl_buf(p_buf, buf_page_count)
                                     buf_page_count = 0
-                                p_buf[buf_page_count] = (prv_blk_num, pg)
-                                buf_page_count += 1
 
                             # Seek and read new block
                             self._journal.p_d.get_ds().seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
                             logger.debug(f"Sought to position: {cur_blk_num * u32Const.BLOCK_BYTES.value}")
 
+                            pg = Page()  # Create a new page for the new block
                             pg.dat = bytearray(self._journal.p_d.get_ds().read(u32Const.BLOCK_BYTES.value))
                             logger.debug(f"Read {u32Const.BLOCK_BYTES.value} bytes from disk")
 
@@ -953,7 +955,18 @@ class Journal:
 
                         self.wrt_cg_to_pg(cg, pg)
 
-                # Return without writing the last block
+                # Handle the last non-final block
+                if len(blocks) > 1:
+                    last_non_final_blk_num = blocks[-2][0]
+                    if last_non_final_blk_num != prv_blk_num:
+                        if prv_blk_num != SENTINEL_INUM:
+                            p_buf[buf_page_count] = (prv_blk_num, pg)
+                            buf_page_count += 1
+
+                            if buf_page_count == self._journal.NUM_PGS_JRNL_BUF:
+                                self._journal.empty_purge_jrnl_buf(p_buf, buf_page_count)
+                                buf_page_count = 0
+
                 logger.debug(f"Exiting rd_and_wrt_back. buf_page_count: {buf_page_count}, "
                              f"prv_blk_num: {prv_blk_num}, cur_blk_num: {cur_blk_num}")
                 return buf_page_count, prv_blk_num, cur_blk_num, pg
