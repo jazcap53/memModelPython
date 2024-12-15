@@ -361,12 +361,12 @@ def test_rd_and_wrt_back_one_or_more_blocks(journal, mocker, caplog,
     # Mock CRC verification to always return True
     mocker.patch.object(journal, 'verify_page_crc', return_value=True)
 
-    # Create mock changes
+    # Create real changes
     mock_changes = {}
     for i in range(num_blocks):
-        mock_change = mocker.Mock(spec=Change)
-        mock_change.block_num = i
-        mock_changes[i] = [mock_change]
+        change = Change(i)  # Create a real Change object
+        change.add_line(0, b'A' * u32Const.BYTES_PER_LINE.value)  # Add some test data
+        mock_changes[i] = [change]
 
     # Use the real dict directly
     mock_j_cg_log = mocker.Mock(spec=ChangeLog)
