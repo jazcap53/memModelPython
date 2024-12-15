@@ -1074,36 +1074,26 @@ class Journal:
             for cg in changes:
                 cur_blk_num = cg.block_num
 
-                if cur_blk_num != prv_blk_num or prv_blk_num == SENTINEL_INUM:
-                    # Always add the previous page to the buffer before processing a new block
+                if cur_blk_num != prv_blk_num:
+                    # New block: add previous block to buffer if it exists
                     if prv_blk_num != SENTINEL_INUM:
                         p_buf[buf_page_count] = (prv_blk_num, pg)
                         buf_page_count += 1
 
-                        # Check if buffer is full *after* adding the page
+                        # Check for buffer full condition
                         if buf_page_count == self._journal.NUM_PGS_JRNL_BUF:
                             logger.debug(f"Buffer full ({buf_page_count}), purging")
                             self._journal.empty_purge_jrnl_buf(p_buf, buf_page_count)
                             buf_page_count = 0
 
-                    # Seek and read new block
+                    # Prepare new page for current block
                     self._journal.p_d.get_ds().seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
                     pg = Page()
                     pg.dat = bytearray(self._journal.p_d.get_ds().read(u32Const.BLOCK_BYTES.value))
                     prv_blk_num = cur_blk_num
 
+                # Apply change to current page
                 self.wrt_cg_to_pg(cg, pg)
-
-            # Add the last processed page to the buffer
-            if cur_blk_num is not None and prv_blk_num != SENTINEL_INUM:
-                p_buf[buf_page_count] = (prv_blk_num, pg)
-                buf_page_count += 1
-
-                # Check if buffer is full after adding the final page
-                if buf_page_count == self._journal.NUM_PGS_JRNL_BUF:
-                    logger.debug(f"Buffer full at end ({buf_page_count}), purging")
-                    self._journal.empty_purge_jrnl_buf(p_buf, buf_page_count)
-                    buf_page_count = 0
 
             return buf_page_count, prv_blk_num, cur_blk_num, pg
 
@@ -1123,3 +1113,7 @@ class Journal:
             p_buf[buf_page_count] = (cur_blk_num, pg)
             buf_page_count += 1
             self._journal.empty_purge_jrnl_buf(p_buf, buf_page_count, True)
+
+            # Clear the buffer after final purge
+            for i in range(len(p_buf)):
+                p_buf[i] = None
