@@ -1115,3 +1115,7 @@ class Journal:
             # Clear the buffer after final purge
             for i in range(len(p_buf)):
                 p_buf[i] = None
+
+        def count_buffer_items(self):
+            """Count non-None items in the buffer."""
+            return sum(1 for item in self.p_buf if item is not None)
