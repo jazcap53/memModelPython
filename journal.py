@@ -61,6 +61,7 @@ class Journal:
     END_TAG_SIZE = 8
     META_LEN = START_TAG_SIZE + CT_BYTES_TO_WRITE_SIZE + END_TAG_SIZE
     NUM_PGS_JRNL_BUF = 16
+    BUFFER_SIZE = NUM_PGS_JRNL_BUF
     CPP_SELECT_T_SZ = 8
 
     # Properties for backward compatibility
@@ -1077,8 +1078,13 @@ class Journal:
                 if cur_blk_num != prv_blk_num:
                     # New block: add previous block to buffer if it exists
                     if prv_blk_num != SENTINEL_INUM:
-                        p_buf[buf_page_count] = (prv_blk_num, pg)
+                        p_buf[buf_page_count % self._journal.BUFFER_SIZE] = (prv_blk_num, pg)
                         buf_page_count += 1
+
+                        # Check for buffer full condition
+                        if buf_page_count % self._journal.BUFFER_SIZE == 0:
+                            logger.debug(f"Buffer full ({self._journal.BUFFER_SIZE}), purging")
+                            self._journal.empty_purge_jrnl_buf(p_buf, self._journal.BUFFER_SIZE)
 
                     # Prepare new page for current block
                     self._journal.p_d.get_ds().seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
@@ -1091,14 +1097,13 @@ class Journal:
 
             # Add the last processed block to the buffer
             if cur_blk_num is not None:
-                p_buf[buf_page_count] = (cur_blk_num, pg)
+                p_buf[buf_page_count % self._journal.BUFFER_SIZE] = (cur_blk_num, pg)
                 buf_page_count += 1
 
-            # Check for buffer full condition
-            if buf_page_count == self._journal.NUM_PGS_JRNL_BUF:
-                logger.debug(f"Buffer full ({buf_page_count}), purging")
-                self._journal.empty_purge_jrnl_buf(p_buf, buf_page_count)
-                buf_page_count = 0
+            # Check for buffer full condition one last time
+            if buf_page_count % self._journal.BUFFER_SIZE == 0:
+                logger.debug(f"Buffer full ({self._journal.BUFFER_SIZE}), purging")
+                self._journal.empty_purge_jrnl_buf(p_buf, self._journal.BUFFER_SIZE)
 
             return buf_page_count, prv_blk_num, cur_blk_num, pg
 
