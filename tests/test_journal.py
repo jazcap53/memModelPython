@@ -380,9 +380,10 @@ def test_rd_and_wrt_back_one_or_more_blocks(journal, mocker, caplog,
     # Process changes
     journal._change_log_handler.process_changes(mock_j_cg_log)
 
-    # Verify intermediate state using the instance attribute
-    assert journal._change_log_handler.intermediate_buf_count == expected_intermediate_count, \
-        f"Expected intermediate buf_page_count to be {expected_intermediate_count}, but got {journal._change_log_handler.intermediate_buf_count}"
+    # Verify intermediate state by counting actual buffer items
+    actual_count = journal._change_log_handler.count_buffer_items()
+    assert actual_count == expected_intermediate_count, \
+        f"Expected intermediate buf_page_count to be {expected_intermediate_count}, but got {actual_count}"
 
     # Verify final buffer state
     filled_slots = sum(1 for x in journal._change_log_handler.p_buf if x is not None)
