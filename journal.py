@@ -1037,7 +1037,6 @@ class Journal:
                          f"size: {self._journal._metadata.meta_sz}")
 
         def process_changes(self, j_cg_log: ChangeLog):
-            """Process all changes in the journal change log."""
             if not j_cg_log.the_log:
                 logger.debug("Change log is empty, nothing to process")
                 return
@@ -1047,18 +1046,13 @@ class Journal:
             prv_blk_num = SENTINEL_INUM
             pg = None
 
-            # Reset the buffer for each new process
-            for i in range(len(self.p_buf)):
-                self.p_buf[i] = None
-
             # Process all blocks except the last one
             for i in range(len(blocks) - 1):
                 blk_num, changes = blocks[i]
                 logger.debug(f"Processing block {blk_num} with {len(changes)} changes")
 
                 buf_page_count, prv_blk_num, _, pg = self._process_block(
-                    changes, self.p_buf, buf_page_count, prv_blk_num, pg
-                )
+                    changes, self.p_buf, buf_page_count, prv_blk_num, pg)
 
             # Store intermediate buffer count
             self.intermediate_buf_count = buf_page_count
@@ -1078,13 +1072,13 @@ class Journal:
                 if cur_blk_num != prv_blk_num:
                     # New block: add previous block to buffer if it exists
                     if prv_blk_num != SENTINEL_INUM:
-                        p_buf[buf_page_count % self._journal.BUFFER_SIZE] = (prv_blk_num, pg)
-                        buf_page_count += 1
+                        if buf_page_count == self._journal.NUM_PGS_JRNL_BUF:
+                            logger.debug(f"Buffer full ({buf_page_count}), purging")
+                            self._journal.empty_purge_jrnl_buf(p_buf, buf_page_count)
+                            buf_page_count = 0  # Reset counter after purge
 
-                        # Check for buffer full condition
-                        if buf_page_count % self._journal.BUFFER_SIZE == 0:
-                            logger.debug(f"Buffer full ({self._journal.BUFFER_SIZE}), purging")
-                            self._journal.empty_purge_jrnl_buf(p_buf, self._journal.BUFFER_SIZE)
+                        p_buf[buf_page_count] = (prv_blk_num, pg)
+                        buf_page_count += 1
 
                     # Prepare new page for current block
                     self._journal.p_d.get_ds().seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
@@ -1095,15 +1089,8 @@ class Journal:
                 # Apply change to current page
                 self.wrt_cg_to_pg(cg, pg)
 
-            # Add the last processed block to the buffer
-            if cur_blk_num is not None:
-                p_buf[buf_page_count % self._journal.BUFFER_SIZE] = (cur_blk_num, pg)
-                buf_page_count += 1
-
-            # Check for buffer full condition one last time
-            if buf_page_count % self._journal.BUFFER_SIZE == 0:
-                logger.debug(f"Buffer full ({self._journal.BUFFER_SIZE}), purging")
-                self._journal.empty_purge_jrnl_buf(p_buf, self._journal.BUFFER_SIZE)
+            # Do NOT add the last processed block here - it will be added in the next iteration
+            # as the previous block, or handled by _process_last_block if this is the last call
 
             return buf_page_count, prv_blk_num, cur_blk_num, pg
 
