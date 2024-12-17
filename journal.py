@@ -1116,3 +1116,59 @@ class Journal:
         def count_buffer_items(self):
             """Count non-None items in the buffer."""
             return sum(1 for item in self.p_buf if item is not None)
+
+
+if __name__ == "__main__":
+    from simDisk import SimDisk
+    from change import ChangeLog, Change
+    from status import Status
+    from crashChk import CrashChk
+
+
+    def check_buffer_management(num_blocks):
+        # Setup - provide all required filenames
+        disk_file = "buffer_mgmt_disk.bin"
+        journal_file = "buffer_mgmt_journal.bin"
+        free_list_file = "buffer_mgmt_free.bin"
+        inode_file = "buffer_mgmt_inode.bin"
+
+        sim_disk = SimDisk(disk_file, journal_file, free_list_file, inode_file)
+        change_log = ChangeLog()
+        status = Status()
+        crash_chk = CrashChk()
+
+        journal = Journal(journal_file, sim_disk, change_log, status, crash_chk)
+
+        # Create changes
+        test_changes = {}
+        for i in range(num_blocks):
+            change = Change(i)
+            change.add_line(0, b'A' * u32Const.BYTES_PER_LINE.value)
+            test_changes[i] = [change]
+
+        change_log.the_log = test_changes
+
+        # Process changes
+        journal._change_log_handler.process_changes(change_log)
+
+        # Get results
+        intermediate_count = journal._change_log_handler.intermediate_buf_count
+        final_count = journal._change_log_handler.count_buffer_items()
+
+        return intermediate_count, final_count
+
+
+    # Test cases
+    test_cases = [
+        (15, 15, 0),  # num_blocks, expected_intermediate_count, expected_final_count
+        (16, 0, 0),
+        (17, 1, 0),
+        (32, 0, 0)
+    ]
+
+    for num_blocks, expected_intermediate, expected_final in test_cases:
+        actual_intermediate, actual_final = check_buffer_management(num_blocks)
+        print(f"Test case: {num_blocks} blocks")
+        print(f"  Intermediate count - Expected: {expected_intermediate}, Got: {actual_intermediate}")
+        print(f"  Final count - Expected: {expected_final}, Got: {actual_final}")
+        print()
