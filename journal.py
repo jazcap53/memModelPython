@@ -1099,6 +1099,7 @@ class Journal:
 
         def _process_last_block(self, cg: Change, p_buf: List,
                                 buf_page_count: int, cur_blk_num: bNum_t, pg: Page):
+            logger.debug(f"Processing block {cur_blk_num} with 1 changes")  # Add this line
             logger.debug(f"Processing last block {cur_blk_num}")
 
             # Seek and read the last block
