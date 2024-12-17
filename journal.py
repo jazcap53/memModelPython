@@ -1044,6 +1044,7 @@ class Journal:
             blocks = list(j_cg_log.the_log.items())
             prv_blk_num = SENTINEL_INUM
             pg = None
+            self.intermediate_buf_count = 0  # Reset at start
 
             # Process all blocks except the last one
             for i in range(len(blocks) - 1):
@@ -1053,7 +1054,7 @@ class Journal:
                 _, prv_blk_num, _, pg = self._process_block(
                     changes, self.p_buf, self.count_buffer_items(), prv_blk_num, pg)
 
-            # Store intermediate buffer count
+            # Store the intermediate count AFTER processing non-last blocks
             self.intermediate_buf_count = self.count_buffer_items()
 
             # Handle the last block separately
@@ -1071,10 +1072,10 @@ class Journal:
                 if cur_blk_num != prv_blk_num:
                     # New block: add previous block to buffer if it exists
                     if prv_blk_num != SENTINEL_INUM:
-                        buf_page_count = self.count_buffer_items()
-                        if buf_page_count == self._journal.NUM_PGS_JRNL_BUF:
-                            logger.debug(f"Buffer full ({buf_page_count}), purging")
-                            self._journal.empty_purge_jrnl_buf(p_buf, buf_page_count)
+                        current_count = self.count_buffer_items()
+                        if current_count >= self._journal.NUM_PGS_JRNL_BUF - 1:  # Changed condition
+                            logger.debug(f"Buffer full ({current_count}), purging")
+                            self._journal.empty_purge_jrnl_buf(p_buf, current_count)
                             for i in range(len(p_buf)):
                                 p_buf[i] = None
 
