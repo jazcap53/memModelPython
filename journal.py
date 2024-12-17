@@ -1073,13 +1073,16 @@ class Journal:
                     # New block: add previous block to buffer if it exists
                     if prv_blk_num != SENTINEL_INUM:
                         current_count = self.count_buffer_items()
-                        if current_count >= self._journal.NUM_PGS_JRNL_BUF - 1:  # Changed condition
+
+                        # Purge if buffer is full
+                        if current_count >= self._journal.NUM_PGS_JRNL_BUF:
                             logger.debug(f"Buffer full ({current_count}), purging")
                             self._journal.empty_purge_jrnl_buf(p_buf, current_count)
                             for i in range(len(p_buf)):
                                 p_buf[i] = None
 
-                        p_buf[self.count_buffer_items()] = (prv_blk_num, pg)
+                        next_slot = self.count_buffer_items()
+                        p_buf[next_slot] = (prv_blk_num, pg)
 
                     # Prepare new page for current block
                     self._journal.p_d.get_ds().seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
@@ -1089,6 +1092,18 @@ class Journal:
 
                 # Apply change to current page
                 self.wrt_cg_to_pg(cg, pg)
+
+            # Handle the last block processed in this batch
+            if prv_blk_num != SENTINEL_INUM:
+                current_count = self.count_buffer_items()
+                if current_count >= self._journal.NUM_PGS_JRNL_BUF:
+                    logger.debug(f"Buffer full ({current_count}), purging before adding last block")
+                    self._journal.empty_purge_jrnl_buf(p_buf, current_count)
+                    for i in range(len(p_buf)):
+                        p_buf[i] = None
+
+                next_slot = self.count_buffer_items()
+                p_buf[next_slot] = (cur_blk_num, pg)
 
             return self.count_buffer_items(), prv_blk_num, cur_blk_num, pg
 
