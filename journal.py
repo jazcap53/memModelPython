@@ -1123,6 +1123,11 @@ if __name__ == "__main__":
     import logging
     import logging.config
     from logging_config import setup_logging
+    from status import Status
+    from simDisk import SimDisk
+    from change import Change, ChangeLog
+    from crashChk import CrashChk
+    from ajTypes import u32Const
 
     # Setup logging
     setup_logging(logging.DEBUG)
