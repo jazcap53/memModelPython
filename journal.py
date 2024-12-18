@@ -1181,32 +1181,28 @@ if __name__ == "__main__":
                         logger.error(f"Failed to remove file {file}: {e}")
 
 
-    # Test cases
-    test_cases = [
-        (15, 15, 0),  # num_blocks, expected_intermediate_count, expected_final_count
-        (16, 0, 0),
-        (17, 1, 0),
-        (32, 0, 0)
-    ]
+    # Test cases and their expected values
+    test_cases = {
+        15: (15, 0),  # num_blocks: (expected_intermediate_count, expected_final_count)
+        16: (0, 0),
+        17: (1, 0),
+        32: (0, 0)
+    }
 
-    for num_blocks, expected_intermediate, expected_final in test_cases:
-        logger.info(f"\nTest case: {num_blocks} blocks")
-        try:
-            actual_intermediate, actual_final = check_buffer_management(num_blocks)
-            logger.info(f"  Intermediate count - Expected: {expected_intermediate}, Got: {actual_intermediate}")
-            logger.info(f"  Final count - Expected: {expected_final}, Got: {actual_final}")
+    # Choose which test to run
+    test_to_run = 15  # Change this value to run different tests
 
-            # Compare results
-            if actual_intermediate != expected_intermediate or actual_final != expected_final:
-                logger.error(f"Test case {num_blocks} blocks failed:")
-                logger.error(
-                    f"  Intermediate count mismatch - Expected: {expected_intermediate}, Got: {actual_intermediate}")
-                logger.error(f"  Final count mismatch - Expected: {expected_final}, Got: {actual_final}")
-            else:
-                logger.info(f"Test case {num_blocks} blocks passed")
+    expected_intermediate, expected_final = test_cases[test_to_run]
+    logger.info(f"Running test case: {test_to_run} blocks")
+    actual_intermediate, actual_final = check_buffer_management(test_to_run)
 
-        except Exception as e:
-            logger.error(f"Error in test case {num_blocks} blocks: {e}")
-            import traceback
+    logger.info(f"Results for {test_to_run} blocks:")
+    logger.info(f"  Intermediate count - Expected: {expected_intermediate}, Got: {actual_intermediate}")
+    logger.info(f"  Final count - Expected: {expected_final}, Got: {actual_final}")
 
-            logger.error(traceback.format_exc())
+    if actual_intermediate != expected_intermediate or actual_final != expected_final:
+        logger.error(f"Test failed:")
+        logger.error(f"  Intermediate count mismatch - Expected: {expected_intermediate}, Got: {actual_intermediate}")
+        logger.error(f"  Final count mismatch - Expected: {expected_final}, Got: {actual_final}")
+    else:
+        logger.info(f"Test passed")
