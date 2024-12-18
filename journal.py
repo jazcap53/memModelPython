@@ -1119,38 +1119,43 @@ class Journal:
 
 
 if __name__ == "__main__":
-    # Setup mock classes
-    class MockStatus:
-        def wrt(self, msg):
-            print(f"Status: {msg}")
+    import os
+    import logging
+    import logging.config
+    from logging_config import setup_logging
 
-    class MockCrashChk:
-        def get_last_status(self):
-            return None
+    # Setup logging
+    setup_logging(logging.DEBUG)
+    logger = get_logger(__name__)
+
 
     def check_buffer_management(num_blocks):
-        # Setup - provide all required filenames and objects
-        disk_file = "buffer_mgmt_disk.bin"
-        journal_file = "buffer_mgmt_journal.bin"
-        free_list_file = "buffer_mgmt_free.bin"
-        inode_file = "buffer_mgmt_inode.bin"
+        # Setup - provide all required filenames
+        disk_file = f"buffer_mgmt_disk_{num_blocks}.bin"
+        journal_file = f"buffer_mgmt_journal_{num_blocks}.bin"
+        free_list_file = f"buffer_mgmt_free_{num_blocks}.bin"
+        inode_file = f"buffer_mgmt_inode_{num_blocks}.bin"
+        status_file = f"buffer_mgmt_status_{num_blocks}.txt"
 
-        status = MockStatus()
-        sim_disk = SimDisk(status, disk_file, journal_file, free_list_file, inode_file)
-        change_log = ChangeLog()
-        crash_chk = MockCrashChk()
+        # Clean up any existing files
+        for file in [disk_file, journal_file, free_list_file, inode_file, status_file]:
+            if os.path.exists(file):
+                os.remove(file)
 
         try:
+            # Create instances
+            status = Status(status_file)
+            sim_disk = SimDisk(status, disk_file, journal_file, free_list_file, inode_file)
+            change_log = ChangeLog(test_sw=True)
+            crash_chk = CrashChk()
+
             journal = Journal(journal_file, sim_disk, change_log, status, crash_chk)
 
             # Create changes
-            test_changes = {}
             for i in range(num_blocks):
                 change = Change(i)
                 change.add_line(0, b'A' * u32Const.BYTES_PER_LINE.value)
-                test_changes[i] = [change]
-
-            change_log.the_log = test_changes
+                change_log.add_to_log(change)
 
             # Process changes
             journal._change_log_handler.process_changes(change_log)
@@ -1162,13 +1167,14 @@ if __name__ == "__main__":
             return intermediate_count, final_count
 
         finally:
-            # Cleanup
-            if 'journal' in locals():
-                journal.js.close()
-            sim_disk.ds.close()
-            for file in [disk_file, journal_file, free_list_file, inode_file]:
+            # Clean up files
+            for file in [disk_file, journal_file, free_list_file, inode_file, status_file]:
                 if os.path.exists(file):
-                    os.remove(file)
+                    try:
+                        os.remove(file)
+                    except Exception as e:
+                        logger.error(f"Failed to remove file {file}: {e}")
+
 
     # Test cases
     test_cases = [
@@ -1179,11 +1185,23 @@ if __name__ == "__main__":
     ]
 
     for num_blocks, expected_intermediate, expected_final in test_cases:
+        logger.info(f"\nTest case: {num_blocks} blocks")
         try:
             actual_intermediate, actual_final = check_buffer_management(num_blocks)
-            print(f"Test case: {num_blocks} blocks")
-            print(f"  Intermediate count - Expected: {expected_intermediate}, Got: {actual_intermediate}")
-            print(f"  Final count - Expected: {expected_final}, Got: {actual_final}")
-            print()
+            logger.info(f"  Intermediate count - Expected: {expected_intermediate}, Got: {actual_intermediate}")
+            logger.info(f"  Final count - Expected: {expected_final}, Got: {actual_final}")
+
+            # Compare results
+            if actual_intermediate != expected_intermediate or actual_final != expected_final:
+                logger.error(f"Test case {num_blocks} blocks failed:")
+                logger.error(
+                    f"  Intermediate count mismatch - Expected: {expected_intermediate}, Got: {actual_intermediate}")
+                logger.error(f"  Final count mismatch - Expected: {expected_final}, Got: {actual_final}")
+            else:
+                logger.info(f"Test case {num_blocks} blocks passed")
+
         except Exception as e:
-            print(f"Error in test case with {num_blocks} blocks: {e}")
+            logger.error(f"Error in test case {num_blocks} blocks: {e}")
+            import traceback
+
+            logger.error(traceback.format_exc())
