@@ -1120,6 +1120,7 @@ class Journal:
 
 if __name__ == "__main__":
     import os
+    import sys
     import logging
     import logging.config
     from logging_config import setup_logging
@@ -1132,7 +1133,6 @@ if __name__ == "__main__":
     # Setup logging
     setup_logging(logging.DEBUG)
     logger = get_logger(__name__)
-
 
     def check_buffer_management(num_blocks):
         # Setup - provide all required filenames
@@ -1182,27 +1182,55 @@ if __name__ == "__main__":
 
 
     # Test cases and their expected values
-    test_cases = {
-        15: (15, 0),  # num_blocks: (expected_intermediate_count, expected_final_count)
-        16: (0, 0),
-        17: (1, 0),
-        32: (0, 0)
-    }
+    test_cases = [
+        (15, 15, 0),  # (num_blocks, expected_intermediate_count, expected_final_count)
+        (16, 0, 0),
+        (17, 1, 0),
+        (32, 0, 0)
+    ]
 
-    # Choose which test to run
-    test_to_run = 15  # Change this value to run different tests
 
-    expected_intermediate, expected_final = test_cases[test_to_run]
-    logger.info(f"Running test case: {test_to_run} blocks")
-    actual_intermediate, actual_final = check_buffer_management(test_to_run)
+    def run_test(test_index):
+        num_blocks, expected_intermediate, expected_final = test_cases[test_index]
+        logger.info(f"\nRunning test case {test_index}: {num_blocks} blocks")
+        actual_intermediate, actual_final = check_buffer_management(num_blocks)
 
-    logger.info(f"Results for {test_to_run} blocks:")
-    logger.info(f"  Intermediate count - Expected: {expected_intermediate}, Got: {actual_intermediate}")
-    logger.info(f"  Final count - Expected: {expected_final}, Got: {actual_final}")
+        logger.info(f"Results for {num_blocks} blocks:")
+        logger.info(f"  Intermediate count - Expected: {expected_intermediate}, Got: {actual_intermediate}")
+        logger.info(f"  Final count - Expected: {expected_final}, Got: {actual_final}")
 
-    if actual_intermediate != expected_intermediate or actual_final != expected_final:
-        logger.error(f"Test failed:")
-        logger.error(f"  Intermediate count mismatch - Expected: {expected_intermediate}, Got: {actual_intermediate}")
-        logger.error(f"  Final count mismatch - Expected: {expected_final}, Got: {actual_final}")
-    else:
-        logger.info(f"Test passed")
+        if actual_intermediate != expected_intermediate or actual_final != expected_final:
+            logger.error(f"Test failed:")
+            logger.error(
+                f"  Intermediate count mismatch - Expected: {expected_intermediate}, Got: {actual_intermediate}")
+            if actual_final != expected_final:
+                logger.error(f"  Final count mismatch - Expected: {expected_final}, Got: {actual_final}")
+            return False
+        else:
+            logger.info(f"Test passed")
+            return True
+
+
+    # Parse command line argument
+    try:
+        if len(sys.argv) > 1:
+            test_index = int(sys.argv[1])
+            if 0 <= test_index < len(test_cases):
+                run_test(test_index)
+            else:
+                print(f"Error: Test index must be between 0 and {len(test_cases) - 1}")
+                sys.exit(1)
+        else:
+            # Run all tests
+            failed_tests = []
+            for i in range(len(test_cases)):
+                if not run_test(i):
+                    failed_tests.append(i)
+
+            if failed_tests:
+                logger.error(f"\nFailed tests: {failed_tests}")
+            else:
+                logger.info("\nAll tests passed!")
+    except ValueError:
+        print("Error: Test index must be an integer")
+        sys.exit(1)
