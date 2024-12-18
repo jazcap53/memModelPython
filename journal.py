@@ -1119,44 +1119,56 @@ class Journal:
 
 
 if __name__ == "__main__":
-    from simDisk import SimDisk
-    from change import ChangeLog, Change
-    from status import Status
-    from crashChk import CrashChk
+    # Setup mock classes
+    class MockStatus:
+        def wrt(self, msg):
+            print(f"Status: {msg}")
 
+    class MockCrashChk:
+        def get_last_status(self):
+            return None
 
     def check_buffer_management(num_blocks):
-        # Setup - provide all required filenames
+        # Setup - provide all required filenames and objects
         disk_file = "buffer_mgmt_disk.bin"
         journal_file = "buffer_mgmt_journal.bin"
         free_list_file = "buffer_mgmt_free.bin"
         inode_file = "buffer_mgmt_inode.bin"
 
-        sim_disk = SimDisk(disk_file, journal_file, free_list_file, inode_file)
+        status = MockStatus()
+        sim_disk = SimDisk(status, disk_file, journal_file, free_list_file, inode_file)
         change_log = ChangeLog()
-        status = Status()
-        crash_chk = CrashChk()
+        crash_chk = MockCrashChk()
 
-        journal = Journal(journal_file, sim_disk, change_log, status, crash_chk)
+        try:
+            journal = Journal(journal_file, sim_disk, change_log, status, crash_chk)
 
-        # Create changes
-        test_changes = {}
-        for i in range(num_blocks):
-            change = Change(i)
-            change.add_line(0, b'A' * u32Const.BYTES_PER_LINE.value)
-            test_changes[i] = [change]
+            # Create changes
+            test_changes = {}
+            for i in range(num_blocks):
+                change = Change(i)
+                change.add_line(0, b'A' * u32Const.BYTES_PER_LINE.value)
+                test_changes[i] = [change]
 
-        change_log.the_log = test_changes
+            change_log.the_log = test_changes
 
-        # Process changes
-        journal._change_log_handler.process_changes(change_log)
+            # Process changes
+            journal._change_log_handler.process_changes(change_log)
 
-        # Get results
-        intermediate_count = journal._change_log_handler.intermediate_buf_count
-        final_count = journal._change_log_handler.count_buffer_items()
+            # Get results
+            intermediate_count = journal._change_log_handler.intermediate_buf_count
+            final_count = journal._change_log_handler.count_buffer_items()
 
-        return intermediate_count, final_count
+            return intermediate_count, final_count
 
+        finally:
+            # Cleanup
+            if 'journal' in locals():
+                journal.js.close()
+            sim_disk.ds.close()
+            for file in [disk_file, journal_file, free_list_file, inode_file]:
+                if os.path.exists(file):
+                    os.remove(file)
 
     # Test cases
     test_cases = [
@@ -1167,8 +1179,11 @@ if __name__ == "__main__":
     ]
 
     for num_blocks, expected_intermediate, expected_final in test_cases:
-        actual_intermediate, actual_final = check_buffer_management(num_blocks)
-        print(f"Test case: {num_blocks} blocks")
-        print(f"  Intermediate count - Expected: {expected_intermediate}, Got: {actual_intermediate}")
-        print(f"  Final count - Expected: {expected_final}, Got: {actual_final}")
-        print()
+        try:
+            actual_intermediate, actual_final = check_buffer_management(num_blocks)
+            print(f"Test case: {num_blocks} blocks")
+            print(f"  Intermediate count - Expected: {expected_intermediate}, Got: {actual_intermediate}")
+            print(f"  Final count - Expected: {expected_final}, Got: {actual_final}")
+            print()
+        except Exception as e:
+            print(f"Error in test case with {num_blocks} blocks: {e}")
