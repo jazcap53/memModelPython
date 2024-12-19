@@ -1079,10 +1079,12 @@ class Journal:
                             for i in range(len(p_buf)):
                                 p_buf[i] = None
 
-                        p_buf[self.count_buffer_items()] = (prv_blk_num, pg)
+                        buf_item_ct = self.count_buffer_items()
+                        p_buf[buf_item_ct] = (prv_blk_num, pg)
 
                     # Prepare new page for current block
-                    self._journal.p_d.get_ds().seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
+                    gotten_ds = self._journal.p_d.get_ds()
+                    gotten_ds.seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
                     pg = Page()
                     pg.dat = bytearray(self._journal.p_d.get_ds().read(u32Const.BLOCK_BYTES.value))
                     prv_blk_num = cur_blk_num
