@@ -1051,8 +1051,7 @@ class Journal:
                 blk_num, changes = blocks[i]
                 logger.debug(f"Processing block {blk_num} with {len(changes)} changes")
 
-                _, prv_blk_num, _, pg = self._process_block(
-                    changes, self.p_buf, self.count_buffer_items(), prv_blk_num, pg)
+                prv_blk_num, pg = self._process_block(changes, self.p_buf, prv_blk_num, pg)
 
             # Store the intermediate count AFTER processing non-last blocks
             self.intermediate_buf_count = self.count_buffer_items()
@@ -1063,8 +1062,8 @@ class Journal:
                 logger.debug(f"Processing last block {last_blk_num} with {len(last_changes)} changes")
                 self._process_last_block(last_changes[-1], self.p_buf, self.count_buffer_items(), last_blk_num, pg)
 
-        def _process_block(self, changes: List[Change], p_buf: List,
-                           buf_page_count: int, prv_blk_num: bNum_t, pg: Page):
+        def _process_block(self, changes: List[Change], p_buf: List, prv_blk_num: bNum_t, pg: Page) -> Tuple[
+            bNum_t, Page]:
             cur_blk_num = None
             for cg in changes:
                 cur_blk_num = cg.block_num
@@ -1073,7 +1072,7 @@ class Journal:
                     # New block: add previous block to buffer if it exists
                     if prv_blk_num != SENTINEL_INUM:
                         current_count = self.count_buffer_items()
-                        if current_count >= self._journal.NUM_PGS_JRNL_BUF - 1:  # Changed condition
+                        if current_count >= self._journal.NUM_PGS_JRNL_BUF - 1:
                             logger.debug(f"Buffer full ({current_count}), purging")
                             self._journal.empty_purge_jrnl_buf(p_buf, current_count)
                             for i in range(len(p_buf)):
@@ -1092,7 +1091,7 @@ class Journal:
                 # Apply change to current page
                 self.wrt_cg_to_pg(cg, pg)
 
-            return self.count_buffer_items(), prv_blk_num, cur_blk_num, pg
+            return prv_blk_num, pg
 
         def _process_last_block(self, cg: Change, p_buf: List,
                                 buf_page_count: int, cur_blk_num: bNum_t, pg: Page):
