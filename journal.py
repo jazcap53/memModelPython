@@ -1060,7 +1060,7 @@ class Journal:
             if blocks:
                 last_blk_num, last_changes = blocks[-1]
                 logger.debug(f"Processing last block {last_blk_num} with {len(last_changes)} changes")
-                self._process_last_block(last_changes[-1], self.p_buf, self.count_buffer_items(), last_blk_num, pg)
+                self._process_last_block(last_changes[-1], self.p_buf, last_blk_num)
 
         def _process_block(self, changes: List[Change], p_buf: List, prv_blk_num: bNum_t, pg: Page) -> Tuple[
             bNum_t, Page]:
@@ -1093,8 +1093,7 @@ class Journal:
 
             return prv_blk_num, pg
 
-        def _process_last_block(self, cg: Change, p_buf: List,
-                                buf_page_count: int, cur_blk_num: bNum_t, pg: Page):
+        def _process_last_block(self, cg: Change, p_buf: List, cur_blk_num: bNum_t):
             logger.debug(f"Processing block {cur_blk_num} with 1 changes")
             logger.debug(f"Processing last block {cur_blk_num}")
 
