@@ -46,7 +46,7 @@ class Journal:
         START_TAG (int): Marker indicating the start of a journal entry
         END_TAG (int): Marker indicating the end of a journal entry
         META_LEN (int): Length of metadata in bytes
-        NUM_PGS_JRNL_BUF (int): Number of pages in journal buffer
+        PAGE_BUFFER_SIZE (int): Number of pages in journal buffer
 
     Properties:
         meta_get (int): Current read position in journal
@@ -60,8 +60,7 @@ class Journal:
     CT_BYTES_TO_WRITE_SIZE = 8
     END_TAG_SIZE = 8
     META_LEN = START_TAG_SIZE + CT_BYTES_TO_WRITE_SIZE + END_TAG_SIZE
-    NUM_PGS_JRNL_BUF = 16
-    BUFFER_SIZE = NUM_PGS_JRNL_BUF
+    PAGE_BUFFER_SIZE = 16
     CPP_SELECT_T_SZ = 8
 
     # Properties for backward compatibility
@@ -95,34 +94,34 @@ class Journal:
         self.debug = debug
         self.f_name = f_name
         self.sim_disk = sim_disk
-        self.p_cL = change_log
-        self.p_stt = status
-        self.p_cck = crash_chk
+        self.change_log = change_log
+        self.status = status
+        self.crash_chk = crash_chk
         self.sz = Journal.CPP_SELECT_T_SZ
         self.end_tag_posn = None
 
         # File initialization
         file_existed = os.path.exists(self.f_name)
-        self.js = open(self.f_name, "rb+" if file_existed else "wb+")
-        self.js.seek(0, 2)  # Go to end of file
-        current_size = self.js.tell()
+        self.journal_file = open(self.f_name, "rb+" if file_existed else "wb+")
+        self.journal_file.seek(0, 2)  # Go to end of file
+        current_size = self.journal_file.tell()
         if current_size < u32Const.JRNL_SIZE.value:
             remaining = u32Const.JRNL_SIZE.value - current_size
-            self.js.write(b'\0' * remaining)
-        self.js.seek(0)  # Reset to beginning
+            self.journal_file.write(b'\0' * remaining)
+        self.journal_file.seek(0)  # Reset to beginning
         logger.debug(f"Journal file {'opened' if file_existed else 'created'}: {self.f_name}")
 
         # Verify file size
-        self.js.seek(0, 2)  # Go to end
-        actual_size = self.js.tell()
-        self.js.seek(0)  # Reset to beginning
+        self.journal_file.seek(0, 2)  # Go to end
+        actual_size = self.journal_file.tell()
+        self.journal_file.seek(0)  # Reset to beginning
         if actual_size != u32Const.JRNL_SIZE.value:
             raise RuntimeError(f"Journal file size mismatch. Expected {u32Const.JRNL_SIZE.value}, got {actual_size}")
 
-        self.js.seek(self.META_LEN)
+        self.journal_file.seek(self.META_LEN)
 
         # Initialize other instance variables
-        self.p_buf = [None] * self.NUM_PGS_JRNL_BUF
+        self.pg_buf = [None] * self.PAGE_BUFFER_SIZE
         self.ct_bytes_to_write = 0
         self.ttl_bytes_written = 0
         self.orig_p_pos = 0
@@ -140,17 +139,17 @@ class Journal:
         self._change_log_handler = self._ChangeLogHandler(self)
 
         # Check last status and call init()
-        last_status = self.p_cck.get_last_status()
+        last_status = self.crash_chk.get_last_status()
         if last_status and last_status[0] == 'C':
             self.purge_jrnl(True, True)
-            self.p_stt.wrt("Last change log recovered")
+            self.status.wrt("Last change log recovered")
         self.init()
 
     def __del__(self):
         """Clean up resources by closing the journal file."""
         try:
-            if hasattr(self, 'js') and self.js and not self.js.closed:
-                self.js.close()
+            if hasattr(self, 'journal_file') and self.journal_file and not self.journal_file.closed:
+                self.journal_file.close()
         except Exception as e:
             print(f"Error closing journal file in __del__: {e}")
 
@@ -204,18 +203,18 @@ class Journal:
         """Apply changes from the journal to the disk."""
         self._change_log_handler.process_changes(j_cg_log)
 
-    def _process_final_change(self, j_cg_log: ChangeLog, ctr: int, cur_blk_num: bNum_t, pg: Page):
+    def _process_final_change(self, j_cg_log: ChangeLog, ctr: int, curr_blk_num: bNum_t, pg: Page):
         """Process the final change in a series."""
-        if cur_blk_num is not None and cur_blk_num in j_cg_log.the_log and j_cg_log.the_log[cur_blk_num]:
-            cg = j_cg_log.the_log[cur_blk_num][-1]
-            self._change_log_handler.r_and_wb_last(cg, self.p_buf, ctr, cur_blk_num, pg)
+        if curr_blk_num is not None and curr_blk_num in j_cg_log.the_log and j_cg_log.the_log[curr_blk_num]:
+            cg = j_cg_log.the_log[curr_blk_num][-1]
+            self._change_log_handler.r_and_wb_last(cg, self.pg_buf, ctr, curr_blk_num, pg)
         else:
-            logger.warning(f"No changes found for block {cur_blk_num}")
+            logger.warning(f"No changes found for block {curr_blk_num}")
 
     def _clear_journal_state(self):
         """Clear the journal state after processing changes."""
         self.blks_in_jrnl = [False] * bNum_tConst.NUM_DISK_BLOCKS.value
-        self.p_cL.the_log.clear()
+        self.change_log.the_log.clear()
 
     def _reset_metadata(self):
         """Reset the journal metadata."""
@@ -232,7 +231,7 @@ class Journal:
 
     def _update_status(self, keep_going: bool):
         """Update the status after purging the journal."""
-        self.p_stt.wrt("Purged journal" if keep_going else "Finishing")
+        self.status.wrt("Purged journal" if keep_going else "Finishing")
 
     def is_in_jrnl(self, b_num: bNum_t) -> bool:
         """Check if a block number is currently in the journal."""
@@ -244,7 +243,7 @@ class Journal:
             p_f_m.do_store_inodes()
             p_f_m.do_store_free_list()
             logger.info("Saving change log and purging journal before adding new block")
-            self._change_log_handler.wrt_cg_log_to_jrnl(self.p_cL)
+            self._change_log_handler.wrt_cg_log_to_jrnl(self.change_log)
             self.purge_jrnl(True, False)
             self.wipers.clear_array()
 
@@ -295,7 +294,7 @@ class Journal:
 
     def rd_jrnl(self, r_j_cg_log: ChangeLog, start_pos: int) -> Tuple[int, int, int]:
         """Read journal contents from a given position."""
-        self.js.seek(start_pos)
+        self.journal_file.seek(start_pos)
 
         with self.track_position("read_start_tag"):
             ck_start_tag = self._read_start_tag()
@@ -313,11 +312,11 @@ class Journal:
 
     def _read_start_tag(self) -> int:
         """Read and return the start tag from the journal file."""
-        return read_64bit(self.js)
+        return read_64bit(self.journal_file)
 
     def _read_ct_bytes_to_write(self) -> int:
         """Read and return the count of bytes to write from the journal file."""
-        return read_64bit(self.js)
+        return read_64bit(self.journal_file)
 
     def _read_changes(self, r_j_cg_log: ChangeLog, ct_bytes_to_write: int) -> int:
         """Read changes from the journal and populate the change log."""
@@ -339,16 +338,16 @@ class Journal:
 
     def _check_journal_end(self, bytes_read: int, ct_bytes_to_write: int) -> bool:
         """Check if the end of the journal has been reached."""
-        return (self.js.tell() + 16 > u32Const.JRNL_SIZE.value) or (bytes_read >= ct_bytes_to_write)
+        return (self.journal_file.tell() + 16 > u32Const.JRNL_SIZE.value) or (bytes_read >= ct_bytes_to_write)
 
     def _read_single_change(self, bytes_read: int) -> Tuple[Optional[Change], int]:
         """Read a single change from the journal file."""
-        b_num = read_64bit(self.js)
+        b_num = read_64bit(self.journal_file)
         bytes_read += 8
         if bytes_read > self.ct_bytes_to_write:
             return None, bytes_read
 
-        timestamp = read_64bit(self.js)
+        timestamp = read_64bit(self.journal_file)
         bytes_read += 8
         if bytes_read > self.ct_bytes_to_write:
             return None, bytes_read
@@ -373,10 +372,10 @@ class Journal:
 
     def _read_selector(self, bytes_read: int) -> Tuple[Optional[Select], int]:
         """Read a selector from the journal file."""
-        if self.js.tell() + 8 > u32Const.JRNL_SIZE.value:
+        if self.journal_file.tell() + 8 > u32Const.JRNL_SIZE.value:
             return None, 0
 
-        selector_data = self.js.read(8)
+        selector_data = self.journal_file.read(8)
         if bytes_read + 8 > self.ct_bytes_to_write:
             return None, 8
 
@@ -390,10 +389,10 @@ class Journal:
                 continue
             if bytes_read + data_bytes_read + u32Const.BYTES_PER_LINE.value > self.ct_bytes_to_write:
                 break
-            if self.js.tell() + u32Const.BYTES_PER_LINE.value > u32Const.JRNL_SIZE.value:
+            if self.journal_file.tell() + u32Const.BYTES_PER_LINE.value > u32Const.JRNL_SIZE.value:
                 break
 
-            line_data = self.js.read(u32Const.BYTES_PER_LINE.value)
+            line_data = self.journal_file.read(u32Const.BYTES_PER_LINE.value)
             data_bytes_read += u32Const.BYTES_PER_LINE.value
             cg.new_data.append(line_data)
 
@@ -402,15 +401,15 @@ class Journal:
     def _read_crc_and_padding(self, bytes_read: int, ct_bytes_to_write: int) -> int:
         """Read CRC and padding if there's enough space."""
         if bytes_read + 8 <= ct_bytes_to_write:
-            self.js.read(8)  # Read CRC (4 bytes) and padding (4 bytes)
+            self.journal_file.read(8)  # Read CRC (4 bytes) and padding (4 bytes)
             bytes_read += 8
         return bytes_read
 
     def _read_end_tag(self) -> int:
         """Read and return the end tag from the journal file."""
-        return read_64bit(self.js)
+        return read_64bit(self.journal_file)
 
-    def empty_purge_jrnl_buf(self, p_buf: List[Tuple[bNum_t, Page]], p_ctr: int, is_end: bool = False) -> bool:
+    def empty_purge_jrnl_buf(self, pg_buf: List[Tuple[bNum_t, Page]], p_ctr: int, is_end: bool = False) -> bool:
         """Empty the journal's purge buffer by writing pages to disk."""
         logger.debug(f"Entering empty_purge_jrnl_buf with {p_ctr} pages, is_end={is_end}")
 
@@ -420,15 +419,15 @@ class Journal:
 
         # Process all valid entries
         for i in range(p_ctr):
-            cursor = p_buf[i]
+            cursor = pg_buf[i]
             if not cursor:
                 continue
 
             if not self.verify_page_crc(cursor):
                 error_msg = f"CRC check failed for block {cursor[0]} before writing to disk"
                 logger.error(error_msg)
-                self.p_stt.wrt(f"Error: {error_msg}")
-                self.p_cck.set_last_status('C')
+                self.status.wrt(f"Error: {error_msg}")
+                self.crash_chk.set_last_status('C')
                 raise ValueError(error_msg)
 
             self.sim_disk.get_ds().seek(cursor[0] * u32Const.BLOCK_BYTES.value)
@@ -447,15 +446,15 @@ class Journal:
     def verify_bytes_read(self):
         """Verify that the number of bytes read matches the expected count."""
         expected_bytes = self.ct_bytes_to_write + self.META_LEN
-        actual_bytes = self.js.tell() - self.META_LEN
+        actual_bytes = self.journal_file.tell() - self.META_LEN
         assert expected_bytes == actual_bytes, f"Byte mismatch: expected {expected_bytes}, got {actual_bytes}"
 
     @contextmanager
     def track_position(self, operation_name: str):
         """Context manager to track file position changes during operations."""
-        start_pos = self.js.tell()
+        start_pos = self.journal_file.tell()
         yield
-        end_pos = self.js.tell()
+        end_pos = self.journal_file.tell()
 
     def verify_page_crc(self, page_tuple: Tuple[bNum_t, Page]) -> bool:
         """Verify the CRC of a page. Public interface for CRC checking."""
@@ -473,24 +472,24 @@ class Journal:
 
         def read(self):
             """Read metadata from journal file."""
-            self._journal.js.seek(0)
+            self._journal.journal_file.seek(0)
             self.meta_get, self.meta_put, self.meta_sz = struct.unpack('<qqq',
-                                                                       self._journal.js.read(24))
+                                                                       self._journal.journal_file.read(24))
             return self.meta_get, self.meta_put, self.meta_sz
 
         def write(self, new_g_pos: int, new_p_pos: int, u_ttl_bytes_written: int):
             """Write metadata to journal file."""
-            self._journal.js.seek(0)
+            self._journal.journal_file.seek(0)
             metadata = struct.pack('<qqq', new_g_pos, new_p_pos, u_ttl_bytes_written)
-            self._journal.js.write(metadata)
+            self._journal.journal_file.write(metadata)
 
         def init(self):
             """Initialize metadata to default values."""
             rd_pt = -1
             wrt_pt = 24
             bytes_stored = 0
-            self._journal.js.seek(0)
-            self._journal.js.write(struct.pack('<qqq', rd_pt, wrt_pt, bytes_stored))
+            self._journal.journal_file.seek(0)
+            self._journal.journal_file.write(struct.pack('<qqq', rd_pt, wrt_pt, bytes_stored))
 
     class _FileIO:
         """Handles file I/O operations for the journal."""
@@ -501,7 +500,7 @@ class Journal:
         def wrt_field(self, data: bytes, dat_len: int, do_ct: bool) -> int:
             """Write a field to the journal file."""
             bytes_written = 0
-            p_pos = self._journal.js.tell()
+            p_pos = self._journal.journal_file.tell()
             buf_sz = u32Const.JRNL_SIZE.value
             end_pt = p_pos + dat_len
 
@@ -511,48 +510,48 @@ class Journal:
 
                 if dat_len == 8:  # 64-bit value
                     # Write the first part
-                    self._journal.js.write(data[:bytes_until_end])
+                    self._journal.journal_file.write(data[:bytes_until_end])
                     bytes_written += bytes_until_end
                     if do_ct:
                         self._journal.ttl_bytes_written += bytes_until_end
 
                     # Move to the correct position after wraparound
-                    self._journal.js.seek(self._journal.META_LEN)
+                    self._journal.journal_file.seek(self._journal.META_LEN)
 
                     # Write the remaining part
-                    self._journal.js.write(data[bytes_until_end:])
+                    self._journal.journal_file.write(data[bytes_until_end:])
                     bytes_written += overflow_bytes
                     if do_ct:
                         self._journal.ttl_bytes_written += overflow_bytes
 
                 elif dat_len == 4:  # 32-bit value
                     value = int.from_bytes(data, byteorder='little')
-                    write_32bit(self._journal.js, value & ((1 << (bytes_until_end * 8)) - 1))
+                    write_32bit(self._journal.journal_file, value & ((1 << (bytes_until_end * 8)) - 1))
                     bytes_written += bytes_until_end
                     if do_ct:
                         self._journal.ttl_bytes_written += bytes_until_end
-                    self._journal.js.seek(self._journal.META_LEN)
-                    write_32bit(self._journal.js, value >> (bytes_until_end * 8))
+                    self._journal.journal_file.seek(self._journal.META_LEN)
+                    write_32bit(self._journal.journal_file, value >> (bytes_until_end * 8))
                     bytes_written += overflow_bytes
                     if do_ct:
                         self._journal.ttl_bytes_written += overflow_bytes
                 else:
-                    self._journal.js.write(data[:bytes_until_end])
+                    self._journal.journal_file.write(data[:bytes_until_end])
                     bytes_written += bytes_until_end
                     if do_ct:
                         self._journal.ttl_bytes_written += bytes_until_end
-                    self._journal.js.seek(self._journal.META_LEN)
-                    self._journal.js.write(data[bytes_until_end:])
+                    self._journal.journal_file.seek(self._journal.META_LEN)
+                    self._journal.journal_file.write(data[bytes_until_end:])
                     bytes_written += overflow_bytes
                     if do_ct:
                         self._journal.ttl_bytes_written += overflow_bytes
             else:
                 if dat_len == 8:
-                    write_64bit(self._journal.js, from_bytes_64bit(data))
+                    write_64bit(self._journal.journal_file, from_bytes_64bit(data))
                 elif dat_len == 4:
-                    write_32bit(self._journal.js, int.from_bytes(data, byteorder='little'))
+                    write_32bit(self._journal.journal_file, int.from_bytes(data, byteorder='little'))
                 else:
-                    self._journal.js.write(data)
+                    self._journal.journal_file.write(data)
                 bytes_written = dat_len
                 if do_ct:
                     self._journal.ttl_bytes_written += dat_len
@@ -560,7 +559,7 @@ class Journal:
             if do_ct:
                 logger.debug(f"Wrote {bytes_written} bytes for {data[:10]}...")
 
-            self._journal.final_p_pos = self._journal.js.tell()
+            self._journal.final_p_pos = self._journal.journal_file.tell()
             return bytes_written
 
         def rd_field(self, dat_len: int) -> bytes:
@@ -572,7 +571,7 @@ class Journal:
             Returns:
                 bytes: Data read from journal file
             """
-            g_pos = self._journal.js.tell()
+            g_pos = self._journal.journal_file.tell()
             buf_sz = u32Const.JRNL_SIZE.value
             end_pt = g_pos + dat_len
 
@@ -595,11 +594,11 @@ class Journal:
 
         def _read_64bit_wraparound(self, under: int) -> bytes:
             """Read a 64-bit value that wraps around in the journal."""
-            low_bits = read_64bit(self._journal.js)
+            low_bits = read_64bit(self._journal.journal_file)
             self._update_bytes_read(under)
 
-            self._journal.js.seek(self._journal.META_LEN)
-            high_bits = read_64bit(self._journal.js)
+            self._journal.journal_file.seek(self._journal.META_LEN)
+            high_bits = read_64bit(self._journal.journal_file)
             self._update_bytes_read(8 - under)
 
             value = (high_bits << (under * 8)) | low_bits
@@ -607,11 +606,11 @@ class Journal:
 
         def _read_32bit_wraparound(self, under: int) -> bytes:
             """Read a 32-bit value that wraps around in the journal."""
-            low_bits = read_32bit(self._journal.js)
+            low_bits = read_32bit(self._journal.journal_file)
             self._update_bytes_read(under)
 
-            self._journal.js.seek(self._journal.META_LEN)
-            high_bits = read_32bit(self._journal.js)
+            self._journal.journal_file.seek(self._journal.META_LEN)
+            high_bits = read_32bit(self._journal.journal_file)
             self._update_bytes_read(4 - under)
 
             value = (high_bits << (under * 8)) | low_bits
@@ -619,11 +618,11 @@ class Journal:
 
         def _read_generic_wraparound(self, under: int, over: int) -> bytes:
             """Read generic data that wraps around in the journal."""
-            data = self._journal.js.read(under)
+            data = self._journal.journal_file.read(under)
             self._update_bytes_read(under)
 
-            self._journal.js.seek(self._journal.META_LEN)
-            data += self._journal.js.read(over)
+            self._journal.journal_file.seek(self._journal.META_LEN)
+            data += self._journal.journal_file.read(over)
             self._update_bytes_read(over)
 
             return data
@@ -631,11 +630,11 @@ class Journal:
         def _read_without_wraparound(self, dat_len: int) -> bytes:
             """Read data that fits within the current journal space."""
             if dat_len == 8:
-                data = to_bytes_64bit(read_64bit(self._journal.js))
+                data = to_bytes_64bit(read_64bit(self._journal.journal_file))
             elif dat_len == 4:
-                data = read_32bit(self._journal.js).to_bytes(4, byteorder='little')
+                data = read_32bit(self._journal.journal_file).to_bytes(4, byteorder='little')
             else:
-                data = self._journal.js.read(dat_len)
+                data = self._journal.journal_file.read(dat_len)
 
             self._update_bytes_read(dat_len)
             return data
@@ -646,41 +645,41 @@ class Journal:
 
         def advance_strm(self, length: int):
             """Advance the file stream position, handling wraparound."""
-            new_pos = self._journal.js.tell() + length
+            new_pos = self._journal.journal_file.tell() + length
             if new_pos >= u32Const.JRNL_SIZE.value:
                 new_pos -= u32Const.JRNL_SIZE.value
                 new_pos += self._journal.META_LEN
-            self._journal.js.seek(new_pos)
+            self._journal.journal_file.seek(new_pos)
 
         def reset_file(self):
             """Reset the journal file to initial state."""
-            self._journal.js.close()
-            self._journal.js = open(self._journal.f_name, "rb+")
-            self._journal.js.seek(0)
+            self._journal.journal_file.close()
+            self._journal.journal_file = open(self._journal.f_name, "rb+")
+            self._journal.journal_file.seek(0)
 
         def write_start_tag(self):
             """Write the start tag to the journal file."""
-            write_64bit(self._journal.js, self._journal.START_TAG)
+            write_64bit(self._journal.journal_file, self._journal.START_TAG)
 
         def write_end_tag(self):
             """Write the end tag to the journal file."""
-            write_64bit(self._journal.js, self._journal.END_TAG)
+            write_64bit(self._journal.journal_file, self._journal.END_TAG)
 
         def write_ct_bytes(self, ct_bytes):
             """Write the count of bytes to the journal file."""
-            write_64bit(self._journal.js, ct_bytes)
+            write_64bit(self._journal.journal_file, ct_bytes)
 
         def read_start_tag(self):
             """Read the start tag from the journal file."""
-            return read_64bit(self._journal.js)
+            return read_64bit(self._journal.journal_file)
 
         def read_end_tag(self):
             """Read the end tag from the journal file."""
-            return read_64bit(self._journal.js)
+            return read_64bit(self._journal.journal_file)
 
         def read_ct_bytes(self):
             """Read the count of bytes from the journal file."""
-            return read_64bit(self._journal.js)
+            return read_64bit(self._journal.journal_file)
 
         def wrt_cgs_to_jrnl(self, r_cg_log: ChangeLog):
             """Write changes from a change log to the journal."""
@@ -753,7 +752,7 @@ class Journal:
 
         def _finalize_journal_write(self):
             """Finalize the journal write operation."""
-            self._journal.js.flush()
+            self._journal.journal_file.flush()
             logger.debug(f"Total bytes written: {self._journal.ttl_bytes_written}")
 
         @staticmethod
@@ -779,7 +778,7 @@ class Journal:
 
         def __init__(self, journal_instance):
             self._journal = journal_instance
-            self.p_buf = [None] * journal_instance.NUM_PGS_JRNL_BUF  # Make this an instance attribute
+            self.pg_buf = [None] * journal_instance.PAGE_BUFFER_SIZE  # Make this an instance attribute
             self.intermediate_buf_count = 0  # Also make this an instance attribute
 
         def get_num_data_lines(self, r_cg: Change) -> int:
@@ -893,14 +892,14 @@ class Journal:
             pg.dat[-4:] = AJZlibCRC.wrt_bytes_little_e(crc, pg.dat[-4:], 4)
             logger.debug(f"Updated page CRC: {crc:08x}")
 
-        def rd_and_wrt_back(self, j_cg_log: ChangeLog, p_buf: List, buf_page_count: int,
-                            prv_blk_num: bNum_t, cur_blk_num: bNum_t, pg: Page):
+        def rd_and_wrt_back(self, j_cg_log: ChangeLog, pg_buf: List, buf_page_count: int,
+                            prev_blk_num: bNum_t, curr_blk_num: bNum_t, pg: Page):
             """Read changes from log and write them back to disk."""
             logger.debug(f"Entering rd_and_wrt_back with {len(j_cg_log.the_log)} blocks in change log")
 
             if not j_cg_log.the_log:
                 logger.debug("Change log is empty, returning early")
-                return buf_page_count, prv_blk_num, cur_blk_num, pg
+                return buf_page_count, prev_blk_num, curr_blk_num, pg
 
             try:
                 blocks = list(j_cg_log.the_log.items())
@@ -912,55 +911,55 @@ class Journal:
                     logger.debug(f"Processing block {blk_num} with {len(changes)} changes")
 
                     for cg in changes:
-                        cur_blk_num = cg.block_num
-                        logger.debug(f"Current block number: {cur_blk_num}, Previous: {prv_blk_num}")
+                        curr_blk_num = cg.block_num
+                        logger.debug(f"Current block number: {curr_blk_num}, Previous: {prev_blk_num}")
 
-                        if cur_blk_num != prv_blk_num or prv_blk_num == SENTINEL_INUM:
-                            if prv_blk_num != SENTINEL_INUM:
-                                p_buf[buf_page_count] = (prv_blk_num, pg)
+                        if curr_blk_num != prev_blk_num or prev_blk_num == SENTINEL_INUM:
+                            if prev_blk_num != SENTINEL_INUM:
+                                pg_buf[buf_page_count] = (prev_blk_num, pg)
                                 buf_page_count += 1
 
-                                if buf_page_count == self._journal.NUM_PGS_JRNL_BUF:
+                                if buf_page_count == self._journal.PAGE_BUFFER_SIZE:
                                     logger.debug(f"Buffer full ({buf_page_count}), purging")
-                                    self._journal.empty_purge_jrnl_buf(p_buf, buf_page_count)
+                                    self._journal.empty_purge_jrnl_buf(pg_buf, buf_page_count)
                                     buf_page_count = 0
 
                             # Seek and read new block
-                            self._journal.sim_disk.get_ds().seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
-                            logger.debug(f"Sought to position: {cur_blk_num * u32Const.BLOCK_BYTES.value}")
+                            self._journal.sim_disk.get_ds().seek(curr_blk_num * u32Const.BLOCK_BYTES.value)
+                            logger.debug(f"Sought to position: {curr_blk_num * u32Const.BLOCK_BYTES.value}")
 
                             pg = Page()
                             pg.dat = bytearray(self._journal.sim_disk.get_ds().read(u32Const.BLOCK_BYTES.value))
                             logger.debug(f"Read {u32Const.BLOCK_BYTES.value} bytes from disk")
 
-                            prv_blk_num = cur_blk_num
+                            prev_blk_num = curr_blk_num
 
                         self.wrt_cg_to_pg(cg, pg)
 
                 # Handle the last processed block (if any)
-                if len(blocks) > 1 and prv_blk_num != SENTINEL_INUM:
-                    p_buf[buf_page_count] = (prv_blk_num, pg)
+                if len(blocks) > 1 and prev_blk_num != SENTINEL_INUM:
+                    pg_buf[buf_page_count] = (prev_blk_num, pg)
                     buf_page_count += 1
 
                 logger.debug(f"Exiting rd_and_wrt_back. buf_page_count: {buf_page_count}, "
-                             f"prv_blk_num: {prv_blk_num}, cur_blk_num: {cur_blk_num}")
-                return buf_page_count, prv_blk_num, cur_blk_num, pg
+                             f"prev_blk_num: {prev_blk_num}, curr_blk_num: {curr_blk_num}")
+                return buf_page_count, prev_blk_num, curr_blk_num, pg
 
             except Exception as e:
                 logger.error(f"Error in rd_and_wrt_back: {str(e)}")
                 raise
 
-        def r_and_wb_last(self, cg: Change, p_buf: List, ctr: int,
-                          cur_blk_num: bNum_t, pg: Page):
+        def r_and_wb_last(self, cg: Change, pg_buf: List, ctr: int,
+                          curr_blk_num: bNum_t, pg: Page):
             """Process the final change and ensure proper buffer handling."""
-            logger.debug(f"Entering r_and_wb_last for block {cur_blk_num}")
+            logger.debug(f"Entering r_and_wb_last for block {curr_blk_num}")
 
             # Add the log message that the test is looking for
-            logger.debug(f"Processing block {cur_blk_num} with 1 changes")
+            logger.debug(f"Processing block {curr_blk_num} with 1 changes")
 
             # Read the block from disk
-            self._journal.sim_disk.get_ds().seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
-            logger.debug(f"Sought to position: {cur_blk_num * u32Const.BLOCK_BYTES.value}")
+            self._journal.sim_disk.get_ds().seek(curr_blk_num * u32Const.BLOCK_BYTES.value)
+            logger.debug(f"Sought to position: {curr_blk_num * u32Const.BLOCK_BYTES.value}")
 
             pg.dat = bytearray(self._journal.sim_disk.get_ds().read(u32Const.BLOCK_BYTES.value))
             logger.debug(f"Read {u32Const.BLOCK_BYTES.value} bytes from disk")
@@ -969,16 +968,16 @@ class Journal:
             self.wrt_cg_to_pg(cg, pg)
 
             # Add final page to buffer
-            p_buf[ctr] = (cur_blk_num, pg)
+            pg_buf[ctr] = (curr_blk_num, pg)
             ctr += 1
 
             # Always purge with is_end=True, regardless of buffer state
             logger.debug(f"Purging buffer in r_and_wb_last, ctr={ctr}")
-            self._journal.empty_purge_jrnl_buf(p_buf, ctr, True)
+            self._journal.empty_purge_jrnl_buf(pg_buf, ctr, True)
 
             # Clear the buffer after final purge
-            for i in range(len(p_buf)):
-                p_buf[i] = None
+            for i in range(len(pg_buf)):
+                pg_buf[i] = None
 
             logger.debug("Exiting r_and_wb_last, buffer cleared")
 
@@ -1011,7 +1010,7 @@ class Journal:
 
             # Update metadata
             new_g_pos = Journal.META_LEN  # Start reading from META_LEN
-            new_p_pos = self._journal.js.tell()
+            new_p_pos = self._journal.journal_file.tell()
             ttl_bytes = self._journal.ct_bytes_to_write + Journal.META_LEN
 
             # Update both instance and file metadata
@@ -1020,8 +1019,8 @@ class Journal:
             self._journal._metadata.meta_sz = ttl_bytes
             self._journal._metadata.write(new_g_pos, new_p_pos, ttl_bytes)
 
-            self._journal.js.flush()
-            os.fsync(self._journal.js.fileno())
+            self._journal.journal_file.flush()
+            os.fsync(self._journal.journal_file.fileno())
 
             logger.debug(f"Metadata after write - get: {self._journal._metadata.meta_get}, "
                          f"put: {self._journal._metadata.meta_put}, "
@@ -1029,7 +1028,7 @@ class Journal:
 
             logger.info(f"Change log written at time {get_cur_time()}")
             r_cg_log.cg_line_ct = 0
-            self._journal.p_stt.wrt("Change log written")
+            self._journal.status.wrt("Change log written")
 
             logger.debug(f"Exiting wrt_cg_log_to_jrnl. Wrote {self._journal.ttl_bytes_written} bytes. Final metadata - "
                          f"get: {self._journal._metadata.meta_get}, "
@@ -1042,7 +1041,7 @@ class Journal:
                 return
 
             blocks = list(j_cg_log.the_log.items())
-            prv_blk_num = SENTINEL_INUM
+            prev_blk_num = SENTINEL_INUM
             pg = None
             self.intermediate_buf_count = 0  # Reset at start
 
@@ -1051,7 +1050,7 @@ class Journal:
                 blk_num, changes = blocks[i]
                 logger.debug(f"Processing block {blk_num} with {len(changes)} changes")
 
-                prv_blk_num, pg = self._process_block(changes, self.p_buf, prv_blk_num, pg)
+                prev_blk_num, pg = self._process_block(changes, self.pg_buf, prev_blk_num, pg)
 
             # Store the intermediate count AFTER processing non-last blocks
             self.intermediate_buf_count = self.count_buffer_items()
@@ -1060,45 +1059,45 @@ class Journal:
             if blocks:
                 last_blk_num, last_changes = blocks[-1]
                 logger.debug(f"Processing last block {last_blk_num} with {len(last_changes)} changes")
-                self._process_last_block(last_changes[-1], self.p_buf, last_blk_num)
+                self._process_last_block(last_changes[-1], self.pg_buf, last_blk_num)
 
-        def _process_block(self, changes: List[Change], p_buf: List, prv_blk_num: bNum_t, pg: Page) -> Tuple[
+        def _process_block(self, changes: List[Change], pg_buf: List, prev_blk_num: bNum_t, pg: Page) -> Tuple[
             bNum_t, Page]:
-            cur_blk_num = None
+            curr_blk_num = None
             for cg in changes:
-                cur_blk_num = cg.block_num
+                curr_blk_num = cg.block_num
 
-                if cur_blk_num != prv_blk_num:
+                if curr_blk_num != prev_blk_num:
                     # New block: add previous block to buffer if it exists
-                    if prv_blk_num != SENTINEL_INUM:
+                    if prev_blk_num != SENTINEL_INUM:
                         current_count = self.count_buffer_items()
-                        if current_count >= self._journal.NUM_PGS_JRNL_BUF - 1:
+                        if current_count >= self._journal.PAGE_BUFFER_SIZE - 1:
                             logger.debug(f"Buffer full ({current_count}), purging")
-                            self._journal.empty_purge_jrnl_buf(p_buf, current_count)
-                            for i in range(len(p_buf)):
-                                p_buf[i] = None
+                            self._journal.empty_purge_jrnl_buf(pg_buf, current_count)
+                            for i in range(len(pg_buf)):
+                                pg_buf[i] = None
 
                         buf_item_ct = self.count_buffer_items()
-                        p_buf[buf_item_ct] = (prv_blk_num, pg)
+                        pg_buf[buf_item_ct] = (prev_blk_num, pg)
 
                     # Prepare new page for current block
                     gotten_ds = self._journal.sim_disk.get_ds()
-                    gotten_ds.seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
+                    gotten_ds.seek(curr_blk_num * u32Const.BLOCK_BYTES.value)
                     pg = Page()
                     pg.dat = bytearray(self._journal.sim_disk.get_ds().read(u32Const.BLOCK_BYTES.value))
-                    prv_blk_num = cur_blk_num
+                    prev_blk_num = curr_blk_num
 
                 # Apply change to current page
                 self.wrt_cg_to_pg(cg, pg)
 
-            return prv_blk_num, pg
+            return prev_blk_num, pg
 
-        def _process_last_block(self, cg: Change, p_buf: List, cur_blk_num: bNum_t):
-            logger.debug(f"Processing block {cur_blk_num} with 1 changes")
-            logger.debug(f"Processing last block {cur_blk_num}")
+        def _process_last_block(self, cg: Change, pg_buf: List, curr_blk_num: bNum_t):
+            logger.debug(f"Processing block {curr_blk_num} with 1 changes")
+            logger.debug(f"Processing last block {curr_blk_num}")
 
             # Seek and read the last block
-            self._journal.sim_disk.get_ds().seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
+            self._journal.sim_disk.get_ds().seek(curr_blk_num * u32Const.BLOCK_BYTES.value)
             pg = Page()
             pg.dat = bytearray(self._journal.sim_disk.get_ds().read(u32Const.BLOCK_BYTES.value))
 
@@ -1106,16 +1105,16 @@ class Journal:
             self.wrt_cg_to_pg(cg, pg)
 
             # Add to buffer and purge
-            p_buf[self.count_buffer_items()] = (cur_blk_num, pg)
-            self._journal.empty_purge_jrnl_buf(p_buf, self.count_buffer_items(), True)
+            pg_buf[self.count_buffer_items()] = (curr_blk_num, pg)
+            self._journal.empty_purge_jrnl_buf(pg_buf, self.count_buffer_items(), True)
 
             # Clear the buffer after final purge
-            for i in range(len(p_buf)):
-                p_buf[i] = None
+            for i in range(len(pg_buf)):
+                pg_buf[i] = None
 
         def count_buffer_items(self):
             """Count non-None items in the buffer."""
-            return sum(1 for item in self.p_buf if item is not None)
+            return sum(1 for item in self.pg_buf if item is not None)
 
 
 if __name__ == "__main__":

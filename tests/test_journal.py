@@ -64,7 +64,7 @@ def journal(mock_sim_disk, mock_change_log, mock_status, mock_crash_chk, temp_jo
     caplog.clear()  # Clear creation message from the log
 
     # Verify journal was initialized correctly
-    assert journal.js.mode == 'rb+'
+    assert journal.journal_file.mode == 'rb+'
     assert os.path.exists(temp_journal_file)
     assert os.path.getsize(temp_journal_file) == u32Const.JRNL_SIZE.value
 
@@ -80,8 +80,8 @@ def mock_change_log(mocker):
 
 
 def test_journal_initialization(journal):
-    assert journal.f_name == str(journal.js.name)
-    assert journal.js.mode == 'rb+'
+    assert journal.f_name == str(journal.journal_file.name)
+    assert journal.journal_file.mode == 'rb+'
 
     # Check instance variables after __init__()
     assert journal.meta_get == 0
@@ -93,8 +93,8 @@ def test_journal_init_file_content(journal):
     journal.init()
 
     # Verify values written to file
-    journal.js.seek(0)
-    file_meta_get, file_meta_put, file_meta_sz = struct.unpack('<qqq', journal.js.read(24))
+    journal.journal_file.seek(0)
+    file_meta_get, file_meta_put, file_meta_sz = struct.unpack('<qqq', journal.journal_file.read(24))
     assert file_meta_get == -1
     assert file_meta_put == 24
     assert file_meta_sz == 0
@@ -102,16 +102,16 @@ def test_journal_init_file_content(journal):
 
 def test_write_field(journal):
     # Test writing a 64-bit field
-    journal.js.seek(0)
+    journal.journal_file.seek(0)
     bytes_written = journal._file_io.wrt_field(b'\x01\x02\x03\x04\x05\x06\x07\x08', 8, True)
     assert bytes_written == 8
     assert journal.ttl_bytes_written == 8
 
     # Test writing with wraparound
-    journal.js.seek(u32Const.JRNL_SIZE.value - 4)
+    journal.journal_file.seek(u32Const.JRNL_SIZE.value - 4)
     bytes_written = journal._file_io.wrt_field(b'\x01\x02\x03\x04\x05\x06\x07\x08', 8, True)
     assert bytes_written == 8
-    assert journal.js.tell() == Journal.META_LEN + 4
+    assert journal.journal_file.tell() == Journal.META_LEN + 4
 
 
 def test_write_change(journal, mocker):
@@ -165,7 +165,7 @@ def test_write_change_log(journal, mock_change_log, mocker, caplog):
     assert any("Change log written at time 12345" in record.message for record in caplog.records)
 
     # Verify journal state
-    journal.js.seek(0)
+    journal.journal_file.seek(0)
     meta_get, meta_put, meta_sz = journal._metadata.read()
 
     # Verify metadata was updated
@@ -279,8 +279,8 @@ def test_purge_journal(journal, mock_change_log, mocker, caplog):
     assert journal._metadata.meta_sz == 0
 
     # Verify journal file size remains correct
-    journal.js.seek(0, 2)  # Seek to end
-    assert journal.js.tell() == u32Const.JRNL_SIZE.value
+    journal.journal_file.seek(0, 2)  # Seek to end
+    assert journal.journal_file.tell() == u32Const.JRNL_SIZE.value
 
     # Verify log messages
     assert any("Purging journal" in record.message for record in caplog.records)
@@ -297,7 +297,7 @@ def test_do_wipe_routine(journal, mocker, mock_change_log, caplog):
     journal.wipers = mock_wipers
 
     # Assign mock change log to journal
-    journal.p_cL = mock_change_log
+    journal.change_log = mock_change_log
 
     with caplog.at_level(logging.INFO):
         # Call the method
@@ -348,10 +348,10 @@ def test_empty_purge_jrnl_buf(journal, mocker, caplog):
 
 @pytest.mark.parametrize("num_blocks, expected_intermediate_count, expected_final_count, expected_purge_calls", [
     (1, 0, 0, 1),  # Single block: just final purge
-    (Journal.NUM_PGS_JRNL_BUF - 1, Journal.NUM_PGS_JRNL_BUF - 1, 0, 1),  # One less than buffer size
-    (Journal.NUM_PGS_JRNL_BUF, 0, 0, 2),  # Full buffer: one purge during, one at end
-    (Journal.NUM_PGS_JRNL_BUF + 1, 1, 0, 2),  # One purge at full, one at end
-    (Journal.NUM_PGS_JRNL_BUF * 2, 0, 0, 3),  # Two full purges, one final
+    (Journal.PAGE_BUFFER_SIZE - 1, Journal.PAGE_BUFFER_SIZE - 1, 0, 1),  # One less than buffer size
+    (Journal.PAGE_BUFFER_SIZE, 0, 0, 2),  # Full buffer: one purge during, one at end
+    (Journal.PAGE_BUFFER_SIZE + 1, 1, 0, 2),  # One purge at full, one at end
+    (Journal.PAGE_BUFFER_SIZE * 2, 0, 0, 3),  # Two full purges, one final
 ])
 def test_rd_and_wrt_back_one_or_more_blocks(journal, mocker, caplog,
                                           num_blocks, expected_intermediate_count,
@@ -410,7 +410,7 @@ def test_r_and_wb_last(journal, mocker, caplog):
     cg = Change(1)
     cg.add_line(0, b'A' * u32Const.BYTES_PER_LINE.value)
     pg = Page()
-    p_buf = [None] * journal.NUM_PGS_JRNL_BUF
+    pg_buf = [None] * journal.PAGE_BUFFER_SIZE
 
     # Mock empty_purge_jrnl_buf
     mock_purge = mocker.Mock()
@@ -418,14 +418,14 @@ def test_r_and_wb_last(journal, mocker, caplog):
 
     # Execute
     with caplog.at_level(logging.WARNING):
-        journal._change_log_handler.r_and_wb_last(cg, p_buf, 0, 1, pg)
+        journal._change_log_handler.r_and_wb_last(cg, pg_buf, 0, 1, pg)
 
     # Verify
     # Check that empty_purge_jrnl_buf was called with correct parameters
-    mock_purge.assert_called_with(p_buf, 1, True)
+    mock_purge.assert_called_with(pg_buf, 1, True)
 
     # Check that wrt_cg_to_pg was called
-    assert len([x for x in p_buf if x is not None]) <= 1  # Buffer should have at most one entry
+    assert len([x for x in pg_buf if x is not None]) <= 1  # Buffer should have at most one entry
 
 
 def test_verify_page_crc(journal):
