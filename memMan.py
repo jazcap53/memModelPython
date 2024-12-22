@@ -22,10 +22,10 @@ class MemMan:
     CG_OHEAD = 16
     JRNL_ENTRY_OHEAD = 24
 
-    def __init__(self, pm: Memory, pd: SimDisk, pj: Journal, pcl: ChangeLog, pstt: Status, v: bool = False):
+    def __init__(self, pm: Memory, sim_disk: SimDisk, pj: Journal, pcl: ChangeLog, pstt: Status, v: bool = False):
         self.pT = PageTable()
         self.p_m = pm
-        self.p_d = pd
+        self.sim_disk = sim_disk
         self.p_j = pj
         self.p_cL = pcl
         self.p_stt = pstt
@@ -190,8 +190,8 @@ class MemMan:
 
         print(f"{self.tabs(1)}Moving page {b_num} into memory slot {mem_slot} at time {get_cur_time()}")
 
-        self.p_d.get_ds().seek(b_num * u32Const.BLOCK_BYTES.value)
-        page_data = self.p_d.get_ds().read(u32Const.BLOCK_BYTES.value)
+        self.sim_disk.get_ds().seek(b_num * u32Const.BLOCK_BYTES.value)
+        page_data = self.sim_disk.get_ds().read(u32Const.BLOCK_BYTES.value)
         self.p_m.get_page(mem_slot).dat = bytearray(page_data)
 
         self.blks_in_mem.set(b_num)

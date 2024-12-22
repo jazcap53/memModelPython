@@ -94,7 +94,7 @@ class Journal:
         # Basic instance variables
         self.debug = debug
         self.f_name = f_name
-        self.p_d = sim_disk
+        self.sim_disk = sim_disk
         self.p_cL = change_log
         self.p_stt = status
         self.p_cck = crash_chk
@@ -431,14 +431,14 @@ class Journal:
                 self.p_cck.set_last_status('C')
                 raise ValueError(error_msg)
 
-            self.p_d.get_ds().seek(cursor[0] * u32Const.BLOCK_BYTES.value)
+            self.sim_disk.get_ds().seek(cursor[0] * u32Const.BLOCK_BYTES.value)
 
             if self.wipers.is_dirty(cursor[0]):
                 # Write zeros for dirty blocks
-                self.p_d.get_ds().write(b'\0' * u32Const.BLOCK_BYTES.value)
+                self.sim_disk.get_ds().write(b'\0' * u32Const.BLOCK_BYTES.value)
                 logger.debug(f"Overwriting dirty block {cursor[0]}")
             else:
-                self.p_d.get_ds().write(cursor[1].dat)
+                self.sim_disk.get_ds().write(cursor[1].dat)
                 logger.debug(f"Writing page {cursor[0]:3} to disk")
 
         logger.debug(f"Finished processing {p_ctr} pages in empty_purge_jrnl_buf")
@@ -926,11 +926,11 @@ class Journal:
                                     buf_page_count = 0
 
                             # Seek and read new block
-                            self._journal.p_d.get_ds().seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
+                            self._journal.sim_disk.get_ds().seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
                             logger.debug(f"Sought to position: {cur_blk_num * u32Const.BLOCK_BYTES.value}")
 
                             pg = Page()
-                            pg.dat = bytearray(self._journal.p_d.get_ds().read(u32Const.BLOCK_BYTES.value))
+                            pg.dat = bytearray(self._journal.sim_disk.get_ds().read(u32Const.BLOCK_BYTES.value))
                             logger.debug(f"Read {u32Const.BLOCK_BYTES.value} bytes from disk")
 
                             prv_blk_num = cur_blk_num
@@ -959,10 +959,10 @@ class Journal:
             logger.debug(f"Processing block {cur_blk_num} with 1 changes")
 
             # Read the block from disk
-            self._journal.p_d.get_ds().seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
+            self._journal.sim_disk.get_ds().seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
             logger.debug(f"Sought to position: {cur_blk_num * u32Const.BLOCK_BYTES.value}")
 
-            pg.dat = bytearray(self._journal.p_d.get_ds().read(u32Const.BLOCK_BYTES.value))
+            pg.dat = bytearray(self._journal.sim_disk.get_ds().read(u32Const.BLOCK_BYTES.value))
             logger.debug(f"Read {u32Const.BLOCK_BYTES.value} bytes from disk")
 
             # Write the final change to the page
@@ -1082,10 +1082,10 @@ class Journal:
                         p_buf[buf_item_ct] = (prv_blk_num, pg)
 
                     # Prepare new page for current block
-                    gotten_ds = self._journal.p_d.get_ds()
+                    gotten_ds = self._journal.sim_disk.get_ds()
                     gotten_ds.seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
                     pg = Page()
-                    pg.dat = bytearray(self._journal.p_d.get_ds().read(u32Const.BLOCK_BYTES.value))
+                    pg.dat = bytearray(self._journal.sim_disk.get_ds().read(u32Const.BLOCK_BYTES.value))
                     prv_blk_num = cur_blk_num
 
                 # Apply change to current page
@@ -1098,9 +1098,9 @@ class Journal:
             logger.debug(f"Processing last block {cur_blk_num}")
 
             # Seek and read the last block
-            self._journal.p_d.get_ds().seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
+            self._journal.sim_disk.get_ds().seek(cur_blk_num * u32Const.BLOCK_BYTES.value)
             pg = Page()
-            pg.dat = bytearray(self._journal.p_d.get_ds().read(u32Const.BLOCK_BYTES.value))
+            pg.dat = bytearray(self._journal.sim_disk.get_ds().read(u32Const.BLOCK_BYTES.value))
 
             # Write change to page
             self.wrt_cg_to_pg(cg, pg)

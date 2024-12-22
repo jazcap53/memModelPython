@@ -374,7 +374,7 @@ def test_rd_and_wrt_back_one_or_more_blocks(journal, mocker, caplog,
 
     # Mock methods
     mock_empty_purge = mocker.patch.object(journal, 'empty_purge_jrnl_buf')
-    mock_disk = mocker.patch.object(journal.p_d, 'get_ds')
+    mock_disk = mocker.patch.object(journal.sim_disk, 'get_ds')
     mock_disk().read.return_value = b'\0' * u32Const.BLOCK_BYTES.value
 
     # Process changes
