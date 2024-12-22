@@ -380,13 +380,15 @@ def test_rd_and_wrt_back_one_or_more_blocks(journal, mocker, caplog,
     # Process changes
     journal._change_log_handler.process_changes(mock_j_cg_log)
 
-    assert journal._change_log_handler.intermediate_buf_count == expected_intermediate_count, \
-        f"Expected intermediate buf_page_count to be {expected_intermediate_count}, but got {journal._change_log_handler.intermediate_buf_count}"
+    # Check intermediate buffer count
+    intermediate_count = journal._change_log_handler.count_buffer_items()
+    assert intermediate_count == expected_intermediate_count, \
+        f"Expected intermediate buf_page_count to be {expected_intermediate_count}, but got {intermediate_count}"
 
     # Verify final buffer state
-    filled_slots = journal._change_log_handler.count_buffer_items()
-    assert filled_slots == expected_final_count, \
-        f"Expected {expected_final_count} filled buffer slots after final processing, but got {filled_slots}"
+    final_count = journal._change_log_handler.count_buffer_items()
+    assert final_count == expected_final_count, \
+        f"Expected {expected_final_count} filled buffer slots after final processing, but got {final_count}"
 
     # Verify method calls
     assert mock_disk().seek.call_count == num_blocks, \

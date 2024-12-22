@@ -779,7 +779,7 @@ class Journal:
         def __init__(self, journal_instance):
             self._journal = journal_instance
             self.pg_buf = [None] * journal_instance.PAGE_BUFFER_SIZE  # Make this an instance attribute
-            self.intermediate_buf_count = 0  # Also make this an instance attribute
+            # self.intermediate_buf_count = 0  # Also make this an instance attribute
 
         def get_num_data_lines(self, r_cg: Change) -> int:
             """Calculate the number of data lines in a change."""
@@ -1043,23 +1043,24 @@ class Journal:
             blocks = list(j_cg_log.the_log.items())
             prev_blk_num = SENTINEL_INUM
             pg = None
-            self.intermediate_buf_count = 0  # Reset at start
+            self.pg_buf = [None] * self._journal.PAGE_BUFFER_SIZE  # Ensure buffer is reset
 
-            # Process all blocks except the last one
-            for i in range(len(blocks) - 1):
+            # Process all blocks
+            for i in range(len(blocks)):
                 blk_num, changes = blocks[i]
                 logger.debug(f"Processing block {blk_num} with {len(changes)} changes")
 
                 prev_blk_num, pg = self._process_block(changes, self.pg_buf, prev_blk_num, pg)
 
-            # Store the intermediate count AFTER processing non-last blocks
-            self.intermediate_buf_count = self.count_buffer_items()
+                # If this is the last block, add it to the buffer
+                if i == len(blocks) - 1 and prev_blk_num != SENTINEL_INUM:
+                    current_count = self.count_buffer_items()
+                    logger.debug(f"Adding last block {prev_blk_num} to buffer at position {current_count}")
+                    self.pg_buf[current_count] = (prev_blk_num, pg)
 
-            # Handle the last block separately
-            if blocks:
-                last_blk_num, last_changes = blocks[-1]
-                logger.debug(f"Processing last block {last_blk_num} with {len(last_changes)} changes")
-                self._process_last_block(last_changes[-1], self.pg_buf, last_blk_num)
+            # Final purge (using the current buffer count)
+            current_count = self.count_buffer_items()
+            self._journal.empty_purge_jrnl_buf(self.pg_buf, current_count, True)
 
         def _process_block(self, changes: List[Change], pg_buf: List, prev_blk_num: bNum_t, pg: Page) -> Tuple[
             bNum_t, Page]:
