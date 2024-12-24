@@ -1183,7 +1183,8 @@ if __name__ == "__main__":
 
     # Test cases and their expected values
     test_cases = [
-        (15, 15, 0),  # (num_blocks, expected_intermediate_count, expected_final_count)
+        (1, 0, 0),  # (num_blocks, expected_intermediate_count, expected_final_count)
+        (15, 15, 0),
         (16, 0, 0),
         (17, 1, 0),
         (32, 0, 0)
