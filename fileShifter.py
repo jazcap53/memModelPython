@@ -26,11 +26,15 @@ class FileShifter:
         """
         had_error = 0
         tmp_file = f_name + ".tmp"
+        original_content = b"" if binary_mode else ""
 
         try:
-            # Read original content
-            with open(f_name, 'rb' if binary_mode else 'r') as orig:
-                original_content = orig.read()
+            # Try to read original content, but don't error if file doesn't exist
+            try:
+                with open(f_name, 'rb' if binary_mode else 'r') as orig:
+                    original_content = orig.read()
+            except FileNotFoundError:
+                logger.debug(f"Creating new file: {f_name}")
 
             mode = "wb" if binary_mode else "w"
             with open(tmp_file, mode) as f:
@@ -58,9 +62,6 @@ class FileShifter:
         except PermissionError:
             had_error = -2
             logger.error("Permission denied")
-        except FileNotFoundError:
-            had_error = -3
-            logger.error("File not found")
         except OSError as e:
             # Handle cases where errno might be None
             had_error = e.errno * 2 if e.errno and e.errno == 2 else \
