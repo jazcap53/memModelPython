@@ -1133,6 +1133,7 @@ if __name__ == "__main__":
     setup_logging(logging.DEBUG)
     logger = get_logger(__name__)
 
+
     def check_buffer_management(num_blocks):
         # Setup - provide all required filenames
         disk_file = f"buffer_mgmt_disk_{num_blocks}.bin"
@@ -1166,17 +1167,25 @@ if __name__ == "__main__":
 
             journal.empty_purge_jrnl_buf = counting_empty_purge
 
-            # Create changes
-            for i in range(num_blocks):
+            # Process all blocks except the last one
+            for i in range(num_blocks - 1):
                 change = Change(i)
                 change.add_line(0, b'A' * u32Const.BYTES_PER_LINE.value)
                 change_log.add_to_log(change)
 
-            # Process changes
+            # Get intermediate count
+            intermediate_count = journal._change_log_handler.count_buffer_items()
+
+            # Process the last block
+            if num_blocks > 0:
+                change = Change(num_blocks - 1)
+                change.add_line(0, b'A' * u32Const.BYTES_PER_LINE.value)
+                change_log.add_to_log(change)
+
+            # Process all changes
             journal._change_log_handler.process_changes(change_log)
 
-            # Get results
-            intermediate_count = journal._change_log_handler.count_buffer_items()
+            # Get final count
             final_count = journal._change_log_handler.count_buffer_items()
 
             return intermediate_count, final_count, purge_count
