@@ -1045,22 +1045,20 @@ class Journal:
             pg = None
             self.pg_buf = [None] * self._journal.PAGE_BUFFER_SIZE  # Ensure buffer is reset
 
-            # Process all blocks
-            for i in range(len(blocks)):
+            # Process all blocks except the last one
+            for i in range(len(blocks) - 1):
                 blk_num, changes = blocks[i]
                 logger.debug(f"Processing block {blk_num} with {len(changes)} changes")
-
                 prev_blk_num, pg = self._process_block(changes, self.pg_buf, prev_blk_num, pg)
 
-                # If this is the last block, add it to the buffer
-                if i == len(blocks) - 1 and prev_blk_num != SENTINEL_INUM:
-                    current_count = self.count_buffer_items()
-                    logger.debug(f"Adding last block {prev_blk_num} to buffer at position {current_count}")
-                    self.pg_buf[current_count] = (prev_blk_num, pg)
+            # Handle the last block separately
+            if blocks:
+                last_blk_num, last_changes = blocks[-1]
+                logger.debug(f"Processing last block {last_blk_num}")
+                self._process_last_block(last_changes[0], self.pg_buf, last_blk_num)
 
-            # Final purge (using the current buffer count)
-            current_count = self.count_buffer_items()
-            self._journal.empty_purge_jrnl_buf(self.pg_buf, current_count, True)
+            # Make sure buffer is completely cleared
+            self.pg_buf = [None] * self._journal.PAGE_BUFFER_SIZE
 
         def _process_block(self, changes: List[Change], pg_buf: List, prev_blk_num: bNum_t, pg: Page) -> Tuple[
             bNum_t, Page]:
@@ -1075,6 +1073,7 @@ class Journal:
                         if current_count >= self._journal.PAGE_BUFFER_SIZE - 1:
                             logger.debug(f"Buffer full ({current_count}), purging")
                             self._journal.empty_purge_jrnl_buf(pg_buf, current_count)
+                            # Clear buffer after purging
                             for i in range(len(pg_buf)):
                                 pg_buf[i] = None
 
@@ -1085,7 +1084,7 @@ class Journal:
                     gotten_ds = self._journal.sim_disk.get_ds()
                     gotten_ds.seek(curr_blk_num * u32Const.BLOCK_BYTES.value)
                     pg = Page()
-                    pg.dat = bytearray(self._journal.sim_disk.get_ds().read(u32Const.BLOCK_BYTES.value))
+                    pg.dat = bytearray(gotten_ds.read(u32Const.BLOCK_BYTES.value))
                     prev_blk_num = curr_blk_num
 
                 # Apply change to current page
