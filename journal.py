@@ -1155,6 +1155,17 @@ if __name__ == "__main__":
 
             journal = Journal(journal_file, sim_disk, change_log, status, crash_chk)
 
+            # Create a counter for purge calls
+            purge_count = 0
+            original_empty_purge = journal.empty_purge_jrnl_buf
+
+            def counting_empty_purge(*args, **kwargs):
+                nonlocal purge_count
+                purge_count += 1
+                return original_empty_purge(*args, **kwargs)
+
+            journal.empty_purge_jrnl_buf = counting_empty_purge
+
             # Create changes
             for i in range(num_blocks):
                 change = Change(i)
@@ -1165,10 +1176,10 @@ if __name__ == "__main__":
             journal._change_log_handler.process_changes(change_log)
 
             # Get results
-            intermediate_count = journal._change_log_handler.intermediate_buf_count
+            intermediate_count = journal._change_log_handler.count_buffer_items()
             final_count = journal._change_log_handler.count_buffer_items()
 
-            return intermediate_count, final_count
+            return intermediate_count, final_count, purge_count
 
         finally:
             # Clean up files
@@ -1182,29 +1193,35 @@ if __name__ == "__main__":
 
     # Test cases and their expected values
     test_cases = [
-        (1, 0, 0),  # (num_blocks, expected_intermediate_count, expected_final_count)
-        (15, 15, 0),
-        (16, 0, 0),
-        (17, 1, 0),
-        (32, 0, 0)
+        (1, 0, 0, 1),  # (num_blocks, expected_intermediate_count, expected_final_count, expected_purge_calls)
+        (15, 15, 0, 1),  # One less than buffer size
+        (16, 0, 0, 2),  # Full buffer: one purge during, one at end
+        (17, 1, 0, 2),  # One purge at full, one at end
+        (32, 0, 0, 3)  # Two full purges, one final
     ]
 
 
     def run_test(test_index):
-        num_blocks, expected_intermediate, expected_final = test_cases[test_index]
+        num_blocks, expected_intermediate, expected_final, expected_purge_calls = test_cases[test_index]
         logger.info(f"\nRunning test case {test_index}: {num_blocks} blocks")
-        actual_intermediate, actual_final = check_buffer_management(num_blocks)
+        actual_intermediate, actual_final, actual_purge_calls = check_buffer_management(num_blocks)
 
         logger.info(f"Results for {num_blocks} blocks:")
         logger.info(f"  Intermediate count - Expected: {expected_intermediate}, Got: {actual_intermediate}")
         logger.info(f"  Final count - Expected: {expected_final}, Got: {actual_final}")
+        logger.info(f"  Purge calls - Expected: {expected_purge_calls}, Got: {actual_purge_calls}")
 
-        if actual_intermediate != expected_intermediate or actual_final != expected_final:
+        if (actual_intermediate != expected_intermediate or
+                actual_final != expected_final or
+                actual_purge_calls != expected_purge_calls):
             logger.error(f"Test failed:")
-            logger.error(
-                f"  Intermediate count mismatch - Expected: {expected_intermediate}, Got: {actual_intermediate}")
+            if actual_intermediate != expected_intermediate:
+                logger.error(
+                    f"  Intermediate count mismatch - Expected: {expected_intermediate}, Got: {actual_intermediate}")
             if actual_final != expected_final:
                 logger.error(f"  Final count mismatch - Expected: {expected_final}, Got: {actual_final}")
+            if actual_purge_calls != expected_purge_calls:
+                logger.error(f"  Purge calls mismatch - Expected: {expected_purge_calls}, Got: {actual_purge_calls}")
             return False
         else:
             logger.info(f"Test passed")
