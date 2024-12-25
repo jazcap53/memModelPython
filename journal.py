@@ -409,13 +409,15 @@ class Journal:
         """Read and return the end tag from the journal file."""
         return read_64bit(self.journal_file)
 
-    def empty_purge_jrnl_buf(self, pg_buf: List[Tuple[bNum_t, Page]], p_ctr: int, is_end: bool = False) -> bool:
+    def empty_purge_jrnl_buf(self, p_ctr: int, is_end: bool = False) -> bool:
         """Empty the journal's purge buffer by writing pages to disk."""
         logger.debug(f"Entering empty_purge_jrnl_buf with {p_ctr} pages, is_end={is_end}")
 
         if p_ctr == 0 and not is_end:
             logger.debug("Buffer empty and not final purge, returning early")
             return True
+
+        pg_buf = self._change_log_handler.pg_buf  # Use the change log handler's buffer
 
         # Process all valid entries
         for i in range(p_ctr):
