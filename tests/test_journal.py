@@ -325,13 +325,16 @@ def test_empty_purge_jrnl_buf(journal, mocker, caplog):
 
     page_tuple = (1, mock_page)
 
+    # Set up the change log handler's buffer
+    journal._change_log_handler.pg_buf = [page_tuple]
+
     # Mock wipers
     mock_wipers = mocker.Mock()
     mock_wipers.is_dirty.return_value = False
     journal.wipers = mock_wipers
 
     with caplog.at_level(logging.DEBUG):
-        result = journal.empty_purge_jrnl_buf([page_tuple], 1)
+        result = journal.empty_purge_jrnl_buf(1, False)  # Pass count and is_end flag
 
     assert result is True
     assert any("Writing page   1 to disk" in record.message for record in caplog.records)
@@ -340,7 +343,8 @@ def test_empty_purge_jrnl_buf(journal, mocker, caplog):
     mock_wipers.is_dirty.return_value = True
 
     with caplog.at_level(logging.DEBUG):
-        result = journal.empty_purge_jrnl_buf([page_tuple], 1)
+        caplog.clear()  # Clear previous logs
+        result = journal.empty_purge_jrnl_buf(1, False)
 
     assert result is True
     assert any("Overwriting dirty block 1" in record.message for record in caplog.records)

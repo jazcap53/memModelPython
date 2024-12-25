@@ -9,4 +9,6 @@ memModel
 *.swp
 *Blurb*
 *.pl
-*.sh
+*#	.sh
+tests/__pycache__/
+
