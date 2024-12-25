@@ -1049,42 +1049,39 @@ class Journal:
             for i in range(len(blocks) - 1):
                 blk_num, changes = blocks[i]
                 logger.debug(f"Processing block {blk_num} with {len(changes)} changes")
-                prev_blk_num, pg = self._process_block(changes, self.pg_buf, prev_blk_num, pg)
+                prev_blk_num, pg = self._process_block(changes, prev_blk_num, pg)
 
             # Handle the last block separately
             if blocks:
                 last_blk_num, last_changes = blocks[-1]
                 logger.debug(f"Processing last block {last_blk_num}")
-                self._process_last_block(last_changes[0], self.pg_buf, last_blk_num)
+                self._process_last_block(last_changes[0], last_blk_num)
 
             # Make sure buffer is completely cleared
             self.pg_buf = [None] * self._journal.PAGE_BUFFER_SIZE
 
-        def _process_block(self, changes: List[Change], pg_buf: List, prev_blk_num: bNum_t, pg: Page) -> Tuple[
-            bNum_t, Page]:
+        def _process_block(self, changes: List[Change], prev_blk_num: bNum_t, pg: Page) -> Tuple[bNum_t, Page]:
             curr_blk_num = None
             for cg in changes:
                 curr_blk_num = cg.block_num
 
                 if curr_blk_num != prev_blk_num:
-                    # New block: add previous block to buffer if it exists
                     if prev_blk_num != SENTINEL_INUM:
                         current_count = self.count_buffer_items()
                         if current_count >= self._journal.PAGE_BUFFER_SIZE - 1:
                             logger.debug(f"Buffer full ({current_count}), purging")
-                            self._journal.empty_purge_jrnl_buf(pg_buf, current_count)
+                            self._journal.empty_purge_jrnl_buf(current_count)
                             # Clear buffer after purging
-                            for i in range(len(pg_buf)):
-                                pg_buf[i] = None
+                            self.pg_buf = [None] * self._journal.PAGE_BUFFER_SIZE
 
                         buf_item_ct = self.count_buffer_items()
-                        pg_buf[buf_item_ct] = (prev_blk_num, pg)
+                        self.pg_buf[buf_item_ct] = (prev_blk_num, pg)
 
                     # Prepare new page for current block
-                    gotten_ds = self._journal.sim_disk.get_ds()
-                    gotten_ds.seek(curr_blk_num * u32Const.BLOCK_BYTES.value)
+                    disk_stream = self._journal.sim_disk.get_ds()
+                    disk_stream.seek(curr_blk_num * u32Const.BLOCK_BYTES.value)
                     pg = Page()
-                    pg.dat = bytearray(gotten_ds.read(u32Const.BLOCK_BYTES.value))
+                    pg.dat = bytearray(disk_stream.read(u32Const.BLOCK_BYTES.value))
                     prev_blk_num = curr_blk_num
 
                 # Apply change to current page
@@ -1092,25 +1089,31 @@ class Journal:
 
             return prev_blk_num, pg
 
-        def _process_last_block(self, cg: Change, pg_buf: List, curr_blk_num: bNum_t):
+        # Updated _process_last_block():
+        def _process_last_block(self, cg: Change, curr_blk_num: bNum_t):
             logger.debug(f"Processing block {curr_blk_num} with 1 changes")
             logger.debug(f"Processing last block {curr_blk_num}")
 
             # Seek and read the last block
-            self._journal.sim_disk.get_ds().seek(curr_blk_num * u32Const.BLOCK_BYTES.value)
+            disk_stream = self._journal.sim_disk.get_ds()
+            disk_stream.seek(curr_blk_num * u32Const.BLOCK_BYTES.value)
             pg = Page()
-            pg.dat = bytearray(self._journal.sim_disk.get_ds().read(u32Const.BLOCK_BYTES.value))
+            pg.dat = bytearray(disk_stream.read(u32Const.BLOCK_BYTES.value))
 
             # Write change to page
             self.wrt_cg_to_pg(cg, pg)
 
             # Add to buffer and purge
-            pg_buf[self.count_buffer_items()] = (curr_blk_num, pg)
-            self._journal.empty_purge_jrnl_buf(pg_buf, self.count_buffer_items(), True)
+            pre_add_count = self.count_buffer_items()
+            self.pg_buf[pre_add_count] = (curr_blk_num, pg)
+            post_add_count = self.count_buffer_items()
+
+            assert post_add_count == pre_add_count + 1, f"Buffer count mismatch: pre={pre_add_count}, post={post_add_count}"
+
+            self._journal.empty_purge_jrnl_buf(post_add_count, True)
 
             # Clear the buffer after final purge
-            for i in range(len(pg_buf)):
-                pg_buf[i] = None
+            self.pg_buf = [None] * self._journal.PAGE_BUFFER_SIZE
 
         def count_buffer_items(self):
             """Count non-None items in the buffer."""
