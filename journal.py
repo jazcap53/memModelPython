@@ -409,9 +409,9 @@ class Journal:
         """Read and return the end tag from the journal file."""
         return read_64bit(self.journal_file)
 
-    def empty_purge_jrnl_buf(self, p_ctr: int, is_end: bool = False) -> bool:
+    def write_buffer_to_disk(self, p_ctr: int, is_end: bool = False) -> bool:
         """Empty the journal's purge buffer by writing pages to disk."""
-        logger.debug(f"Entering empty_purge_jrnl_buf with {p_ctr} pages, is_end={is_end}")
+        logger.debug(f"Entering write_buffer_to_disk with {p_ctr} pages, is_end={is_end}")
 
         if p_ctr == 0 and not is_end:
             logger.debug("Buffer empty and not final purge, returning early")
@@ -442,7 +442,7 @@ class Journal:
                 self.sim_disk.get_ds().write(cursor[1].dat)
                 logger.debug(f"Writing page {cursor[0]:3} to disk")
 
-        logger.debug(f"Finished processing {p_ctr} pages in empty_purge_jrnl_buf")
+        logger.debug(f"Finished processing {p_ctr} pages in write_buffer_to_disk")
         return True
 
     def verify_bytes_read(self):
@@ -923,7 +923,7 @@ class Journal:
 
                                 if buf_page_count == self._journal.PAGE_BUFFER_SIZE:
                                     logger.debug(f"Buffer full ({buf_page_count}), purging")
-                                    self._journal.empty_purge_jrnl_buf(pg_buf, buf_page_count)
+                                    self._journal.write_buffer_to_disk(pg_buf, buf_page_count)
                                     buf_page_count = 0
 
                             # Seek and read new block
@@ -975,7 +975,7 @@ class Journal:
 
             # Always purge with is_end=True, regardless of buffer state
             logger.debug(f"Purging buffer in r_and_wb_last, ctr={ctr}")
-            self._journal.empty_purge_jrnl_buf(pg_buf, ctr, True)
+            self._journal.write_buffer_to_disk(pg_buf, ctr, True)
 
             # Clear the buffer after final purge
             for i in range(len(pg_buf)):
@@ -1061,6 +1061,8 @@ class Journal:
 
             # Make sure buffer is completely cleared
             self.pg_buf = [None] * self._journal.PAGE_BUFFER_SIZE
+            if True:  # TODO: REMOVE THESE TWO LINES
+                pass
 
         def _process_block(self, changes: List[Change], prev_blk_num: bNum_t, pg: Page) -> Tuple[bNum_t, Page]:
             curr_blk_num = None
@@ -1072,7 +1074,7 @@ class Journal:
                         current_count = self.count_buffer_items()
                         if current_count >= self._journal.PAGE_BUFFER_SIZE - 1:
                             logger.debug(f"Buffer full ({current_count}), purging")
-                            self._journal.empty_purge_jrnl_buf(current_count)
+                            self._journal.write_buffer_to_disk(current_count)
                             # Clear buffer after purging
                             self.pg_buf = [None] * self._journal.PAGE_BUFFER_SIZE
 
@@ -1112,7 +1114,7 @@ class Journal:
 
             assert post_add_count == pre_add_count + 1, f"Buffer count mismatch: pre={pre_add_count}, post={post_add_count}"
 
-            self._journal.empty_purge_jrnl_buf(post_add_count, True)
+            self._journal.write_buffer_to_disk(post_add_count, True)
 
             # Clear the buffer after final purge
             self.pg_buf = [None] * self._journal.PAGE_BUFFER_SIZE
@@ -1163,14 +1165,14 @@ if __name__ == "__main__":
 
             # Create a counter for purge calls
             purge_count = 0
-            original_empty_purge = journal.empty_purge_jrnl_buf
+            original_empty_purge = journal.write_buffer_to_disk
 
             def counting_empty_purge(*args, **kwargs):
                 nonlocal purge_count
                 purge_count += 1
                 return original_empty_purge(*args, **kwargs)
 
-            journal.empty_purge_jrnl_buf = counting_empty_purge
+            journal.write_buffer_to_disk = counting_empty_purge
 
             # Process all blocks except the last one
             for i in range(num_blocks - 1):

@@ -334,7 +334,7 @@ def test_empty_purge_jrnl_buf(journal, mocker, caplog):
     journal.wipers = mock_wipers
 
     with caplog.at_level(logging.DEBUG):
-        result = journal.empty_purge_jrnl_buf(1, False)  # Pass count and is_end flag
+        result = journal.write_buffer_to_disk(1, False)  # Pass count and is_end flag
 
     assert result is True
     assert any("Writing page   1 to disk" in record.message for record in caplog.records)
@@ -344,7 +344,7 @@ def test_empty_purge_jrnl_buf(journal, mocker, caplog):
 
     with caplog.at_level(logging.DEBUG):
         caplog.clear()  # Clear previous logs
-        result = journal.empty_purge_jrnl_buf(1, False)
+        result = journal.write_buffer_to_disk(1, False)
 
     assert result is True
     assert any("Overwriting dirty block 1" in record.message for record in caplog.records)
@@ -377,7 +377,7 @@ def test_rd_and_wrt_back_one_or_more_blocks(journal, mocker, caplog,
     mock_j_cg_log.the_log = mock_changes
 
     # Mock methods
-    mock_empty_purge = mocker.patch.object(journal, 'empty_purge_jrnl_buf')
+    mock_empty_purge = mocker.patch.object(journal, 'write_buffer_to_disk')
     mock_disk = mocker.patch.object(journal.sim_disk, 'get_ds')
     mock_disk().read.return_value = b'\0' * u32Const.BLOCK_BYTES.value
 
@@ -418,16 +418,16 @@ def test_r_and_wb_last(journal, mocker, caplog):
     pg = Page()
     pg_buf = [None] * journal.PAGE_BUFFER_SIZE
 
-    # Mock empty_purge_jrnl_buf
+    # Mock write_buffer_to_disk
     mock_purge = mocker.Mock()
-    journal.empty_purge_jrnl_buf = mock_purge
+    journal.write_buffer_to_disk = mock_purge
 
     # Execute
     with caplog.at_level(logging.WARNING):
         journal._change_log_handler.r_and_wb_last(cg, pg_buf, 0, 1, pg)
 
     # Verify
-    # Check that empty_purge_jrnl_buf was called with correct parameters
+    # Check that write_buffer_to_disk was called with correct parameters
     mock_purge.assert_called_with(pg_buf, 1, True)
 
     # Check that wrt_cg_to_pg was called
