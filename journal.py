@@ -432,12 +432,16 @@ class Journal:
             _ChangeLogHandler.write_buffer_to_disk: Coordinates the overall buffer writing process
         """
         try:
+            # Log the disk write operation
+            logger.debug(f"Writing block {block_num:3} to disk")
+
             # Seek to correct position
             self.sim_disk.get_ds().seek(block_num * u32Const.BLOCK_BYTES.value)
 
             # Check if block is dirty
             if self.wipers.is_dirty(block_num):
                 # Write zeros for dirty blocks
+                logger.debug(f"  Overwriting dirty block {block_num}")
                 self.sim_disk.get_ds().write(b'\0' * u32Const.BLOCK_BYTES.value)
             else:
                 # Write actual page data
@@ -1145,16 +1149,23 @@ class Journal:
             See Also:
                 Journal.write_block_to_disk: Handles the actual disk I/O for individual blocks
             """
+            """Coordinate writing buffered pages to disk."""
+            logger.debug(f"Initiating buffer write (is_end={is_end})")
+
             pages_to_write = [item for item in self.pg_buf if item is not None]
+            logger.debug(f"  {len(pages_to_write)} pages to write: {[item[0] for item in pages_to_write if item]}")
 
             if not pages_to_write and not is_end:
+                logger.debug("  No pages to write, returning early")
                 return True
 
             try:
                 for i, (block_num, page) in enumerate(pages_to_write):
+                    logger.debug(f"  Processing page {i + 1}/{len(pages_to_write)} (block {block_num})")
+
                     # Verify CRC
                     if not self._journal.verify_page_crc((block_num, page)):
-                        logger.error(f"CRC check failed for block {block_num}")
+                        logger.error(f"    CRC check failed for block {block_num}")
                         return False
 
                     # Delegate to Journal for actual write
@@ -1162,9 +1173,10 @@ class Journal:
 
                 # Clear the buffer
                 self.pg_buf = [None] * self._journal.PAGE_BUFFER_SIZE
+                logger.debug("  Buffer cleared after write operation")
                 return True
             except Exception as e:
-                logger.error(f"Error during buffer write process: {e}")
+                logger.error(f"  Error during buffer write process: {e}")
                 return False
 
 
