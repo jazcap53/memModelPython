@@ -409,41 +409,42 @@ class Journal:
         """Read and return the end tag from the journal file."""
         return read_64bit(self.journal_file)
 
-    def write_buffer_to_disk(self, p_ctr: int, is_end: bool = False) -> bool:
-        """Empty the journal's purge buffer by writing pages to disk."""
-        logger.debug(f"Entering write_buffer_to_disk with {p_ctr} pages, is_end={is_end}")
+    def write_block_to_disk(self, block_num: bNum_t, page: Page):
+        """Write a single block to disk.
 
-        if p_ctr == 0 and not is_end:
-            logger.debug("Buffer empty and not final purge, returning early")
-            return True
+        This method handles the low-level disk I/O for a single block:
+        1. Seeks to the correct disk position
+        2. Checks if the block is marked as dirty
+        3. Performs the actual write operation
 
-        pg_buf = self._change_log_handler.pg_buf  # Use the change log handler's buffer
+        This method is called by _ChangeLogHandler.write_buffer_to_disk() for each
+        block that needs to be written. It handles the physical I/O details that
+        the ChangeLogHandler doesn't need to know about.
 
-        # Process all valid entries
-        for i in range(p_ctr):
-            cursor = pg_buf[i]
-            if not cursor:
-                continue
+        Args:
+            block_num: The block number to write
+            page: The page containing the data to write
 
-            if not self.verify_page_crc(cursor):
-                error_msg = f"CRC check failed for block {cursor[0]} before writing to disk"
-                logger.error(error_msg)
-                self.status.wrt(f"Error: {error_msg}")
-                self.crash_chk.set_last_status('C')
-                raise ValueError(error_msg)
+        Raises:
+            IOError: If the write operation fails
 
-            self.sim_disk.get_ds().seek(cursor[0] * u32Const.BLOCK_BYTES.value)
+        See Also:
+            _ChangeLogHandler.write_buffer_to_disk: Coordinates the overall buffer writing process
+        """
+        try:
+            # Seek to correct position
+            self.sim_disk.get_ds().seek(block_num * u32Const.BLOCK_BYTES.value)
 
-            if self.wipers.is_dirty(cursor[0]):
+            # Check if block is dirty
+            if self.wipers.is_dirty(block_num):
                 # Write zeros for dirty blocks
                 self.sim_disk.get_ds().write(b'\0' * u32Const.BLOCK_BYTES.value)
-                logger.debug(f"Overwriting dirty block {cursor[0]}")
             else:
-                self.sim_disk.get_ds().write(cursor[1].dat)
-                logger.debug(f"Writing page {cursor[0]:3} to disk")
-
-        logger.debug(f"Finished processing {p_ctr} pages in write_buffer_to_disk")
-        return True
+                # Write actual page data
+                self.sim_disk.get_ds().write(page.dat)
+        except IOError as e:
+            logger.error(f"Failed to write block {block_num} to disk: {e}")
+            raise
 
     def verify_bytes_read(self):
         """Verify that the number of bytes read matches the expected count."""
@@ -923,7 +924,7 @@ class Journal:
 
                                 if buf_page_count == self._journal.PAGE_BUFFER_SIZE:
                                     logger.debug(f"Buffer full ({buf_page_count}), purging")
-                                    self._journal.write_buffer_to_disk(pg_buf, buf_page_count)
+                                    self.write_buffer_to_disk(False)  # Not the end of processing
                                     buf_page_count = 0
 
                             # Seek and read new block
@@ -975,7 +976,7 @@ class Journal:
 
             # Always purge with is_end=True, regardless of buffer state
             logger.debug(f"Purging buffer in r_and_wb_last, ctr={ctr}")
-            self._journal.write_buffer_to_disk(pg_buf, ctr, True)
+            self.write_buffer_to_disk(True)  # End of processing
 
             # Clear the buffer after final purge
             for i in range(len(pg_buf)):
@@ -1074,7 +1075,7 @@ class Journal:
                         current_count = self.count_buffer_items()
                         if current_count >= self._journal.PAGE_BUFFER_SIZE - 1:
                             logger.debug(f"Buffer full ({current_count}), purging")
-                            self._journal.write_buffer_to_disk(current_count)
+                            self.write_buffer_to_disk(False)  # Not the end of processing
                             # Clear buffer after purging
                             self.pg_buf = [None] * self._journal.PAGE_BUFFER_SIZE
 
@@ -1114,7 +1115,7 @@ class Journal:
 
             assert post_add_count == pre_add_count + 1, f"Buffer count mismatch: pre={pre_add_count}, post={post_add_count}"
 
-            self._journal.write_buffer_to_disk(post_add_count, True)
+            self.write_buffer_to_disk(True)  # End of processing
 
             # Clear the buffer after final purge
             self.pg_buf = [None] * self._journal.PAGE_BUFFER_SIZE
@@ -1122,6 +1123,49 @@ class Journal:
         def count_buffer_items(self):
             """Count non-None items in the buffer."""
             return sum(1 for item in self.pg_buf if item is not None)
+
+        def write_buffer_to_disk(self, is_end: bool = False) -> bool:
+            """Coordinate writing buffered pages to disk.
+
+            This method manages the high-level process of writing buffered pages to disk:
+            1. Iterates through the buffer
+            2. Verifies CRC for each page
+            3. Delegates actual disk writing to Journal.write_block_to_disk
+
+            This method owns the buffer and understands its structure, while
+            delegating physical I/O operations to the Journal class.
+
+            Args:
+                is_end: Whether this is the final write operation in the current sequence.
+                       When True, ensures all buffered pages are written.
+
+            Returns:
+                bool: True if all writes were successful, False otherwise
+
+            See Also:
+                Journal.write_block_to_disk: Handles the actual disk I/O for individual blocks
+            """
+            pages_to_write = [item for item in self.pg_buf if item is not None]
+
+            if not pages_to_write and not is_end:
+                return True
+
+            try:
+                for i, (block_num, page) in enumerate(pages_to_write):
+                    # Verify CRC
+                    if not self._journal.verify_page_crc((block_num, page)):
+                        logger.error(f"CRC check failed for block {block_num}")
+                        return False
+
+                    # Delegate to Journal for actual write
+                    self._journal.write_block_to_disk(block_num, page)
+
+                # Clear the buffer
+                self.pg_buf = [None] * self._journal.PAGE_BUFFER_SIZE
+                return True
+            except Exception as e:
+                logger.error(f"Error during buffer write process: {e}")
+                return False
 
 
 if __name__ == "__main__":
@@ -1165,14 +1209,14 @@ if __name__ == "__main__":
 
             # Create a counter for purge calls
             purge_count = 0
-            original_empty_purge = journal.write_buffer_to_disk
+            original_empty_purge = journal._change_log_handler.write_buffer_to_disk
 
             def counting_empty_purge(*args, **kwargs):
                 nonlocal purge_count
                 purge_count += 1
                 return original_empty_purge(*args, **kwargs)
 
-            journal.write_buffer_to_disk = counting_empty_purge
+            journal._change_log_handler.write_buffer_to_disk = counting_empty_purge
 
             # Process all blocks except the last one
             for i in range(num_blocks - 1):

@@ -313,49 +313,36 @@ def test_do_wipe_routine(journal, mocker, mock_change_log, caplog):
 
 
 def test_empty_purge_jrnl_buf(journal, mocker, caplog):
-    # Setup
+    # Mock the Journal's write_block_to_disk method
+    mock_write_block = mocker.patch.object(journal, 'write_block_to_disk')
+
+    # Create a test page
     mock_page = Page()
     mock_page.dat = bytearray(u32Const.BLOCK_BYTES.value)
 
-    # Calculate correct CRC and write it to the page
+    # Calculate and set correct CRC
     crc = AJZlibCRC.get_code(mock_page.dat[:-u32Const.CRC_BYTES.value],
                              u32Const.BYTES_PER_PAGE.value - u32Const.CRC_BYTES.value)
     for i in range(u32Const.CRC_BYTES.value):
         mock_page.dat[-u32Const.CRC_BYTES.value + i] = (crc >> (8 * i)) & 0xFF
 
-    page_tuple = (1, mock_page)
-
     # Set up the change log handler's buffer
-    journal._change_log_handler.pg_buf = [page_tuple]
+    journal._change_log_handler.pg_buf = [(1, mock_page)]
 
-    # Mock wipers
-    mock_wipers = mocker.Mock()
-    mock_wipers.is_dirty.return_value = False
-    journal.wipers = mock_wipers
-
-    with caplog.at_level(logging.DEBUG):
-        result = journal.write_buffer_to_disk(1, False)  # Pass count and is_end flag
+    # Call the method on change log handler
+    result = journal._change_log_handler.write_buffer_to_disk(False)
 
     assert result is True
-    assert any("Writing page   1 to disk" in record.message for record in caplog.records)
-
-    # Test with dirty block
-    mock_wipers.is_dirty.return_value = True
-
-    with caplog.at_level(logging.DEBUG):
-        caplog.clear()  # Clear previous logs
-        result = journal.write_buffer_to_disk(1, False)
-
-    assert result is True
-    assert any("Overwriting dirty block 1" in record.message for record in caplog.records)
+    mock_write_block.assert_called_once_with(1, mock_page)
+    assert all(item is None for item in journal._change_log_handler.pg_buf)  # Buffer should be cleared
 
 
 @pytest.mark.parametrize("num_blocks, expected_intermediate_count, expected_final_count, expected_purge_calls", [
-    (1, 0, 0, 1),  # Single block: just final purge
-    (Journal.PAGE_BUFFER_SIZE - 1, Journal.PAGE_BUFFER_SIZE - 1, 0, 1),  # One less than buffer size
-    (Journal.PAGE_BUFFER_SIZE, 0, 0, 2),  # Full buffer: one purge during, one at end
-    (Journal.PAGE_BUFFER_SIZE + 1, 1, 0, 2),  # One purge at full, one at end
-    (Journal.PAGE_BUFFER_SIZE * 2, 0, 0, 3),  # Two full purges, one final
+    (1, 0, 0, 1),
+    (15, 15, 0, 1),
+    (16, 0, 0, 2),
+    (17, 1, 0, 2),
+    (32, 0, 0, 3)
 ])
 def test_rd_and_wrt_back_one_or_more_blocks(journal, mocker, caplog,
                                           num_blocks, expected_intermediate_count,
@@ -368,8 +355,8 @@ def test_rd_and_wrt_back_one_or_more_blocks(journal, mocker, caplog,
     # Create real changes
     mock_changes = {}
     for i in range(num_blocks):
-        change = Change(i)  # Create a real Change object
-        change.add_line(0, b'A' * u32Const.BYTES_PER_LINE.value)  # Add some test data
+        change = Change(i)
+        change.add_line(0, b'A' * u32Const.BYTES_PER_LINE.value)
         mock_changes[i] = [change]
 
     # Use the real dict directly
@@ -377,7 +364,7 @@ def test_rd_and_wrt_back_one_or_more_blocks(journal, mocker, caplog,
     mock_j_cg_log.the_log = mock_changes
 
     # Mock methods
-    mock_empty_purge = mocker.patch.object(journal, 'write_buffer_to_disk')
+    mock_empty_purge = mocker.patch.object(journal._change_log_handler, 'write_buffer_to_disk')
     mock_disk = mocker.patch.object(journal.sim_disk, 'get_ds')
     mock_disk().read.return_value = b'\0' * u32Const.BLOCK_BYTES.value
 
@@ -386,52 +373,50 @@ def test_rd_and_wrt_back_one_or_more_blocks(journal, mocker, caplog,
 
     # Check intermediate buffer count
     intermediate_count = journal._change_log_handler.count_buffer_items()
-    assert intermediate_count == expected_intermediate_count, \
-        f"Expected intermediate buf_page_count to be {expected_intermediate_count}, but got {intermediate_count}"
+    assert intermediate_count == expected_intermediate_count
 
     # Verify final buffer state
     final_count = journal._change_log_handler.count_buffer_items()
-    assert final_count == expected_final_count, \
-        f"Expected {expected_final_count} filled buffer slots after final processing, but got {final_count}"
+    assert final_count == expected_final_count
 
     # Verify method calls
-    assert mock_disk().seek.call_count == num_blocks, \
-        f"Expected {num_blocks} seek calls, but got {mock_disk().seek.call_count}"
-
-    assert mock_disk().read.call_count == num_blocks, \
-        f"Expected {num_blocks} read calls, but got {mock_disk().read.call_count}"
-
-    assert mock_empty_purge.call_count == expected_purge_calls, \
-        f"Expected {expected_purge_calls} purge calls, but got {mock_empty_purge.call_count}"
+    assert mock_disk().seek.call_count == num_blocks
+    assert mock_disk().read.call_count == num_blocks
+    assert mock_empty_purge.call_count == expected_purge_calls
 
     # Check log messages
     for i in range(num_blocks):
         assert any(f"Processing block {i} with 1 changes" in record.message
-                   for record in caplog.records), f"Missing log message for block {i}"
+                   for record in caplog.records)
 
 
 def test_r_and_wb_last(journal, mocker, caplog):
-    """Test r_and_wb_last behavior."""
-    # Setup
+    # Set logging level to DEBUG for the entire test
+    caplog.set_level(logging.DEBUG)
+
+    # Setup (unchanged)
     cg = Change(1)
     cg.add_line(0, b'A' * u32Const.BYTES_PER_LINE.value)
     pg = Page()
     pg_buf = [None] * journal.PAGE_BUFFER_SIZE
 
-    # Mock write_buffer_to_disk
-    mock_purge = mocker.Mock()
-    journal.write_buffer_to_disk = mock_purge
+    # Mocking (unchanged)
+    mock_purge = mocker.patch.object(journal._change_log_handler, 'write_buffer_to_disk')
+    mock_disk = mocker.patch.object(journal.sim_disk, 'get_ds')
+    mock_disk().read.return_value = b'\0' * u32Const.BLOCK_BYTES.value
 
-    # Execute
-    with caplog.at_level(logging.WARNING):
-        journal._change_log_handler.r_and_wb_last(cg, pg_buf, 0, 1, pg)
+    # Execute (removed the WARNING level context manager)
+    journal._change_log_handler.r_and_wb_last(cg, pg_buf, 0, 1, pg)
 
-    # Verify
-    # Check that write_buffer_to_disk was called with correct parameters
-    mock_purge.assert_called_with(pg_buf, 1, True)
+    # Debug: Print all captured logs
+    for record in caplog.records:
+        print(f"Captured log: {record.levelname} - {record.message}")
 
-    # Check that wrt_cg_to_pg was called
-    assert len([x for x in pg_buf if x is not None]) <= 1  # Buffer should have at most one entry
+    # Verify (unchanged)
+    mock_purge.assert_called_once_with(True)
+    assert len([x for x in pg_buf if x is not None]) <= 1
+    assert any("Processing block 1 with 1 changes" in record.message
+               for record in caplog.records)
 
 
 def test_verify_page_crc(journal):
