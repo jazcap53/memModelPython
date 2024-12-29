@@ -785,7 +785,7 @@ class Journal:
 
         def __init__(self, journal_instance):
             self._journal = journal_instance
-            self.pg_buf = [None] * journal_instance.PAGE_BUFFER_SIZE  # Make this an instance attribute
+            self.pg_buf: List[Optional[Tuple[int, Page]]] = [None] * journal_instance.PAGE_BUFFER_SIZE  # Make this an instance attribute
             # self.intermediate_buf_count = 0  # Also make this an instance attribute
 
         def get_num_data_lines(self, r_cg: Change) -> int:
@@ -1069,34 +1069,37 @@ class Journal:
             if True:  # TODO: REMOVE THESE TWO LINES
                 pass
 
-        def _process_block(self, changes: List[Change], prev_blk_num: bNum_t, pg: Page) -> Tuple[bNum_t, Page]:
-            curr_blk_num = None
-            for cg in changes:
-                curr_blk_num = cg.block_num
+        def _process_block(self, changes: List[Change], prev_block_num: bNum_t, prev_page: Page) -> Tuple[bNum_t, Page]:
+            """Process a block of changes."""
+            current_block_num = prev_block_num  # Start with previous block number
+            current_page = prev_page  # Start with previous page
 
-                if curr_blk_num != prev_blk_num:
-                    if prev_blk_num != SENTINEL_INUM:
+            for change in changes:
+                if change.block_num != current_block_num:
+                    # We've moved to a new block
+                    if current_block_num != SENTINEL_INUM:
+                        # Add the completed page to the buffer
                         current_count = self.count_buffer_items()
-                        if current_count >= self._journal.PAGE_BUFFER_SIZE - 1:
+                        assert current_count <= self._journal.PAGE_BUFFER_SIZE - 1, f"Buffer overflow: {current_count}"
+
+                        if current_count == self._journal.PAGE_BUFFER_SIZE - 1:
                             logger.debug(f"Buffer full ({current_count}), purging")
                             self.write_buffer_to_disk(False)  # Not the end of processing
-                            # Clear buffer after purging
-                            self.pg_buf = [None] * self._journal.PAGE_BUFFER_SIZE
+                            current_count = 0  # Reset after purge
 
-                        buf_item_ct = self.count_buffer_items()
-                        self.pg_buf[buf_item_ct] = (prev_blk_num, pg)
+                        self.pg_buf[current_count] = (current_block_num, current_page)
 
-                    # Prepare new page for current block
+                    # Prepare new page for new block
+                    current_block_num = change.block_num
                     disk_stream = self._journal.sim_disk.get_ds()
-                    disk_stream.seek(curr_blk_num * u32Const.BLOCK_BYTES.value)
-                    pg = Page()
-                    pg.dat = bytearray(disk_stream.read(u32Const.BLOCK_BYTES.value))
-                    prev_blk_num = curr_blk_num
+                    disk_stream.seek(current_block_num * u32Const.BLOCK_BYTES.value, 0)
+                    current_page = Page()
+                    current_page.dat = bytearray(disk_stream.read(u32Const.BLOCK_BYTES.value))
 
                 # Apply change to current page
-                self.wrt_cg_to_pg(cg, pg)
+                self.wrt_cg_to_pg(change, current_page)
 
-            return prev_blk_num, pg
+            return current_block_num, current_page
 
         # Updated _process_last_block():
         def _process_last_block(self, cg: Change, curr_blk_num: bNum_t):
@@ -1124,7 +1127,7 @@ class Journal:
             # Clear the buffer after final purge
             self.pg_buf = [None] * self._journal.PAGE_BUFFER_SIZE
 
-        def count_buffer_items(self):
+        def count_buffer_items(self) -> int:
             """Count non-None items in the buffer."""
             return sum(1 for item in self.pg_buf if item is not None)
 
