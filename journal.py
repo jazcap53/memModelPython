@@ -1212,12 +1212,20 @@ if __name__ == "__main__":
         inode_file = f"buffer_mgmt_inode_{num_blocks}.bin"
         status_file = f"buffer_mgmt_status_{num_blocks}.txt"
 
-        # Clean up any existing files
-        for file in [disk_file, journal_file, free_list_file, inode_file, status_file]:
-            if os.path.exists(file):
-                os.remove(file)
+        # List to track written blocks
+        written_blocks = []
+
+        # Mock the disk write operation
+        def mock_write_block(block_num, page):
+            written_blocks.append(block_num)
+            return True
 
         try:
+            # Clean up any existing files
+            for file in [disk_file, journal_file, free_list_file, inode_file, status_file]:
+                if os.path.exists(file):
+                    os.remove(file)
+
             # Create instances
             status = Status(status_file)
             sim_disk = SimDisk(status, disk_file, journal_file, free_list_file, inode_file)
@@ -1225,6 +1233,9 @@ if __name__ == "__main__":
             crash_chk = CrashChk()
 
             journal = Journal(journal_file, sim_disk, change_log, status, crash_chk)
+
+            # Mock write_block_to_disk
+            journal.write_block_to_disk = mock_write_block
 
             # Create a counter for purge calls
             purge_count = 0
@@ -1237,28 +1248,30 @@ if __name__ == "__main__":
 
             journal._change_log_handler.write_buffer_to_disk = counting_empty_purge
 
-            # Process all blocks except the last one
-            for i in range(num_blocks - 1):
+            # Create changes for all blocks
+            for i in range(num_blocks):
                 change = Change(i)
-                change.add_line(0, b'A' * u32Const.BYTES_PER_LINE.value)
-                change_log.add_to_log(change)
-
-            # Get intermediate count
-            intermediate_count = journal._change_log_handler.count_buffer_items()
-
-            # Process the last block
-            if num_blocks > 0:
-                change = Change(num_blocks - 1)
                 change.add_line(0, b'A' * u32Const.BYTES_PER_LINE.value)
                 change_log.add_to_log(change)
 
             # Process all changes
             journal._change_log_handler.process_changes(change_log)
 
-            # Get final count
-            final_count = journal._change_log_handler.count_buffer_items()
+            # Analyze results
+            unique_written_blocks = set(written_blocks)
+            duplicate_blocks = [b for b in written_blocks if written_blocks.count(b) > 1]
 
-            return intermediate_count, final_count, purge_count
+            return {
+                'purge_calls': purge_count,
+                'written_blocks': written_blocks,
+                'unique_written_blocks': unique_written_blocks,
+                'duplicate_blocks': duplicate_blocks,
+                'all_blocks_written': set(range(num_blocks)).issubset(unique_written_blocks)
+            }
+
+        except Exception as e:
+            logger.error(f"Error in check_buffer_management: {e}")
+            raise
 
         finally:
             # Clean up files
@@ -1272,35 +1285,37 @@ if __name__ == "__main__":
 
     # Test cases and their expected values
     test_cases = [
-        (1, 0, 0, 1),  # (num_blocks, expected_intermediate_count, expected_final_count, expected_purge_calls)
-        (15, 15, 0, 1),  # One less than buffer size
-        (16, 0, 0, 2),  # Full buffer: one purge during, one at end
-        (17, 1, 0, 2),  # One purge at full, one at end
-        (32, 0, 0, 3)  # Two full purges, one final
+        (1, 1),  # (num_blocks, expected_purge_calls)
+        (15, 1),  # One less than buffer size
+        (16, 2),  # Full buffer: one purge during, one at end
+        (17, 2),  # One purge at full, one at end
+        (32, 3)  # Two full purges, one final
     ]
 
 
     def run_test(test_index):
-        num_blocks, expected_intermediate, expected_final, expected_purge_calls = test_cases[test_index]
+        num_blocks, expected_purge_calls = test_cases[test_index]
         logger.info(f"\nRunning test case {test_index}: {num_blocks} blocks")
-        actual_intermediate, actual_final, actual_purge_calls = check_buffer_management(num_blocks)
+        results = check_buffer_management(num_blocks)
 
         logger.info(f"Results for {num_blocks} blocks:")
-        logger.info(f"  Intermediate count - Expected: {expected_intermediate}, Got: {actual_intermediate}")
-        logger.info(f"  Final count - Expected: {expected_final}, Got: {actual_final}")
-        logger.info(f"  Purge calls - Expected: {expected_purge_calls}, Got: {actual_purge_calls}")
+        logger.info(f"  Purge calls - Expected: {expected_purge_calls}, Got: {results['purge_calls']}")
+        logger.info(f"  All blocks written: {results['all_blocks_written']}")
+        logger.info(f"  Duplicate blocks: {results['duplicate_blocks']}")
+        logger.info(f"  Written blocks: {results['written_blocks']}")
 
-        if (actual_intermediate != expected_intermediate or
-                actual_final != expected_final or
-                actual_purge_calls != expected_purge_calls):
+        if (results['purge_calls'] != expected_purge_calls or
+                not results['all_blocks_written'] or
+                results['duplicate_blocks']):
             logger.error(f"Test failed:")
-            if actual_intermediate != expected_intermediate:
+            if results['purge_calls'] != expected_purge_calls:
                 logger.error(
-                    f"  Intermediate count mismatch - Expected: {expected_intermediate}, Got: {actual_intermediate}")
-            if actual_final != expected_final:
-                logger.error(f"  Final count mismatch - Expected: {expected_final}, Got: {actual_final}")
-            if actual_purge_calls != expected_purge_calls:
-                logger.error(f"  Purge calls mismatch - Expected: {expected_purge_calls}, Got: {actual_purge_calls}")
+                    f"  Purge calls mismatch - Expected: {expected_purge_calls}, Got: {results['purge_calls']}")
+            if not results['all_blocks_written']:
+                logger.error(
+                    f"  Not all blocks were written. Missing: {set(range(num_blocks)) - results['unique_written_blocks']}")
+            if results['duplicate_blocks']:
+                logger.error(f"  Duplicate writes detected for blocks: {results['duplicate_blocks']}")
             return False
         else:
             logger.info(f"Test passed")

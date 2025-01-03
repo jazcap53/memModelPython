@@ -440,3 +440,20 @@ def test_verify_page_crc(journal):
     # Test with incorrect CRC
     test_page.dat[-1] ^= 0xFF  # Flip bits in last byte
     assert journal.verify_page_crc((1, test_page)) is False
+
+
+@pytest.mark.parametrize("num_blocks, expected_purge_calls", [
+    (1, 1),
+    (15, 1),
+    (16, 2),
+    (17, 2),
+    (32, 3)
+])
+def test_buffer_management(num_blocks, expected_purge_calls):
+    results = check_buffer_management(num_blocks)
+
+    assert results[
+               'purge_calls'] == expected_purge_calls, f"Expected {expected_purge_calls} purges, got {results['purge_calls']}"
+    assert results[
+        'all_blocks_written'], f"Not all blocks were written. Missing: {set(range(num_blocks)) - results['unique_written_blocks']}"
+    assert not results['duplicate_blocks'], f"Duplicate writes detected for blocks: {results['duplicate_blocks']}"
