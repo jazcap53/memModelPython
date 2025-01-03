@@ -1052,11 +1052,16 @@ class Journal:
             pg = None
             self.pg_buf = [None] * self._journal.PAGE_BUFFER_SIZE  # Ensure buffer is reset
 
-            # Process all blocks except the last one
-            for i in range(len(blocks) - 1):
+            # Process all blocks
+            for i in range(len(blocks)):
                 blk_num, changes = blocks[i]
                 logger.debug(f"Processing block {blk_num} with {len(changes)} changes")
                 prev_blk_num, pg = self._process_block(changes, prev_blk_num, pg)
+
+                # If this is the second-to-last block, add it to the buffer
+                if i == len(blocks) - 2:
+                    current_count = self.count_buffer_items()
+                    self.pg_buf[current_count] = (prev_blk_num, pg)
 
             # Handle the last block separately
             if blocks:
@@ -1066,8 +1071,6 @@ class Journal:
 
             # Make sure buffer is completely cleared
             self.pg_buf = [None] * self._journal.PAGE_BUFFER_SIZE
-            if True:  # TODO: REMOVE THESE TWO LINES
-                pass
 
         def _process_block(self, changes: List[Change], prev_block_num: bNum_t, prev_page: Page) -> Tuple[bNum_t, Page]:
             """Process a block of changes."""
