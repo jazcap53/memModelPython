@@ -1193,30 +1193,53 @@ class Journal:
 
             return current_block_num, current_page
 
-        # Updated _process_last_block():
         def _process_last_block(self, cg: Change, curr_blk_num: bNum_t):
+            """Process the final block in a series of changes.
+
+            Args:
+                cg: The Change object containing modifications
+                curr_blk_num: The block number being processed
+            """
             logger.debug(f"Processing block {curr_blk_num} with 1 changes")
             logger.debug(f"Processing last block {curr_blk_num}")
 
             # Seek and read the last block
             disk_stream = self._journal.sim_disk.get_ds()
-            disk_stream.seek(curr_blk_num * u32Const.BLOCK_BYTES.value)
+            seek_pos = curr_blk_num * u32Const.BLOCK_BYTES.value
+            disk_stream.seek(seek_pos)
             pg = Page()
             pg.dat = bytearray(disk_stream.read(u32Const.BLOCK_BYTES.value))
 
             # Write change to page
             self.wrt_cg_to_pg(cg, pg)
 
-            # Add to buffer and purge
-            pre_add_count = self.count_buffer_items()
-            self.pg_buf[pre_add_count] = (curr_blk_num, pg)
-            post_add_count = self.count_buffer_items()
+            # Check buffer state before adding new item
+            current_count = self.count_buffer_items()
+            assert current_count <= self._journal.PAGE_BUFFER_SIZE, (
+                f"Buffer overflow: {current_count} items in size "
+                f"{self._journal.PAGE_BUFFER_SIZE} buffer"
+            )
 
-            assert post_add_count == pre_add_count + 1, f"Buffer count mismatch: pre={pre_add_count}, post={post_add_count}"
+            # Write to disk if buffer is full
+            if current_count == self._journal.PAGE_BUFFER_SIZE:
+                # Write current buffer to disk
+                self.write_buffer_to_disk(False)
+                # Reset buffer
+                self.pg_buf = [None] * self._journal.PAGE_BUFFER_SIZE
+                current_count = 0
 
+            # Add to buffer
+            self.pg_buf[current_count] = (curr_blk_num, pg)
+            new_count = self.count_buffer_items()
+
+            assert new_count == current_count + 1, (
+                f"Buffer count mismatch: pre={current_count}, post={new_count}"
+            )
+
+            # Write final buffer to disk
             self.write_buffer_to_disk(True)  # End of processing
 
-            # Clear the buffer after final purge
+            # Clear the buffer
             self.pg_buf = [None] * self._journal.PAGE_BUFFER_SIZE
 
         def count_buffer_items(self) -> int:
