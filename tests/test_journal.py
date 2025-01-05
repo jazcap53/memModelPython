@@ -9,6 +9,10 @@ from myMemory import Page
 from ajCrc import AJZlibCRC
 import struct
 import logging
+from status import Status
+from simDisk import SimDisk
+from change import Change, ChangeLog
+from crashChk import CrashChk
 
 
 logger = logging.getLogger(__name__)
@@ -450,10 +454,8 @@ def test_verify_page_crc(journal):
     (32, 3)
 ])
 def test_buffer_management(num_blocks, expected_purge_calls):
-    results = check_buffer_management(num_blocks)
+    results = Journal.check_buffer_management(num_blocks)
 
-    assert results[
-               'purge_calls'] == expected_purge_calls, f"Expected {expected_purge_calls} purges, got {results['purge_calls']}"
-    assert results[
-        'all_blocks_written'], f"Not all blocks were written. Missing: {set(range(num_blocks)) - results['unique_written_blocks']}"
+    assert results['purge_calls'] == expected_purge_calls, f"Expected {expected_purge_calls} purges, got {results['purge_calls']}"
+    assert results['all_blocks_written'], f"Not all blocks were written. Missing: {set(range(num_blocks)) - results['unique_written_blocks']}"
     assert not results['duplicate_blocks'], f"Duplicate writes detected for blocks: {results['duplicate_blocks']}"

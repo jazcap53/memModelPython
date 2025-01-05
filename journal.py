@@ -26,6 +26,9 @@ from myMemory import Page
 import os
 from contextlib import contextmanager
 from logging_config import get_logger
+# from status import Status
+# from simDisk import SimDisk
+# from crashChk import CrashChk
 
 
 logger = get_logger(__name__)
@@ -466,6 +469,91 @@ class Journal:
     def verify_page_crc(self, page_tuple: Tuple[bNum_t, Page]) -> bool:
         """Verify the CRC of a page. Public interface for CRC checking."""
         return self._file_io._crc_check_pg(page_tuple)
+
+    @classmethod
+    def check_buffer_management(cls, num_blocks, test_sw=True):
+        """Test buffer management with a specified number of blocks."""
+        from simDisk import SimDisk
+        from status import Status
+        from crashChk import CrashChk
+
+        # Setup - provide all required filenames
+        disk_file = f"buffer_mgmt_disk_{num_blocks}.bin"
+        journal_file = f"buffer_mgmt_journal_{num_blocks}.bin"
+        free_list_file = f"buffer_mgmt_free_{num_blocks}.bin"
+        inode_file = f"buffer_mgmt_inode_{num_blocks}.bin"
+        status_file = f"buffer_mgmt_status_{num_blocks}.txt"
+
+        # List to track written blocks
+        written_blocks = []
+
+        try:
+            # Clean up any existing files
+            for file in [disk_file, journal_file, free_list_file, inode_file, status_file]:
+                if os.path.exists(file):
+                    os.remove(file)
+
+            # Create instances
+            status = Status(status_file)
+            sim_disk = SimDisk(status, disk_file, journal_file, free_list_file, inode_file)
+            change_log = ChangeLog(test_sw=test_sw)
+            crash_chk = CrashChk()
+
+            journal = cls(journal_file, sim_disk, change_log, status, crash_chk)
+
+            # Create a counter for purge calls
+            purge_count = 0
+            original_write_buffer = journal._change_log_handler.write_buffer_to_disk
+
+            def counting_write_buffer(*args, **kwargs):
+                nonlocal purge_count
+                purge_count += 1
+                return original_write_buffer(*args, **kwargs)
+
+            journal._change_log_handler.write_buffer_to_disk = counting_write_buffer
+
+            # Mock write_block_to_disk to track written blocks
+            original_write_block = journal.write_block_to_disk
+
+            def tracking_write_block(block_num, page):
+                written_blocks.append(block_num)
+                return original_write_block(block_num, page)
+
+            journal.write_block_to_disk = tracking_write_block
+
+            # Create changes for all blocks
+            for i in range(num_blocks):
+                change = Change(i)
+                change.add_line(0, b'A' * u32Const.BYTES_PER_LINE.value)
+                change_log.add_to_log(change)
+
+            # Process all changes
+            journal._change_log_handler.process_changes(change_log)
+
+            # Analyze results
+            unique_written_blocks = set(written_blocks)
+            duplicate_blocks = [b for b in written_blocks if written_blocks.count(b) > 1]
+
+            return {
+                'purge_calls': purge_count,
+                'written_blocks': written_blocks,
+                'unique_written_blocks': unique_written_blocks,
+                'duplicate_blocks': duplicate_blocks,
+                'all_blocks_written': set(range(num_blocks)).issubset(unique_written_blocks)
+            }
+
+        except Exception as e:
+            logger.error(f"Error in check_buffer_management: {e}")
+            raise
+
+        finally:
+            # Clean up files
+            for file in [disk_file, journal_file, free_list_file, inode_file, status_file]:
+                if os.path.exists(file):
+                    try:
+                        os.remove(file)
+                    except Exception as e:
+                        logger.error(f"Failed to remove file {file}: {e}")
 
 
     class _Metadata:
@@ -1204,85 +1292,6 @@ if __name__ == "__main__":
     logger = get_logger(__name__)
 
 
-    def check_buffer_management(num_blocks):
-        # Setup - provide all required filenames
-        disk_file = f"buffer_mgmt_disk_{num_blocks}.bin"
-        journal_file = f"buffer_mgmt_journal_{num_blocks}.bin"
-        free_list_file = f"buffer_mgmt_free_{num_blocks}.bin"
-        inode_file = f"buffer_mgmt_inode_{num_blocks}.bin"
-        status_file = f"buffer_mgmt_status_{num_blocks}.txt"
-
-        # List to track written blocks
-        written_blocks = []
-
-        # Mock the disk write operation
-        def mock_write_block(block_num, page):
-            written_blocks.append(block_num)
-            return True
-
-        try:
-            # Clean up any existing files
-            for file in [disk_file, journal_file, free_list_file, inode_file, status_file]:
-                if os.path.exists(file):
-                    os.remove(file)
-
-            # Create instances
-            status = Status(status_file)
-            sim_disk = SimDisk(status, disk_file, journal_file, free_list_file, inode_file)
-            change_log = ChangeLog(test_sw=True)
-            crash_chk = CrashChk()
-
-            journal = Journal(journal_file, sim_disk, change_log, status, crash_chk)
-
-            # Mock write_block_to_disk
-            journal.write_block_to_disk = mock_write_block
-
-            # Create a counter for purge calls
-            purge_count = 0
-            original_empty_purge = journal._change_log_handler.write_buffer_to_disk
-
-            def counting_empty_purge(*args, **kwargs):
-                nonlocal purge_count
-                purge_count += 1
-                return original_empty_purge(*args, **kwargs)
-
-            journal._change_log_handler.write_buffer_to_disk = counting_empty_purge
-
-            # Create changes for all blocks
-            for i in range(num_blocks):
-                change = Change(i)
-                change.add_line(0, b'A' * u32Const.BYTES_PER_LINE.value)
-                change_log.add_to_log(change)
-
-            # Process all changes
-            journal._change_log_handler.process_changes(change_log)
-
-            # Analyze results
-            unique_written_blocks = set(written_blocks)
-            duplicate_blocks = [b for b in written_blocks if written_blocks.count(b) > 1]
-
-            return {
-                'purge_calls': purge_count,
-                'written_blocks': written_blocks,
-                'unique_written_blocks': unique_written_blocks,
-                'duplicate_blocks': duplicate_blocks,
-                'all_blocks_written': set(range(num_blocks)).issubset(unique_written_blocks)
-            }
-
-        except Exception as e:
-            logger.error(f"Error in check_buffer_management: {e}")
-            raise
-
-        finally:
-            # Clean up files
-            for file in [disk_file, journal_file, free_list_file, inode_file, status_file]:
-                if os.path.exists(file):
-                    try:
-                        os.remove(file)
-                    except Exception as e:
-                        logger.error(f"Failed to remove file {file}: {e}")
-
-
     # Test cases and their expected values
     test_cases = [
         (1, 1),  # (num_blocks, expected_purge_calls)
@@ -1296,7 +1305,7 @@ if __name__ == "__main__":
     def run_test(test_index):
         num_blocks, expected_purge_calls = test_cases[test_index]
         logger.info(f"\nRunning test case {test_index}: {num_blocks} blocks")
-        results = check_buffer_management(num_blocks)
+        results = Journal.check_buffer_management(num_blocks)
 
         logger.info(f"Results for {num_blocks} blocks:")
         logger.info(f"  Purge calls - Expected: {expected_purge_calls}, Got: {results['purge_calls']}")
