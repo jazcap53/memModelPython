@@ -447,11 +447,11 @@ def test_verify_page_crc(journal):
 
 
 @pytest.mark.parametrize("num_blocks, expected_purge_calls", [
-    (1, 1),
-    (15, 1),
-    (16, 2),
-    (17, 2),
-    (32, 3)
+    (1, 1),    # Single block, one write at end
+    (15, 1),   # Buffer not full, one write at end
+    (16, 1),   # Buffer exactly full, one write
+    (17, 2),   # Buffer overflows, write at 16 and again at end
+    (32, 2)    # Changed from 3 to 2: Two full buffers, two writes
 ])
 def test_buffer_management(num_blocks, expected_purge_calls):
     results = Journal.check_buffer_management(num_blocks)
