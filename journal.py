@@ -1161,9 +1161,18 @@ class Journal:
             self.pg_buf = [None] * self._journal.PAGE_BUFFER_SIZE
 
         def _process_block(self, changes: List[Change], prev_block_num: bNum_t, prev_page: Page) -> Tuple[bNum_t, Page]:
-            """Process a block of changes."""
-            current_block_num = prev_block_num  # Start with previous block number
-            current_page = prev_page  # Start with previous page
+            """Process a block of changes.
+
+            Args:
+                changes: List of changes to apply
+                prev_block_num: The block number we processed last
+                prev_page: The page from the previous block, if any
+
+            Returns:
+                Tuple of (current block number, current page)
+            """
+            current_block_num = prev_block_num
+            current_page = prev_page
 
             for change in changes:
                 if change.block_num != current_block_num:
@@ -1171,12 +1180,12 @@ class Journal:
                     if current_block_num != SENTINEL_INUM:
                         # Add the completed page to the buffer
                         current_count = self.count_buffer_items()
-                        assert current_count <= self._journal.PAGE_BUFFER_SIZE - 1, f"Buffer overflow: {current_count}"
 
-                        if current_count == self._journal.PAGE_BUFFER_SIZE - 1:
-                            logger.debug(f"Buffer full ({current_count}), purging")
+                        # Only write to disk when buffer is completely full
+                        if current_count == self._journal.PAGE_BUFFER_SIZE:  # Changed from PAGE_BUFFER_SIZE - 1
+                            logger.debug(f"Buffer full ({current_count}), writing to disk")
                             self.write_buffer_to_disk(False)  # Not the end of processing
-                            current_count = 0  # Reset after purge
+                            current_count = 0  # Reset counter after write
 
                         self.pg_buf[current_count] = (current_block_num, current_page)
 
