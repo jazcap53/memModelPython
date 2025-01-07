@@ -455,16 +455,16 @@ def create_multiline_change(block_num):
         change.add_line(i, b'A' * u32Const.BYTES_PER_LINE.value)
     return change
 
-@pytest.mark.parametrize("change_dict, expected_writes", [
-    pytest.param({}, 0, id="empty_changelog"),
-    pytest.param({0: []}, 0, id="block_with_empty_changes"),
-    pytest.param({0: [Change(0), Change(0)]}, 1, id="multiple_changes_same_block"),
-    pytest.param({0: [Change(0)], 2: [Change(2)], 1: [Change(1)]}, 1, id="non_sequential_blocks"),
-    pytest.param({0: [Change(0)], 5: [Change(5)]}, 1, id="blocks_with_gaps"),
-    pytest.param({0: [create_multiline_change(0)]}, 1, id="multiline_change"),
-    pytest.param({i: [Change(i)] for i in range(Journal.PAGE_BUFFER_SIZE + 1)}, 2, id="partial_buffer_write")
+@pytest.mark.parametrize("change_dict, expected_writes, expect_processing", [
+    pytest.param({}, 0, False, id="empty_changelog"),
+    pytest.param({0: []}, 0, False, id="block_with_empty_changes"),
+    pytest.param({0: [Change(0), Change(0)]}, 1, True, id="multiple_changes_same_block"),
+    pytest.param({0: [Change(0)], 2: [Change(2)], 1: [Change(1)]}, 1, True, id="non_sequential_blocks"),
+    pytest.param({0: [Change(0)], 5: [Change(5)]}, 1, True, id="blocks_with_gaps"),
+    pytest.param({0: [create_multiline_change(0)]}, 1, True, id="multiline_change"),
+    pytest.param({i: [Change(i)] for i in range(Journal.PAGE_BUFFER_SIZE + 1)}, 2, True, id="partial_buffer_write")
 ])
-def test_process_changes_edge_cases(journal, mocker, change_dict, expected_writes):
+def test_process_changes_edge_cases(journal, mocker, change_dict, expected_writes, expect_processing):
     """Test edge cases for ChangeLogHandler.process_changes."""
     # Mock disk operations
     mock_disk = mocker.patch.object(journal.sim_disk, 'get_ds')
@@ -487,8 +487,11 @@ def test_process_changes_edge_cases(journal, mocker, change_dict, expected_write
         block_num = call_args[0][0] // u32Const.BLOCK_BYTES.value
         processed_blocks.add(block_num)
 
-    expected_blocks = set(change_dict.keys())
-    assert processed_blocks == expected_blocks
+    if expect_processing:
+        expected_blocks = {k for k, v in change_dict.items() if v}
+        assert processed_blocks == expected_blocks
+    else:
+        assert not processed_blocks
 
     # Verify buffer state
     buffer_items = [item for item in journal._change_log_handler.pg_buf if item is not None]

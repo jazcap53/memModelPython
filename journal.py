@@ -1131,10 +1131,16 @@ class Journal:
                 logger.debug("Change log is empty, nothing to process")
                 return
 
-            blocks = list(j_cg_log.the_log.items())
+            # Filter out blocks with empty change lists
+            blocks = [(blk_num, changes) for blk_num, changes in j_cg_log.the_log.items() if changes]
+
+            if not blocks:
+                logger.debug("No non-empty change lists, nothing to process")
+                return
+
             prev_blk_num = SENTINEL_INUM
             pg = None
-            self.pg_buf = [None] * self._journal.PAGE_BUFFER_SIZE  # Ensure buffer is reset
+            self.pg_buf = [None] * self._journal.PAGE_BUFFER_SIZE
 
             # Process all blocks except the last one
             for i in range(len(blocks) - 1):
