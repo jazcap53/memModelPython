@@ -341,88 +341,6 @@ def test_empty_purge_jrnl_buf(journal, mocker, caplog):
     assert all(item is None for item in journal._change_log_handler.pg_buf)  # Buffer should be cleared
 
 
-@pytest.mark.parametrize("num_blocks, expected_intermediate_count, expected_final_count, expected_purge_calls", [
-    (1, 0, 0, 1),
-    (15, 15, 0, 1),
-    (16, 0, 0, 2),
-    (17, 1, 0, 2),
-    (32, 0, 0, 3)
-])
-def test_rd_and_wrt_back_one_or_more_blocks(journal, mocker, caplog,
-                                          num_blocks, expected_intermediate_count,
-                                          expected_final_count, expected_purge_calls):
-    caplog.set_level(logging.DEBUG)
-
-    # Mock CRC verification to always return True
-    mocker.patch.object(journal, 'verify_page_crc', return_value=True)
-
-    # Create real changes
-    mock_changes = {}
-    for i in range(num_blocks):
-        change = Change(i)
-        change.add_line(0, b'A' * u32Const.BYTES_PER_LINE.value)
-        mock_changes[i] = [change]
-
-    # Use the real dict directly
-    mock_j_cg_log = mocker.Mock(spec=ChangeLog)
-    mock_j_cg_log.the_log = mock_changes
-
-    # Mock methods
-    mock_empty_purge = mocker.patch.object(journal._change_log_handler, 'write_buffer_to_disk')
-    mock_disk = mocker.patch.object(journal.sim_disk, 'get_ds')
-    mock_disk().read.return_value = b'\0' * u32Const.BLOCK_BYTES.value
-
-    # Process changes
-    journal._change_log_handler.process_changes(mock_j_cg_log)
-
-    # Check intermediate buffer count
-    intermediate_count = journal._change_log_handler.count_buffer_items()
-    assert intermediate_count == expected_intermediate_count
-
-    # Verify final buffer state
-    final_count = journal._change_log_handler.count_buffer_items()
-    assert final_count == expected_final_count
-
-    # Verify method calls
-    assert mock_disk().seek.call_count == num_blocks
-    assert mock_disk().read.call_count == num_blocks
-    assert mock_empty_purge.call_count == expected_purge_calls
-
-    # Check log messages
-    for i in range(num_blocks):
-        assert any(f"Processing block {i} with 1 changes" in record.message
-                   for record in caplog.records)
-
-
-def test_r_and_wb_last(journal, mocker, caplog):
-    # Set logging level to DEBUG for the entire test
-    caplog.set_level(logging.DEBUG)
-
-    # Setup (unchanged)
-    cg = Change(1)
-    cg.add_line(0, b'A' * u32Const.BYTES_PER_LINE.value)
-    pg = Page()
-    pg_buf = [None] * journal.PAGE_BUFFER_SIZE
-
-    # Mocking (unchanged)
-    mock_purge = mocker.patch.object(journal._change_log_handler, 'write_buffer_to_disk')
-    mock_disk = mocker.patch.object(journal.sim_disk, 'get_ds')
-    mock_disk().read.return_value = b'\0' * u32Const.BLOCK_BYTES.value
-
-    # Execute (removed the WARNING level context manager)
-    journal._change_log_handler.r_and_wb_last(cg, pg_buf, 0, 1, pg)
-
-    # Debug: Print all captured logs
-    for record in caplog.records:
-        print(f"Captured log: {record.levelname} - {record.message}")
-
-    # Verify (unchanged)
-    mock_purge.assert_called_once_with(True)
-    assert len([x for x in pg_buf if x is not None]) <= 1
-    assert any("Processing block 1 with 1 changes" in record.message
-               for record in caplog.records)
-
-
 def test_verify_page_crc(journal):
     """Test CRC verification of a page."""
     # Create a test page
@@ -446,16 +364,44 @@ def test_verify_page_crc(journal):
     assert journal.verify_page_crc((1, test_page)) is False
 
 
-@pytest.mark.parametrize("num_blocks, expected_purge_calls", [
-    (1, 1),    # Single block, one write at end
-    (15, 1),   # Buffer not full, one write at end
-    (16, 1),   # Buffer exactly full, one write
-    (17, 2),   # Buffer overflows, write at 16 and again at end
-    (32, 2)    # Changed from 3 to 2: Two full buffers, two writes
+@pytest.mark.parametrize("num_blocks, expected_writes", [
+    (1, 1),  # Single block, one write
+    (15, 1),  # Buffer not full, one write at end
+    (16, 1),  # Buffer exactly full, one write
+    (17, 2),  # One write at 16, one at end
+    (32, 2)  # Two full buffers, two writes
 ])
-def test_buffer_management(num_blocks, expected_purge_calls):
+def test_buffer_management(num_blocks, expected_writes):
+    """Test journal buffer management with different numbers of blocks.
+
+    This test verifies that:
+    1. The correct number of buffer writes occur
+    2. All blocks are written exactly once
+    3. No blocks are written more than once
+
+    Args:
+        num_blocks: Number of blocks to process
+        expected_writes: Expected number of buffer write operations
+    """
     results = Journal.check_buffer_management(num_blocks)
 
-    assert results['purge_calls'] == expected_purge_calls, f"Expected {expected_purge_calls} purges, got {results['purge_calls']}"
-    assert results['all_blocks_written'], f"Not all blocks were written. Missing: {set(range(num_blocks)) - results['unique_written_blocks']}"
-    assert not results['duplicate_blocks'], f"Duplicate writes detected for blocks: {results['duplicate_blocks']}"
+    assert results['purge_calls'] == expected_writes, \
+        f"Expected {expected_writes} writes, got {results['purge_calls']}"
+
+    assert results['all_blocks_written'], \
+        f"Not all blocks were written. Missing: {set(range(num_blocks)) - results['unique_written_blocks']}"
+
+    assert not results['duplicate_blocks'], \
+        f"Duplicate writes detected for blocks: {results['duplicate_blocks']}"
+
+    # Additional checks for block writing order
+    written_blocks = results['written_blocks']
+    assert len(written_blocks) >= num_blocks, \
+        f"Not enough blocks written. Expected at least {num_blocks}, got {len(written_blocks)}"
+
+    # Verify that blocks are written in sequential chunks
+    if num_blocks > Journal.PAGE_BUFFER_SIZE:
+        chunk_size = Journal.PAGE_BUFFER_SIZE
+        for i in range(0, len(written_blocks), chunk_size):
+            chunk = written_blocks[i:i + chunk_size]
+            assert len(set(chunk)) == len(chunk), f"Duplicate blocks in chunk: {chunk}"

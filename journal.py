@@ -26,9 +26,6 @@ from myMemory import Page
 import os
 from contextlib import contextmanager
 from logging_config import get_logger
-# from status import Status
-# from simDisk import SimDisk
-# from crashChk import CrashChk
 
 
 logger = get_logger(__name__)
@@ -1295,81 +1292,16 @@ class Journal:
 
 
 if __name__ == "__main__":
-    import os
     import sys
-    import logging
-    import logging.config
-    from logging_config import setup_logging
-    from status import Status
-    from simDisk import SimDisk
-    from change import Change, ChangeLog
-    from crashChk import CrashChk
-    from ajTypes import u32Const
 
-    # Setup logging
-    setup_logging(logging.DEBUG)
-    logger = get_logger(__name__)
+    print("Notice: The journal buffer management tests have been moved to the pytest suite.")
+    print("To run these tests, please use one of the following commands:")
+    print("  pytest tests/test_journal.py                  # Run all journal tests")
+    print("  pytest tests/test_journal.py -k buffer        # Run only buffer management tests")
+    print("  pytest tests/test_journal.py -v               # Run all tests with verbose output")
 
+    if len(sys.argv) > 1:
+        print("\nNote: Command-line arguments for individual test cases are no longer supported.")
+        print("Please use pytest's built-in filtering and selection options instead.")
 
-    # Test cases and their expected values
-    test_cases = [
-        (1, 1),  # (num_blocks, expected_purge_calls)
-        (15, 1),  # One less than buffer size
-        (16, 1),  # Full buffer: one purge during, one at end
-        (17, 2),  # One purge at full, one at end
-        (32, 2)  # Two full purges, one final
-    ]
-
-
-    def run_test(test_index):
-        num_blocks, expected_purge_calls = test_cases[test_index]
-        logger.info(f"\nRunning test case {test_index}: {num_blocks} blocks")
-        results = Journal.check_buffer_management(num_blocks)
-
-        logger.info(f"Results for {num_blocks} blocks:")
-        logger.info(f"  Purge calls - Expected: {expected_purge_calls}, Got: {results['purge_calls']}")
-        logger.info(f"  All blocks written: {results['all_blocks_written']}")
-        logger.info(f"  Duplicate blocks: {results['duplicate_blocks']}")
-        logger.info(f"  Written blocks: {results['written_blocks']}")
-
-        if (results['purge_calls'] != expected_purge_calls or
-                not results['all_blocks_written'] or
-                results['duplicate_blocks']):
-            logger.error(f"Test failed:")
-            if results['purge_calls'] != expected_purge_calls:
-                logger.error(
-                    f"  Purge calls mismatch - Expected: {expected_purge_calls}, Got: {results['purge_calls']}")
-            if not results['all_blocks_written']:
-                logger.error(
-                    f"  Not all blocks were written. Missing: {set(range(num_blocks)) - results['unique_written_blocks']}")
-            if results['duplicate_blocks']:
-                logger.error(f"  Duplicate writes detected for blocks: {results['duplicate_blocks']}")
-            return False
-        else:
-            logger.info(f"Test passed")
-            return True
-
-
-    # Parse command line argument
-    try:
-        if len(sys.argv) > 1:
-            test_index = int(sys.argv[1])
-            if 0 <= test_index < len(test_cases):
-                run_test(test_index)
-            else:
-                print(f"Error: Test index must be between 0 and {len(test_cases) - 1}")
-                sys.exit(1)
-        else:
-            # Run all tests
-            failed_tests = []
-            for i in range(len(test_cases)):
-                if not run_test(i):
-                    failed_tests.append(i)
-
-            if failed_tests:
-                logger.error(f"\nFailed tests: {failed_tests}")
-            else:
-                logger.info("\nAll tests passed!")
-    except ValueError:
-        print("Error: Test index must be an integer")
-        sys.exit(1)
+    sys.exit(0)
