@@ -1152,7 +1152,8 @@ class Journal:
             if blocks:
                 last_blk_num, last_changes = blocks[-1]
                 logger.debug(f"Processing last block {last_blk_num}")
-                self._process_last_block(last_changes[0], last_blk_num)
+                if last_changes:
+                    self._process_last_block(last_changes[0], last_blk_num)
 
             # Make sure buffer is completely cleared
             self.pg_buf = [None] * self._journal.PAGE_BUFFER_SIZE

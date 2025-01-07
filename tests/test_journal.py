@@ -448,77 +448,51 @@ def test_buffer_management(num_blocks, expected_writes, description):
         pytest.fail(f"{description}: Unexpected error: {str(e)}")
 
 
-def test_process_changes_edge_cases(journal, mocker):
+def create_multiline_change(block_num):
+    """Helper function to create a change with multiple lines."""
+    change = Change(block_num)
+    for i in range(3):  # Add 3 lines
+        change.add_line(i, b'A' * u32Const.BYTES_PER_LINE.value)
+    return change
+
+@pytest.mark.parametrize("change_dict, expected_writes", [
+    pytest.param({}, 0, id="empty_changelog"),
+    pytest.param({0: []}, 0, id="block_with_empty_changes"),
+    pytest.param({0: [Change(0), Change(0)]}, 1, id="multiple_changes_same_block"),
+    pytest.param({0: [Change(0)], 2: [Change(2)], 1: [Change(1)]}, 1, id="non_sequential_blocks"),
+    pytest.param({0: [Change(0)], 5: [Change(5)]}, 1, id="blocks_with_gaps"),
+    pytest.param({0: [create_multiline_change(0)]}, 1, id="multiline_change"),
+    pytest.param({i: [Change(i)] for i in range(Journal.PAGE_BUFFER_SIZE + 1)}, 2, id="partial_buffer_write")
+])
+def test_process_changes_edge_cases(journal, mocker, change_dict, expected_writes):
     """Test edge cases for ChangeLogHandler.process_changes."""
     # Mock disk operations
     mock_disk = mocker.patch.object(journal.sim_disk, 'get_ds')
     mock_disk().read.return_value = b'\0' * u32Const.BLOCK_BYTES.value
 
-    test_cases = [
-        pytest.param(
-            {},
-            0,
-            id="empty_changelog"
-        ),
-        pytest.param(
-            {0: []},
-            0,
-            id="block_with_empty_changes"
-        ),
-        pytest.param(
-            {0: [Change(0), Change(0)]},
-            1,
-            id="multiple_changes_same_block"
-        ),
-        pytest.param(
-            {0: [Change(0)], 2: [Change(2)], 1: [Change(1)]},
-            1,
-            id="non_sequential_blocks"
-        ),
-        pytest.param(
-            {0: [Change(0)], 5: [Change(5)]},
-            1,
-            id="blocks_with_gaps"
-        ),
-        pytest.param(
-            {0: [create_multiline_change(0)]},
-            1,
-            id="multiline_change"
-        ),
-        pytest.param(
-            {i: [Change(i)] for i in range(Journal.PAGE_BUFFER_SIZE + 1)},
-            2,
-            id="partial_buffer_write"
-        )
-    ]
+    # Setup
+    mock_write = mocker.patch.object(journal._change_log_handler, 'write_buffer_to_disk')
+    mock_cg_log = mocker.Mock(spec=ChangeLog)
+    mock_cg_log.the_log = change_dict
 
-    @pytest.mark.parametrize("change_dict, expected_writes", test_cases)
-    def run_test(change_dict, expected_writes):
-        # Setup
-        mock_write = mocker.patch.object(journal._change_log_handler, 'write_buffer_to_disk')
-        mock_cg_log = mocker.Mock(spec=ChangeLog)
-        mock_cg_log.the_log = change_dict
+    # Execute
+    journal._change_log_handler.process_changes(mock_cg_log)
 
-        # Execute
-        journal._change_log_handler.process_changes(mock_cg_log)
+    # Verify
+    assert mock_write.call_count == expected_writes
 
-        # Verify
-        assert mock_write.call_count == expected_writes
+    # Verify correct blocks were processed
+    processed_blocks = set()
+    for call_args in mock_disk().seek.call_args_list:
+        block_num = call_args[0][0] // u32Const.BLOCK_BYTES.value
+        processed_blocks.add(block_num)
 
-        # Verify correct blocks were processed
-        processed_blocks = set()
-        for call_args in mock_disk().seek.call_args_list:
-            block_num = call_args[0][0] // u32Const.BLOCK_BYTES.value
-            processed_blocks.add(block_num)
+    expected_blocks = set(change_dict.keys())
+    assert processed_blocks == expected_blocks
 
-        expected_blocks = set(change_dict.keys())
-        assert processed_blocks == expected_blocks
-
-        # Verify buffer state
-        buffer_items = [item for item in journal._change_log_handler.pg_buf if item is not None]
-        assert len(buffer_items) == 0  # Buffer should be empty after processing
-
-    run_test()
+    # Verify buffer state
+    buffer_items = [item for item in journal._change_log_handler.pg_buf if item is not None]
+    assert len(buffer_items) == 0  # Buffer should be empty after processing
 
 
 def create_multiline_change(block_num):
