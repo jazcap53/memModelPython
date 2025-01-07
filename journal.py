@@ -1131,6 +1131,11 @@ class Journal:
                 logger.debug("Change log is empty, nothing to process")
                 return
 
+            # Check for invalid block numbers before processing
+            for block_num in j_cg_log.the_log:
+                if block_num >= bNum_tConst.NUM_DISK_BLOCKS.value:
+                    raise ValueError(f"Invalid block number: {block_num}")
+
             # Filter out blocks with empty change lists
             blocks = [(blk_num, changes) for blk_num, changes in j_cg_log.the_log.items() if changes]
 

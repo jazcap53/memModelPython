@@ -519,11 +519,11 @@ def test_process_changes_error_handling(journal, mocker):
         journal._change_log_handler.process_changes(mock_cg_log)
 
 
-def test_process_changes_invalid_block(journal):
+def test_process_changes_invalid_block(journal, mocker):
     """Test handling of invalid block numbers."""
     invalid_block_num = bNum_tConst.NUM_DISK_BLOCKS.value + 1
     mock_cg_log = mocker.Mock(spec=ChangeLog)
     mock_cg_log.the_log = {invalid_block_num: [Change(invalid_block_num)]}
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=f"Invalid block number: {invalid_block_num}"):
         journal._change_log_handler.process_changes(mock_cg_log)
