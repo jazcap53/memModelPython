@@ -1136,116 +1136,74 @@ class Journal:
                 if block_num >= bNum_tConst.NUM_DISK_BLOCKS.value:
                     raise ValueError(f"Invalid block number: {block_num}")
 
-            # Filter out blocks with empty change lists
             blocks = [(blk_num, changes) for blk_num, changes in j_cg_log.the_log.items() if changes]
 
             if not blocks:
                 logger.debug("No non-empty change lists, nothing to process")
                 return
 
+            try:
+                self._process_main_blocks(blocks[:-1])
+                if blocks:
+                    self._process_last_block(blocks[-1][1][0], blocks[-1][0])
+            finally:
+                # Always clear the buffer
+                self.pg_buf = [None] * self._journal.PAGE_BUFFER_SIZE
+
+        def _process_main_blocks(self, blocks):
             prev_blk_num = SENTINEL_INUM
             pg = None
-            self.pg_buf = [None] * self._journal.PAGE_BUFFER_SIZE
 
-            # Process all blocks except the last one
-            for i in range(len(blocks) - 1):
-                blk_num, changes = blocks[i]
+            for blk_num, changes in blocks:
                 logger.debug(f"Processing block {blk_num} with {len(changes)} changes")
                 prev_blk_num, pg = self._process_block(changes, prev_blk_num, pg)
 
-                # After processing the second-to-last block, make sure it's in the buffer
-                if i == len(blocks) - 2:
-                    current_count = self.count_buffer_items()
-                    if current_count < self._journal.PAGE_BUFFER_SIZE:
-                        self.pg_buf[current_count] = (prev_blk_num, pg)
-
-            # Handle the last block separately
-            if blocks:
-                last_blk_num, last_changes = blocks[-1]
-                logger.debug(f"Processing last block {last_blk_num}")
-                if last_changes:
-                    self._process_last_block(last_changes[0], last_blk_num)
-
-            # Make sure buffer is completely cleared
-            self.pg_buf = [None] * self._journal.PAGE_BUFFER_SIZE
-
-        def _process_block(self, changes: List[Change], prev_block_num: bNum_t, prev_page: Page) -> Tuple[bNum_t, Page]:
-            """Process a block of changes.
-
-            Args:
-                changes: List of changes to apply
-                prev_block_num: The block number we processed last
-                prev_page: The page from the previous block, if any
-
-            Returns:
-                Tuple of (current block number, current page)
-            """
-            current_block_num = prev_block_num
+        def _process_block(self, changes, prev_blk_num, prev_page):
+            """Process a block's changes and handle CRC verification."""
+            current_block_num = prev_blk_num
             current_page = prev_page
 
             for change in changes:
                 if change.block_num != current_block_num:
-                    # We've moved to a new block
                     if current_block_num != SENTINEL_INUM:
-                        # Add the completed page to the buffer
-                        current_count = self.count_buffer_items()
+                        # Verify CRC before adding to buffer
+                        if not self._journal.verify_page_crc((current_block_num, current_page)):
+                            raise ValueError("CRC verification failed")
+                        self._add_to_buffer(current_block_num, current_page)
 
-                        # Only write to disk when buffer is completely full
-                        if current_count == self._journal.PAGE_BUFFER_SIZE:  # Changed from PAGE_BUFFER_SIZE - 1
-                            logger.debug(f"Buffer full ({current_count}), writing to disk")
-                            self.write_buffer_to_disk(False)  # Not the end of processing
-                            current_count = 0  # Reset counter after write
-
-                        self.pg_buf[current_count] = (current_block_num, current_page)
-
-                    # Prepare new page for new block
-                    current_block_num = change.block_num
+                    block_num = change.block_num
                     disk_stream = self._journal.sim_disk.get_ds()
-                    disk_stream.seek(current_block_num * u32Const.BLOCK_BYTES.value, 0)
+                    disk_stream.seek(block_num * u32Const.BLOCK_BYTES.value)
                     current_page = Page()
                     current_page.dat = bytearray(disk_stream.read(u32Const.BLOCK_BYTES.value))
+                    current_block_num = block_num
 
-                # Apply change to current page
                 self.wrt_cg_to_pg(change, current_page)
 
             return current_block_num, current_page
 
-        def _process_last_block(self, cg: Change, curr_blk_num: bNum_t):
-            """Process the final block in a series of changes."""
-            logger.debug(f"Processing last block {curr_blk_num}")
+        def _process_last_block(self, change, block_num):
+            """Process the final block and handle CRC verification."""
+            logger.debug(f"Processing last block {block_num}")
 
-            # Seek and read the last block
             disk_stream = self._journal.sim_disk.get_ds()
-            seek_pos = curr_blk_num * u32Const.BLOCK_BYTES.value
-            disk_stream.seek(seek_pos, 0)
-            pg = Page()
-            pg.dat = bytearray(disk_stream.read(u32Const.BLOCK_BYTES.value))
+            disk_stream.seek(block_num * u32Const.BLOCK_BYTES.value)
+            last_page = Page()
+            last_page.dat = bytearray(disk_stream.read(u32Const.BLOCK_BYTES.value))
 
-            # Write change to page
-            self.wrt_cg_to_pg(cg, pg)
+            self.wrt_cg_to_pg(change, last_page)
 
-            # Check buffer state before adding new item
+            # Verify CRC before final write
+            if not self._journal.verify_page_crc((block_num, last_page)):
+                raise ValueError("CRC verification failed")
+
             current_count = self.count_buffer_items()
-            assert current_count <= self._journal.PAGE_BUFFER_SIZE, (
-                f"Buffer overflow: {current_count} items in size "
-                f"{self._journal.PAGE_BUFFER_SIZE} buffer"
-            )
+            if current_count < self._journal.PAGE_BUFFER_SIZE:
+                self.pg_buf[current_count] = (block_num, last_page)
 
-            # Write to disk if buffer is full
-            if current_count == self._journal.PAGE_BUFFER_SIZE:
-                self.write_buffer_to_disk(False)  # Not final, just full
-                self.pg_buf = [None] * self._journal.PAGE_BUFFER_SIZE
-                current_count = 0
-
-            # Add to buffer
-            self.pg_buf[current_count] = (curr_blk_num, pg)
-
-            # Only write to disk again if there's actually data to write
+            # Write buffer to disk
             if any(item is not None for item in self.pg_buf):
-                self.write_buffer_to_disk(True)  # Final write
-
-            # Clear the buffer
-            self.pg_buf = [None] * self._journal.PAGE_BUFFER_SIZE
+                self.write_buffer_to_disk(True)
 
         def count_buffer_items(self) -> int:
             """Count non-None items in the buffer."""
