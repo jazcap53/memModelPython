@@ -364,44 +364,86 @@ def test_verify_page_crc(journal):
     assert journal.verify_page_crc((1, test_page)) is False
 
 
-@pytest.mark.parametrize("num_blocks, expected_writes", [
-    (1, 1),  # Single block, one write
-    (15, 1),  # Buffer not full, one write at end
-    (16, 1),  # Buffer exactly full, one write
-    (17, 2),  # One write at 16, one at end
-    (32, 2)  # Two full buffers, two writes
+@pytest.mark.parametrize("num_blocks, expected_writes, description", [
+    (0, 0, "Empty case - no blocks"),
+    (1, 1, "Single block"),
+    (15, 1, "One less than buffer size"),
+    (16, 1, "Exactly one buffer"),
+    (17, 2, "One more than buffer size"),
+    (31, 2, "One less than two buffers"),
+    (32, 2, "Exactly two buffers"),
+    (33, 3, "One more than two buffers"),
+    (Journal.PAGE_BUFFER_SIZE - 1, 1, "Buffer size minus 1"),
+    (Journal.PAGE_BUFFER_SIZE, 1, "Exact buffer size"),
+    (Journal.PAGE_BUFFER_SIZE + 1, 2, "Buffer size plus 1"),
+    (Journal.PAGE_BUFFER_SIZE * 2 - 1, 2, "Double buffer size minus 1"),
+    (Journal.PAGE_BUFFER_SIZE * 2, 2, "Double buffer size"),
+    (Journal.PAGE_BUFFER_SIZE * 2 + 1, 3, "Double buffer size plus 1"),
+    (bNum_tConst.NUM_DISK_BLOCKS.value - 1,
+     (bNum_tConst.NUM_DISK_BLOCKS.value - 1) // Journal.PAGE_BUFFER_SIZE + 1,
+     "One less than max blocks"),
+    (bNum_tConst.NUM_DISK_BLOCKS.value,
+     bNum_tConst.NUM_DISK_BLOCKS.value // Journal.PAGE_BUFFER_SIZE,
+     "Maximum number of blocks")
 ])
-def test_buffer_management(num_blocks, expected_writes):
-    """Test journal buffer management with different numbers of blocks.
+def test_buffer_management(num_blocks, expected_writes, description):
+    """Test journal buffer management with various edge cases.
 
-    This test verifies that:
-    1. The correct number of buffer writes occur
-    2. All blocks are written exactly once
-    3. No blocks are written more than once
+    This test verifies buffer management behavior for different numbers of blocks,
+    including edge cases and boundary conditions.
 
     Args:
         num_blocks: Number of blocks to process
         expected_writes: Expected number of buffer write operations
+        description: Description of the test case
     """
-    results = Journal.check_buffer_management(num_blocks)
+    try:
+        results = Journal.check_buffer_management(num_blocks)
 
-    assert results['purge_calls'] == expected_writes, \
-        f"Expected {expected_writes} writes, got {results['purge_calls']}"
+        # Core assertions
+        assert results['purge_calls'] == expected_writes, \
+            f"{description}: Expected {expected_writes} writes, got {results['purge_calls']}"
 
-    assert results['all_blocks_written'], \
-        f"Not all blocks were written. Missing: {set(range(num_blocks)) - results['unique_written_blocks']}"
+        if num_blocks > 0:
+            assert results['all_blocks_written'], \
+                f"{description}: Not all blocks written. Missing: {set(range(num_blocks)) - results['unique_written_blocks']}"
 
-    assert not results['duplicate_blocks'], \
-        f"Duplicate writes detected for blocks: {results['duplicate_blocks']}"
+        assert not results['duplicate_blocks'], \
+            f"{description}: Duplicate writes detected for blocks: {results['duplicate_blocks']}"
 
-    # Additional checks for block writing order
-    written_blocks = results['written_blocks']
-    assert len(written_blocks) >= num_blocks, \
-        f"Not enough blocks written. Expected at least {num_blocks}, got {len(written_blocks)}"
+        # Additional edge case verifications
+        written_blocks = results['written_blocks']
 
-    # Verify that blocks are written in sequential chunks
-    if num_blocks > Journal.PAGE_BUFFER_SIZE:
-        chunk_size = Journal.PAGE_BUFFER_SIZE
-        for i in range(0, len(written_blocks), chunk_size):
-            chunk = written_blocks[i:i + chunk_size]
-            assert len(set(chunk)) == len(chunk), f"Duplicate blocks in chunk: {chunk}"
+        # Verify total number of blocks written
+        assert len(results['unique_written_blocks']) == num_blocks, \
+            f"{description}: Wrong number of unique blocks written. Expected {num_blocks}, got {len(results['unique_written_blocks'])}"
+
+        # Verify buffer utilization
+        if num_blocks > 0:
+            full_buffers = num_blocks // Journal.PAGE_BUFFER_SIZE
+            remaining_blocks = num_blocks % Journal.PAGE_BUFFER_SIZE
+
+            # Check full buffer writes
+            for i in range(full_buffers):
+                buffer_chunk = written_blocks[i * Journal.PAGE_BUFFER_SIZE:(i + 1) * Journal.PAGE_BUFFER_SIZE]
+                assert len(buffer_chunk) == Journal.PAGE_BUFFER_SIZE, \
+                    f"{description}: Incomplete buffer write for buffer {i}"
+                assert len(set(buffer_chunk)) == Journal.PAGE_BUFFER_SIZE, \
+                    f"{description}: Duplicate blocks in full buffer {i}"
+
+            # Check partial buffer write if applicable
+            if remaining_blocks > 0:
+                last_chunk = written_blocks[full_buffers * Journal.PAGE_BUFFER_SIZE:]
+                assert len(last_chunk) == remaining_blocks, \
+                    f"{description}: Wrong number of blocks in final partial buffer"
+                assert len(set(last_chunk)) == remaining_blocks, \
+                    f"{description}: Duplicate blocks in final partial buffer"
+
+        # Verify block order
+        for i in range(len(written_blocks)):
+            assert written_blocks[i] < bNum_tConst.NUM_DISK_BLOCKS.value, \
+                f"{description}: Block number {written_blocks[i]} exceeds maximum"
+
+    except Exception as e:
+        pytest.fail(f"{description}: Unexpected error: {str(e)}")
+        
