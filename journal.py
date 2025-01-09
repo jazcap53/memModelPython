@@ -873,6 +873,53 @@ class Journal:
             self.pg_buf: List[Optional[Tuple[int, Page]]] = [None] * journal_instance.PAGE_BUFFER_SIZE  # Make this an instance attribute
             # self.intermediate_buf_count = 0  # Also make this an instance attribute
 
+        def _handle_block_transition(self, block_num: bNum_t, page: Page):
+            """Handle transition between blocks during change processing.
+
+            Args:
+                block_num: The current block number.
+                page: The current page object.
+            """
+            if block_num != SENTINEL_INUM:
+                self._add_to_buffer(block_num, page)
+
+        def _read_new_block(self, block_num: bNum_t) -> Tuple[bNum_t, Page]:
+            """Read a new block from disk.
+
+            Args:
+                block_num: The block number to read.
+
+            Returns:
+                A tuple containing the block number and the read Page object.
+            """
+            disk_stream = self._journal.sim_disk.get_ds()
+            disk_stream.seek(block_num * u32Const.BLOCK_BYTES.value, 0)
+            page = Page()
+            page.dat = bytearray(disk_stream.read(u32Const.BLOCK_BYTES.value))
+            return block_num, page
+
+        def _apply_change_to_page(self, change: Change, page: Page):
+            """Apply a single change to a page.
+
+            Args:
+                change: The Change object to apply.
+                page: The Page object to modify.
+            """
+            self.wrt_cg_to_pg(change, page)
+
+        def _add_to_buffer(self, block_num: bNum_t, page: Page):
+            """Add a block to the buffer, writing to disk if the buffer is full.
+
+            Args:
+                block_num: The block number to add.
+                page: The Page object to add.
+            """
+            current_count = self.count_buffer_items()
+            if current_count == self._journal.PAGE_BUFFER_SIZE:
+                self.write_buffer_to_disk(False)
+                current_count = 0
+            self.pg_buf[current_count] = (block_num, page)
+
         def get_num_data_lines(self, r_cg: Change) -> int:
             """Calculate the number of data lines in a change."""
             num_data_lines = 0
@@ -1127,6 +1174,11 @@ class Journal:
                          f"size: {self._journal._metadata.meta_sz}")
 
         def process_changes(self, j_cg_log: ChangeLog):
+            """Process all changes in the change log.
+
+            Args:
+                j_cg_log: The ChangeLog object containing changes to process.
+            """
             if not j_cg_log.the_log:
                 logger.debug("Change log is empty, nothing to process")
                 return
@@ -1143,70 +1195,42 @@ class Journal:
                 logger.debug("No non-empty change lists, nothing to process")
                 return
 
-            prev_blk_num = SENTINEL_INUM
-            pg = None
-            self.pg_buf = [None] * self._journal.PAGE_BUFFER_SIZE
+            prev_block_num = SENTINEL_INUM
+            current_page = None
 
-            # Process all blocks except the last one
-            for i in range(len(blocks) - 1):
-                blk_num, changes = blocks[i]
-                logger.debug(f"Processing block {blk_num} with {len(changes)} changes")
-                prev_blk_num, pg = self._process_block(changes, prev_blk_num, pg)
+            for blk_num, changes in blocks:
+                prev_block_num, current_page = self._process_block(changes, prev_block_num, current_page)
 
-                # After processing the second-to-last block, make sure it's in the buffer
-                if i == len(blocks) - 2:
-                    current_count = self.count_buffer_items()
-                    if current_count < self._journal.PAGE_BUFFER_SIZE:
-                        self.pg_buf[current_count] = (prev_blk_num, pg)
+            # Handle the last processed block
+            if prev_block_num != SENTINEL_INUM:
+                self._add_to_buffer(prev_block_num, current_page)
 
-            # Handle the last block separately
-            if blocks:
-                last_blk_num, last_changes = blocks[-1]
-                logger.debug(f"Processing last block {last_blk_num}")
-                if last_changes:
-                    self._process_last_block(last_changes[0], last_blk_num)
+            # Final write to disk
+            self.write_buffer_to_disk(True)
 
-            # Make sure buffer is completely cleared
+            # Clear the buffer
             self.pg_buf = [None] * self._journal.PAGE_BUFFER_SIZE
 
         def _process_block(self, changes: List[Change], prev_block_num: bNum_t, prev_page: Page) -> Tuple[bNum_t, Page]:
-            """Process a block of changes.
+            """Process a list of changes for a block.
 
             Args:
-                changes: List of changes to apply
-                prev_block_num: The block number we processed last
-                prev_page: The page from the previous block, if any
+                changes: List of Change objects to process.
+                prev_block_num: The previous block number.
+                prev_page: The previous Page object.
 
             Returns:
-                Tuple of (current block number, current page)
+                A tuple containing the current block number and Page object.
             """
             current_block_num = prev_block_num
             current_page = prev_page
 
             for change in changes:
                 if change.block_num != current_block_num:
-                    # We've moved to a new block
-                    if current_block_num != SENTINEL_INUM:
-                        # Add the completed page to the buffer
-                        current_count = self.count_buffer_items()
+                    self._handle_block_transition(current_block_num, current_page)
+                    current_block_num, current_page = self._read_new_block(change.block_num)
 
-                        # Only write to disk when buffer is completely full
-                        if current_count == self._journal.PAGE_BUFFER_SIZE:  # Changed from PAGE_BUFFER_SIZE - 1
-                            logger.debug(f"Buffer full ({current_count}), writing to disk")
-                            self.write_buffer_to_disk(False)  # Not the end of processing
-                            current_count = 0  # Reset counter after write
-
-                        self.pg_buf[current_count] = (current_block_num, current_page)
-
-                    # Prepare new page for new block
-                    current_block_num = change.block_num
-                    disk_stream = self._journal.sim_disk.get_ds()
-                    disk_stream.seek(current_block_num * u32Const.BLOCK_BYTES.value, 0)
-                    current_page = Page()
-                    current_page.dat = bytearray(disk_stream.read(u32Const.BLOCK_BYTES.value))
-
-                # Apply change to current page
-                self.wrt_cg_to_pg(change, current_page)
+                self._apply_change_to_page(change, current_page)
 
             return current_block_num, current_page
 
