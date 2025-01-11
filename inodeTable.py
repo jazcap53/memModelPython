@@ -18,6 +18,7 @@ from ajTypes import bNum_t, inNum_t, u32Const, lNum_tConst, SENTINEL_INUM, SENTI
 from ajUtils import get_cur_time, Tabber
 from fileShifter import FileShifter
 from arrBit import ArrBit
+import logging
 
 
 @dataclass
@@ -159,6 +160,7 @@ class InodeAllocator:
     def __init__(self, num_blocks: int, inodes_per_block: int):
         self.avail = ArrBit(num_blocks, inodes_per_block)
         self.avail.set()  # All inodes initially available
+        self.logger = logging.getLogger(__name__)
 
     def allocate(self) -> Optional[inNum_t]:
         """
@@ -167,21 +169,31 @@ class InodeAllocator:
         Returns:
             inode number if successful, None if no inodes available
         """
-        max_inum = u32Const.NUM_INODE_TBL_BLOCKS.value * lNum_tConst.INODES_PER_BLOCK.value
+        max_inum = self.avail.total_bits
         for ix in range(max_inum):
             if self.avail.test(ix):
                 self.avail.reset(ix)
                 return ix
+        self.logger.warning("Failed to allocate inode: all inodes are in use")
         return None
 
     def deallocate(self, inode_num: inNum_t) -> None:
         """Mark an inode as available."""
-        if inode_num != SENTINEL_INUM:
+        if inode_num == SENTINEL_INUM:
+            return
+        if 0 <= inode_num < self.avail.total_bits:
             self.avail.set(inode_num)
+        else:
+            self.logger.warning(f"Attempted to deallocate out-of-range inode {inode_num}")
 
     def is_available(self, inode_num: inNum_t) -> bool:
         """Check if an inode is available."""
-        return self.avail.test(inode_num)
+        if inode_num == SENTINEL_INUM:
+            return False
+        if 0 <= inode_num < self.avail.total_bits:
+            return self.avail.test(inode_num)
+        self.logger.warning(f"Checked availability of out-of-range inode {inode_num}")
+        return False  # Out of range inodes are not available
 
 
 class InodeBlockManager:

@@ -291,6 +291,37 @@ class TestInodeTable:
             block_num = 100 + i
             assert block_num in inode.indirect, f"Indirect block {block_num} not found after assignment"
 
+    def test_load_nonexistent_file(self, temp_inode_file):
+        """Test loading from a non-existent file."""
+        # Ensure the file doesn't exist
+        if os.path.exists(temp_inode_file):
+            os.unlink(temp_inode_file)
+
+        table = InodeTable(temp_inode_file)
+        # Should not raise exceptions, but start fresh
+        table.load()
+
+        # Verify table is in initial state
+        assert table.allocator.avail.all()
+        assert not table.storage.modified
+
+    def test_store_with_permission_error(self, temp_inode_file):
+        """Test storing with insufficient permissions."""
+        table = InodeTable(temp_inode_file)
+
+        # Create an inode to make the table modified
+        table.create_inode()
+
+        # Make the file read-only
+        os.chmod(temp_inode_file, 0o444)
+
+        # Should handle the permission error gracefully
+        with pytest.raises(PermissionError):
+            table.store()
+
+        # Cleanup
+        os.chmod(temp_inode_file, 0o666)
+
 
 class TestInodeStorage:
     """Tests for the InodeStorage class."""
@@ -338,6 +369,25 @@ class TestInodeBlockManager:
         assert manager.release_block(inode, 1)
         assert 1 not in manager.list_blocks(inode)
 
+    def test_block_management_edge_cases(self):
+        """Test edge cases in InodeBlockManager."""
+        manager = InodeBlockManager()
+        inode = Inode()
+
+        # Test with sentinel block number
+        assert not manager.assign_block(inode, SENTINEL_BNUM)
+        assert not manager.release_block(inode, SENTINEL_BNUM)
+
+        # Test releasing non-existent block
+        assert not manager.release_block(inode, 999)
+
+        # Test assigning blocks when full
+        for i in range(u32Const.CT_INODE_BNUMS.value):
+            assert manager.assign_block(inode, i)
+
+        # Try to assign one more block
+        assert not manager.assign_block(inode, u32Const.CT_INODE_BNUMS.value)
+
     @pytest.mark.xfail(reason="Indirect block handling not implemented")
     def test_indirect_block_operations(self):
         """Test indirect block assignment and release."""
@@ -351,3 +401,81 @@ class TestInodeBlockManager:
         # Try to assign an indirect block
         assert manager.assign_block(inode, 100), "Failed to assign indirect block"
         assert 100 in inode.indirect, "Indirect block not found after assignment"
+
+
+class TestInodeAllocatorBoundaries:
+    """Tests for boundary conditions in InodeAllocator."""
+
+    def test_allocate_full_table(self):
+        """Test allocation when table is full."""
+        # Create a small allocator for easier testing
+        allocator = InodeAllocator(2, 4)  # 8 total inodes
+
+        # Allocate all inodes
+        inodes = [allocator.allocate() for _ in range(8)]
+        assert all(i is not None for i in inodes)
+
+        # Try to allocate one more
+        assert allocator.allocate() is None
+
+    def test_deallocate_edge_cases(self):
+        """Test deallocation edge cases."""
+        allocator = InodeAllocator(2, 4)
+
+        # Deallocate unallocated inode
+        allocator.deallocate(0)  # Should not raise error
+
+        # Deallocate sentinel value
+        allocator.deallocate(SENTINEL_INUM)  # Should not raise error
+
+        # Deallocate out of range inode
+        allocator.deallocate(100)  # Should not raise error or corrupt state
+
+    def test_is_available_edge_cases(self):
+        """Test is_available edge cases."""
+        allocator = InodeAllocator(2, 4)
+
+        # Test with valid unallocated inode
+        assert allocator.is_available(0) == True
+
+        # Test with sentinel value
+        assert allocator.is_available(SENTINEL_INUM) == False
+
+        # Test with out of range inode
+        assert allocator.is_available(100) == False
+
+
+class TestInodeStorageInternals:
+    """Tests for internal methods of InodeStorage."""
+
+    @pytest.fixture
+    def storage_with_data(self, temp_inode_file):
+        """Create storage with some test data."""
+        storage = InodeStorage(temp_inode_file)
+        inode = storage.get_inode(0)
+        inode.b_nums[0] = 42
+        inode.lkd = 1
+        inode.cr_time = 1000
+        inode.indirect[0] = 99
+        storage.modified = True
+        return storage
+
+    def test_read_write_inode(self, storage_with_data, temp_inode_file):
+        """Test _read_inode and _write_inode methods."""
+        storage = storage_with_data
+
+        # Store the data
+        storage.store_table()
+
+        # Create new storage to read data
+        new_storage = InodeStorage(temp_inode_file)
+        new_storage.load_table()
+
+        # Verify data was read correctly
+        inode = new_storage.get_inode(0)
+        assert inode.b_nums[0] == 42
+        assert inode.lkd == 1
+        assert inode.cr_time == 1000
+        assert inode.indirect[0] == 99
+
+
