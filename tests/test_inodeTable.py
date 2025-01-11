@@ -270,6 +270,27 @@ class TestInodeTable:
             blocks = [b for b in inode.b_nums if b != SENTINEL_BNUM]
             assert blocks == [i * 2, i * 2 + 1]
 
+    @pytest.mark.xfail(reason="Indirect block handling not implemented")
+    def test_indirect_block_operations(self, inode_table):
+        """Test operations with indirect blocks."""
+        inode_num = inode_table.create_inode()
+
+        # Fill direct blocks
+        for i in range(u32Const.CT_INODE_BNUMS.value):
+            assert inode_table.assign_block(inode_num, i)
+
+        # Try to assign more blocks (should use indirect blocks if implemented)
+        additional_blocks = min(u32Const.CT_INODE_INDIRECTS.value, 3)  # Test with a few indirect blocks
+        for i in range(additional_blocks):
+            block_num = 100 + i
+            assert inode_table.assign_block(inode_num, block_num), f"Failed to assign indirect block {block_num}"
+
+        # Verify indirect blocks
+        inode = inode_table.storage.get_inode(inode_num)
+        for i in range(additional_blocks):
+            block_num = 100 + i
+            assert block_num in inode.indirect, f"Indirect block {block_num} not found after assignment"
+
 
 class TestInodeStorage:
     """Tests for the InodeStorage class."""
@@ -316,3 +337,17 @@ class TestInodeBlockManager:
 
         assert manager.release_block(inode, 1)
         assert 1 not in manager.list_blocks(inode)
+
+    @pytest.mark.xfail(reason="Indirect block handling not implemented")
+    def test_indirect_block_operations(self):
+        """Test indirect block assignment and release."""
+        manager = InodeBlockManager()
+        inode = Inode()
+
+        # Fill direct blocks
+        for i in range(u32Const.CT_INODE_BNUMS.value):
+            assert manager.assign_block(inode, i)
+
+        # Try to assign an indirect block
+        assert manager.assign_block(inode, 100), "Failed to assign indirect block"
+        assert 100 in inode.indirect, "Indirect block not found after assignment"
