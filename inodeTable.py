@@ -105,30 +105,87 @@ class InodeStorage:
             # Re-raise to ensure caller knows about the failure
             raise
 
-    def store_table(self) -> None:
-        """Store the inode table to disk."""
+    def store_table(self) -> bool:
+        """Store the inode table to disk. Returns True if successful, False otherwise."""
         if not self.modified:
             logger.debug("store_table: No modifications to store")
-            return
+            return True
 
-        def write_table(f):
+        def write_table(f) -> bool:
             # Skip availability bitmap (handled by InodeAllocator)
             bitmap_size = (u32Const.NUM_INODE_TBL_BLOCKS.value *
                            lNum_tConst.INODES_PER_BLOCK.value + 7) // 8
             f.seek(bitmap_size)
 
             # Write inode table entries
+            all_successful = True
             for block in self.tbl:
                 for inode in block:
-                    self._write_inode(f, inode)
+                    if not self._write_inode(f, inode):
+                        all_successful = False
+            return all_successful
 
         try:
-            self.shifter.shift_files(self.filename, write_table, binary_mode=True)
-            self.modified = False
-            logger.info(f"Successfully stored inode table to {self.filename}")
+            success = self.shifter.shift_files(self.filename, write_table, binary_mode=True)
+            if success:
+                self.modified = False
+                logger.info(f"Successfully stored inode table to {self.filename}")
+            else:
+                logger.error("Failed to store inode table: some inodes could not be written")
+            return success
         except Exception as e:
             logger.error(f"Error storing inode table: {str(e)}")
-            raise
+            return False
+
+    def _read_inode(self, f: BinaryIO, block_idx: int, inode_idx: int) -> None:
+        """Read a single inode from the file."""
+        try:
+            node = self.tbl[block_idx][inode_idx]
+
+            # Read direct block numbers
+            node.b_nums = list(struct.unpack(
+                f'<{u32Const.CT_INODE_BNUMS.value}I',
+                f.read(4 * u32Const.CT_INODE_BNUMS.value)))
+
+            # Read lock status
+            node.lkd, = struct.unpack('<I', f.read(4))
+
+            # Read creation time
+            node.cr_time, = struct.unpack('<Q', f.read(8))
+
+            # Read indirect block numbers
+            node.indirect = list(struct.unpack(
+                f'<{u32Const.CT_INODE_INDIRECTS.value}I',
+                f.read(4 * u32Const.CT_INODE_INDIRECTS.value)))
+
+            # Read inode number
+            node.i_num, = struct.unpack('<I', f.read(4))
+        except struct.error as e:
+            logger.warning(f"Failed to read inode {block_idx}:{inode_idx}: {str(e)}")
+            # Initialize with default values if read fails
+            self.tbl[block_idx][inode_idx] = Inode()
+
+    def _write_inode(self, f: BinaryIO, inode: Inode) -> bool:
+        """Write a single inode to the file. Returns True if successful, False otherwise."""
+        try:
+            # Write direct block numbers
+            f.write(struct.pack(f'<{u32Const.CT_INODE_BNUMS.value}I', *inode.b_nums))
+
+            # Write lock status
+            f.write(struct.pack('<I', inode.lkd))
+
+            # Write creation time
+            f.write(struct.pack('<Q', inode.cr_time))
+
+            # Write indirect block numbers
+            f.write(struct.pack(f'<{u32Const.CT_INODE_INDIRECTS.value}I', *inode.indirect))
+
+            # Write inode number
+            f.write(struct.pack('<I', inode.i_num))
+            return True
+        except struct.error as e:
+            logger.error(f"Failed to write inode: {str(e)}")
+            return False
 
 
 class InodeAllocator:
@@ -213,6 +270,11 @@ class InodeBlockManager:
         logger.warning(f"Failed to release block {target}: block not found in inode")
         return False
 
+    @staticmethod
+    def list_blocks(inode: Inode) -> List[bNum_t]:
+        """Get list of all blocks assigned to an inode."""
+        return [item for item in inode.b_nums if item != SENTINEL_BNUM]
+
 
 class InodeTable:
     """Main class coordinating inode operations."""
@@ -293,20 +355,20 @@ class InodeTable:
             return False
         return not self.allocator.is_available(inode_num)
 
-    def store(self) -> None:
-        """Store the inode table to disk."""
+    def store(self) -> bool:
+        """Store the inode table to disk. Returns True if successful, False otherwise."""
         try:
             # First write the availability bitmap
             with open(self.storage.filename, 'r+b') as f:
                 bitmap_size = (u32Const.NUM_INODE_TBL_BLOCKS.value *
-                            lNum_tConst.INODES_PER_BLOCK.value + 7) // 8
+                               lNum_tConst.INODES_PER_BLOCK.value + 7) // 8
                 f.write(self.allocator.avail.to_bytes())
 
             # Then store the inode data
-            self.storage.store_table()
+            return self.storage.store_table()
         except Exception as e:
             logger.error(f"Error storing inode table: {str(e)}")
-            raise
+            return False
 
     def load(self) -> None:
         """Load the inode table from disk."""
