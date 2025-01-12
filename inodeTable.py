@@ -61,8 +61,15 @@ class InodeStorage:
 
     def _create_empty_table(self) -> List[List[Inode]]:
         """Create an empty two-dimensional table of inodes."""
-        return [[Inode() for _ in range(lNum_tConst.INODES_PER_BLOCK.value)]
-                for _ in range(u32Const.NUM_INODE_TBL_BLOCKS.value)]
+        table = []
+        for block_idx in range(u32Const.NUM_INODE_TBL_BLOCKS.value):
+            block = []
+            for inode_idx in range(lNum_tConst.INODES_PER_BLOCK.value):
+                inode = Inode()
+                inode.i_num = block_idx * lNum_tConst.INODES_PER_BLOCK.value + inode_idx
+                block.append(inode)
+            table.append(block)
+        return table
 
     def get_inode(self, inode_num: inNum_t) -> Optional[Inode]:
         """
@@ -293,6 +300,7 @@ class InodeTable:
         inode_num = self.allocator.allocate()
         if inode_num is not None:
             inode = self.storage.get_inode(inode_num)
+            inode.i_num = inode_num  # Set the inode number
             inode.cr_time = get_cur_time(True)
             self.storage.modified = True
             logger.debug(f"Created new inode with number {inode_num}")
