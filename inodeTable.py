@@ -126,10 +126,13 @@ class InodeStorage:
 
             # Write inode table entries
             all_successful = True
-            for block in self.tbl:
-                for inode in block:
+            for i, block in enumerate(self.tbl):
+                for j, inode in enumerate(block):
                     if not self._write_inode(f, inode):
+                        logger.error(f"Failed at block {i}, inode {j}")
                         all_successful = False
+                        return False  # Fail fast
+                    logger.debug(f"Successfully wrote inode {inode.i_num}")
             return all_successful
 
         try:
@@ -141,7 +144,7 @@ class InodeStorage:
                 logger.error("Failed to store inode table: some inodes could not be written")
             return success
         except Exception as e:
-            logger.error(f"Error storing inode table: {str(e)}")
+            logger.error(f"Error in store_table: {str(e)}")
             return False
 
     def _read_inode(self, f: BinaryIO, block_idx: int, inode_idx: int) -> None:
@@ -175,8 +178,6 @@ class InodeStorage:
     def _write_inode(self, f: BinaryIO, inode: Inode) -> bool:
         """Write a single inode to the file. Returns True if successful, False otherwise."""
         try:
-            logger.debug(f"Attempting to write inode {inode.i_num} with b_nums={inode.b_nums}")  # New debug line
-
             # Write direct block numbers
             f.write(struct.pack(f'<{u32Const.CT_INODE_BNUMS.value}I', *inode.b_nums))
 
@@ -193,7 +194,13 @@ class InodeStorage:
             f.write(struct.pack('<I', inode.i_num))
             return True
         except struct.error as e:
-            logger.error(f"Failed to write inode {inode.i_num}: {str(e)} in _write_inode except block")
+            logger.error(f"Failed to write inode {inode.i_num} due to struct error: {str(e)}")
+            return False
+        except IOError as e:
+            logger.error(f"Failed to write inode {inode.i_num} due to IO error: {str(e)}")
+            return False
+        except Exception as e:
+            logger.error(f"Failed to write inode {inode.i_num} due to unexpected error: {str(e)}")
             return False
 
 
