@@ -168,6 +168,8 @@ class InodeStorage:
     def _write_inode(self, f: BinaryIO, inode: Inode) -> bool:
         """Write a single inode to the file. Returns True if successful, False otherwise."""
         try:
+            logger.debug(f"Attempting to write inode {inode.i_num} with b_nums={inode.b_nums}")  # New debug line
+
             # Write direct block numbers
             f.write(struct.pack(f'<{u32Const.CT_INODE_BNUMS.value}I', *inode.b_nums))
 
@@ -184,7 +186,7 @@ class InodeStorage:
             f.write(struct.pack('<I', inode.i_num))
             return True
         except struct.error as e:
-            logger.error(f"Failed to write inode: {str(e)}")
+            logger.error(f"Failed to write inode {inode.i_num}: {str(e)} in _write_inode except block")
             return False
 
 
@@ -399,3 +401,45 @@ class InodeTable:
         """Ensure the inode table is stored if modified."""
         if self.storage.modified:
             self.store()
+
+
+if __name__ == '__main__':
+    import tempfile
+    import logging
+
+    # Setup logging
+    logging.basicConfig(level=logging.DEBUG)
+
+    # Create temporary file
+    with tempfile.NamedTemporaryFile(delete=False) as tf:
+        filename = tf.name
+
+    # Initialize table
+    table = InodeTable(filename)
+
+    # Perform operations from failing test
+    inode_num = table.create_inode()
+    print(f"\nCreated inode number: {inode_num}")
+
+    success = table.assign_block(inode_num, 1)
+    print(f"Block assignment success: {success}")
+
+    # Get inode state before store
+    inode = table.storage.get_inode(inode_num)
+    print(f"\nBefore store:")
+    print(f"Inode {inode_num} state:")
+    print(f"  b_nums: {inode.b_nums}")
+    print(f"  lkd: {inode.lkd}")
+    print(f"  cr_time: {inode.cr_time}")
+    print(f"  indirect: {inode.indirect}")
+    print(f"  i_num: {inode.i_num}")
+
+    # Try to store
+    success = table.store()
+    print(f"\nStore success: {success}")
+    print(f"Modified flag: {table.storage.modified}")
+
+    # Clean up
+    import os
+
+    os.unlink(filename)
