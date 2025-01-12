@@ -315,9 +315,8 @@ class TestInodeTable:
         # Make the file read-only
         os.chmod(temp_inode_file, 0o444)
 
-        # Should handle the permission error gracefully
-        with pytest.raises(PermissionError):
-            table.store()
+        # Should return False when store fails
+        assert not table.store()
 
         # Cleanup
         os.chmod(temp_inode_file, 0o666)
