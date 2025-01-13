@@ -14,15 +14,14 @@ __all__ = ['Inode', 'InodeStorage', 'InodeAllocator', 'InodeBlockManager', 'Inod
 from dataclasses import dataclass
 import struct
 from typing import List, Optional, Set, BinaryIO
-import logging
 from ajTypes import bNum_t, inNum_t, u32Const, lNum_tConst, SENTINEL_INUM, SENTINEL_BNUM
 from ajUtils import get_cur_time, Tabber
 from fileShifter import FileShifter
 from arrBit import ArrBit
+from logging_config import get_logger
 
 
-# Setup module logger
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass
