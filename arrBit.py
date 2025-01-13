@@ -43,7 +43,11 @@ class ArrBit:
 
         Raises:
             ArrBitSizeError: If the requested size exceeds MAX_SIZE_LIMIT.
+            ValueError: If array_size or bitset_size is not positive.
         """
+        if array_size <= 0 or bitset_size <= 0:
+            raise ValueError("Both array_size and bitset_size must be positive")
+
         requested_size = array_size * bitset_size
         if requested_size > self.MAX_SIZE_LIMIT:
             raise ArrBitSizeError(

@@ -120,3 +120,127 @@ def test_error_message_on_size_limit_exceeded():
         ArrBit(array_size=large_array_size, bitset_size=large_bitset_size)
     expected_message = f"Requested ArrBit size ({large_array_size * large_bitset_size} bits) exceeds the maximum allowed size ({1024 * 1024} bits)."
     assert str(exc_info.value) == expected_message
+
+
+def test_non_multiple_of_8_size():
+    """Test with total bits that aren't multiples of 8."""
+    arr_bit = ArrBit(array_size=1, bitset_size=13)  # 13 bits total
+    arr_bit.set()
+    assert arr_bit.count() == 13
+    assert arr_bit.all()
+    arr_bit.reset()
+    assert arr_bit.none()
+
+    # Test last bit
+    arr_bit.set(12)
+    assert arr_bit.test(12)
+    assert not arr_bit.test(11)
+
+
+def test_operation_combinations():
+    """Test combinations of set, reset, flip on same bits."""
+    arr_bit = ArrBit(array_size=1, bitset_size=8)
+    arr_bit.set(3)
+    arr_bit.set(3)  # Set again
+    assert arr_bit.test(3)
+
+    arr_bit.flip(3)
+    assert not arr_bit.test(3)
+
+    arr_bit.reset(3)
+    assert not arr_bit.test(3)
+
+    arr_bit.flip(3)
+    assert arr_bit.test(3)
+
+
+def test_or_after_operations():
+    """Test OR operation after various other operations."""
+    arr_bit1 = ArrBit(array_size=1, bitset_size=8)
+    arr_bit2 = ArrBit(array_size=1, bitset_size=8)
+
+    arr_bit1.set(1)
+    arr_bit1.set(3)
+    arr_bit1.reset(1)
+
+    arr_bit2.set(2)
+    arr_bit2.set(3)
+    arr_bit2.flip(2)  # Now bit 2 is 0
+
+    arr_bit1 |= arr_bit2
+    assert not arr_bit1.test(1)
+    assert not arr_bit1.test(2)
+    assert arr_bit1.test(3)
+
+
+def test_or_mismatched_sizes():
+    """Test OR operation with mismatched sizes."""
+    arr_bit1 = ArrBit(array_size=1, bitset_size=8)
+    arr_bit2 = ArrBit(array_size=1, bitset_size=16)
+
+    with pytest.raises(ValueError):
+        arr_bit1 |= arr_bit2
+
+
+def test_index_out_of_range():
+    """Test index out of range for various operations."""
+    arr_bit = ArrBit(array_size=1, bitset_size=8)
+
+    with pytest.raises(IndexError):
+        arr_bit.set(8)
+
+    with pytest.raises(IndexError):
+        arr_bit.reset(8)
+
+    with pytest.raises(IndexError):
+        arr_bit.test(8)
+
+    with pytest.raises(IndexError):
+        arr_bit.flip(8)
+
+
+def test_minimum_size():
+    """Test with minimum size (1,1)."""
+    arr_bit = ArrBit(array_size=1, bitset_size=1)
+    assert arr_bit.size() == 1
+
+    arr_bit.set(0)
+    assert arr_bit.test(0)
+    assert arr_bit.all()
+
+    arr_bit.reset(0)
+    assert arr_bit.none()
+
+
+def test_maximum_size():
+    """Test with exactly maximum size."""
+    max_bits = ArrBit.MAX_SIZE_LIMIT
+    arr_bit = ArrBit(array_size=1, bitset_size=max_bits)
+    assert arr_bit.size() == max_bits
+
+    # Test first and last bit
+    arr_bit.set(0)
+    arr_bit.set(max_bits - 1)
+    assert arr_bit.test(0)
+    assert arr_bit.test(max_bits - 1)
+    assert arr_bit.count() == 2
+
+
+@pytest.mark.parametrize("array_size,bitset_size,expected_message", [
+    (0, 0, "Both array_size and bitset_size must be positive"),
+    (0, 1, "Both array_size and bitset_size must be positive"),
+    (1, 0, "Both array_size and bitset_size must be positive"),
+    (-1, 1, "Both array_size and bitset_size must be positive"),
+    (1, -1, "Both array_size and bitset_size must be positive"),
+    (-1, -1, "Both array_size and bitset_size must be positive"),
+    (-1, 0, "Both array_size and bitset_size must be positive"),
+    (0, -1, "Both array_size and bitset_size must be positive"),
+    (10, -5, "Both array_size and bitset_size must be positive"),
+    (-5, 10, "Both array_size and bitset_size must be positive"),
+])
+def test_invalid_sizes_disallowed(array_size, bitset_size, expected_message):
+    """Test that zero and negative sizes are disallowed for both array_size and bitset_size."""
+    with pytest.raises(ValueError) as exc_info:
+        ArrBit(array_size=array_size, bitset_size=bitset_size)
+    assert expected_message in str(exc_info.value)
+
