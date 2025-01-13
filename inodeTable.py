@@ -418,43 +418,13 @@ class InodeTable:
             self.store()
 
 
-if __name__ == '__main__':
-    import tempfile
-    import logging
+if __name__ == "__main__":
+    import sys
 
-    # Setup logging
-    logging.basicConfig(level=logging.DEBUG)
+    print("Notice: The InodeTable tests have been moved to the pytest suite.")
+    print("To run these tests, please use one of the following commands:")
+    print("  pytest tests/test_inodeTable.py                  # Run all InodeTable tests")
+    print("  pytest tests/test_inodeTable.py -k store         # Run only storage-related tests")
+    print("  pytest tests/test_inodeTable.py -v               # Run all tests with verbose output")
 
-    # Create temporary file
-    with tempfile.NamedTemporaryFile(delete=False) as tf:
-        filename = tf.name
-
-    # Initialize table
-    table = InodeTable(filename)
-
-    # Perform operations from failing test
-    inode_num = table.create_inode()
-    print(f"\nCreated inode number: {inode_num}")
-
-    success = table.assign_block(inode_num, 1)
-    print(f"Block assignment success: {success}")
-
-    # Get inode state before store
-    inode = table.storage.get_inode(inode_num)
-    print(f"\nBefore store:")
-    print(f"Inode {inode_num} state:")
-    print(f"  b_nums: {inode.b_nums}")
-    print(f"  lkd: {inode.lkd}")
-    print(f"  cr_time: {inode.cr_time}")
-    print(f"  indirect: {inode.indirect}")
-    print(f"  i_num: {inode.i_num}")
-
-    # Try to store
-    success = table.store()
-    print(f"\nStore success: {success}")
-    print(f"Modified flag: {table.storage.modified}")
-
-    # Clean up
-    import os
-
-    os.unlink(filename)
+    sys.exit(0)
