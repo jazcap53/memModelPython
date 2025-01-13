@@ -137,7 +137,7 @@ class InodeStorage:
 
         try:
             success = self.shifter.shift_files(self.filename, write_table, binary_mode=True)
-            if success:
+            if success == 0:  # FileShifter.shift_files() returns 0 for success
                 self.modified = False
                 logger.info(f"Successfully stored inode table to {self.filename}")
             else:
