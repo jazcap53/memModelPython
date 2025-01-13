@@ -14,15 +14,29 @@ class FileShifter:
     @staticmethod
     def shift_files(f_name: str, action: Callable[[str], None], binary_mode: bool = False) -> int:
         """
-        Update a file atomically by writing to a temporary file.
+        Update a file atomically by writing to a temporary file and then replacing the original.
+
+        This method works by:
+        1. Creating a temporary file in the same directory
+        2. Applying the 'action' function to write/modify the temporary file
+        3. Atomically replacing the original file with the temporary file
+
+        Notes:
+        - Can replace read-only target files as long as the directory is writable
+        - Returns 0 on success, non-zero error code on failure
+        - Cleans up temporary file in case of errors
+        - Will preserve original file if no changes are made or if new content is empty
 
         Args:
-            f_name: Path to the file to update.
-            action: Function to update the file.
-            binary_mode: Open file in binary mode if True.
+            f_name: Path to the file to update
+            action: Function that takes a file handle and updates the file
+            binary_mode: Open files in binary mode if True, text mode if False
 
         Returns:
-            0 if successful, non-zero error code otherwise.
+            0 if successful, non-zero error code otherwise:
+            -1: Generic unexpected error
+            -2: Permission error (e.g., read-only directory)
+            Other values: OS error codes (multiplied by 2, 3, or 4 for different scenarios)
         """
         had_error = 0
         tmp_file = f_name + ".tmp"
