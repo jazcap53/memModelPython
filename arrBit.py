@@ -252,41 +252,6 @@ class ArrBit:
 
 
 if __name__ == '__main__':
-    # Create an ArrBit instance
-    arr_bit = ArrBit(array_size=4, bitset_size=8)
-
-    # Set some bits
-    arr_bit.set(5)
-    arr_bit.set(10)
-    arr_bit.set(15)
-
-    # Test some bits
-    print(f"Bit 5 is set: {arr_bit.test(5)}")
-    print(f"Bit 7 is set: {arr_bit.test(7)}")
-
-    # Count set bits
-    print(f"Number of set bits: {arr_bit.count()}")
-
-    # Check if any bit is set
-    print(f"Any bit set: {arr_bit.any()}")
-
-    # Reset a bit
-    arr_bit.reset(10)
-
-    # Flip all bits
-    arr_bit.flip()
-
-    # Check if all bits are set
-    print(f"All bits set after flip: {arr_bit.all()}")
-
-    # Create another ArrBit instance
-    other_arr_bit = ArrBit(array_size=4, bitset_size=8)
-    other_arr_bit.set(0)
-    other_arr_bit.set(31)
-
-    # Perform OR operation
-    arr_bit |= other_arr_bit
-
-    # Check the result
-    print(f"Bit 0 is set after OR: {arr_bit.test(0)}")
-    print(f"Bit 31 is set after OR: {arr_bit.test(31)}")
+    print("This module's tests have been moved to the PyTest suite.")
+    print("Please run tests using the PyTest command:")
+    print("    pytest tests/test_arrBit.py")
