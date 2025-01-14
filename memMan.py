@@ -31,7 +31,7 @@ class MemMan:
         self.p_stt = pstt
         self.verbose = v
 
-        self.blks_in_mem = ArrBit(bNum_tConst.NUM_DISK_BLOCKS.value, u32Const.BITS_PER_PAGE.value)
+        self.blks_in_mem = ArrBit(bNum_tConst.NUM_DISK_BLOCKS.value, 1)
         self.blk_locs_in_mem: Dict[bNum_t, int] = {}
 
         self.tabs = Tabber()
