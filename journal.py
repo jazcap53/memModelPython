@@ -157,6 +157,10 @@ class Journal:
         """Initialize journal metadata to default values."""
         self._metadata.init()
 
+    def wrt_cg_log_to_jrnl(self, r_cg_log: ChangeLog):
+        """Public method to delegate writing change log to journal to the inner _ChangeLogHandler."""
+        self._change_log_handler.wrt_cg_log_to_jrnl(r_cg_log)
+
     def purge_jrnl(self, keep_going: bool, had_crash: bool):
         """Purge the journal, optionally handling crash recovery."""
         logger.debug(f"Entering purge_jrnl(keep_going={keep_going}, had_crash={had_crash})")
