@@ -849,6 +849,7 @@ class Journal:
         def _finalize_journal_write(self):
             """Finalize the journal write operation."""
             self._journal.journal_file.flush()
+            os.fsync(self._journal.journal_file.fileno())  # Ensure data is written to disk
             logger.debug(f"Total bytes written: {self._journal.ttl_bytes_written}")
 
         @staticmethod
