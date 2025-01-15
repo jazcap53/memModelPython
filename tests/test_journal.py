@@ -527,3 +527,49 @@ def test_process_changes_invalid_block(journal, mocker):
 
     with pytest.raises(ValueError, match=f"Invalid block number: {invalid_block_num}"):
         journal._change_log_handler.process_changes(mock_cg_log)
+
+
+def test_journal_tags_after_purge_delay(temp_journal_file):
+    """Test that journal tags remain valid after JRNL_PURGE_DELAY_USEC threshold."""
+    # Create actual components instead of mocks for this integration test
+    status = Status("test_status.txt")
+    sim_disk = SimDisk(status,
+                       "test_disk.bin",
+                       temp_journal_file,
+                       "test_free.bin",
+                       "test_inode.bin")
+    change_log = ChangeLog(test_sw=True)  # Use deterministic mode
+    crash_chk = CrashChk()
+
+    try:
+        journal = Journal(temp_journal_file, sim_disk, change_log, status, crash_chk)
+
+        # Create and write a change
+        change = Change(0)  # block 0
+        change.add_line(0, b'A' * u32Const.BYTES_PER_LINE.value)
+        change_log.add_to_log(change)
+
+        # Write to journal
+        journal._change_log_handler.wrt_cg_log_to_jrnl(change_log)
+
+        # Simulate time passing
+        journal.last_jrnl_purge_time = 0  # Force purge
+
+        # Purge journal
+        journal.purge_jrnl(True, False)
+
+        # Read back and verify tags
+        journal.journal_file.seek(0)
+        start_tag = journal._file_io.read_start_tag()
+        assert start_tag == journal.START_TAG
+
+        # Skip the change data
+        journal.journal_file.seek(-8, 2)  # Go to end tag
+        end_tag = journal._file_io.read_end_tag()
+        assert end_tag == journal.END_TAG
+
+    finally:
+        # Cleanup
+        for f in ["test_status.txt", "test_disk.bin", "test_free.bin", "test_inode.bin"]:
+            if os.path.exists(f):
+                os.remove(f)
