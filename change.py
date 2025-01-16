@@ -63,11 +63,16 @@ class Change:
     def add_line(self, line_num: int, data: bytes):
         if not self.selectors or self.selectors[-1].is_set(line_num % 63):
             new_selector = Select()
-            if not self.selectors:
-                new_selector.set_last_block()  # Set last block flag for the first (and only) selector
             self.selectors.append(new_selector)
         self.selectors[-1].set(line_num % 63)
         self.new_data.append(data)
+
+        # Update the last block flag - clear it from all selectors and set it on the last one
+        for i, selector in enumerate(self.selectors):
+            if i == len(self.selectors) - 1:
+                selector.set_last_block()
+            else:
+                selector.value &= ~(1 << 63)  # Clear the MSB
 
     def is_last_block(self) -> bool:
         return any(selector.is_last_block() for selector in self.selectors)
