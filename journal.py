@@ -638,9 +638,9 @@ class Journal:
                 data = self._file.read(size)
                 bytes_read = len(data) if size == -1 else size
                 self.total_bytes_read += bytes_read
-                logger.debug(f"READ: {bytes_read} bytes (Total read: {self.total_bytes_read}, "
-                             f"Total written: {self.total_bytes_written}, "
-                             f"File position: {self._file.tell()})")
+                logger.info(f"READ: {bytes_read} bytes (Total read: {self.total_bytes_read}, "
+                            f"Total written: {self.total_bytes_written}, "
+                            f"File position: {self._file.tell()})")
                 return data
             except IOError as e:
                 logger.error(f"Read error: {e}")
@@ -650,9 +650,9 @@ class Journal:
             try:
                 bytes_written = self._file.write(data)
                 self.total_bytes_written += bytes_written
-                logger.debug(f"WRITE: {bytes_written} bytes (Total read: {self.total_bytes_read}, "
-                             f"Total written: {self.total_bytes_written}, "
-                             f"File position: {self._file.tell()})")
+                logger.info(f"WRITE: {bytes_written} bytes (Total read: {self.total_bytes_read}, "
+                            f"Total written: {self.total_bytes_written}, "
+                            f"File position: {self._file.tell()})")
                 return bytes_written
             except IOError as e:
                 logger.error(f"Write error: {e}")
@@ -661,7 +661,7 @@ class Journal:
         def seek(self, offset, whence=0):
             try:
                 result = self._file.seek(offset, whence)
-                logger.debug(f"SEEK: New position {result} (offset: {offset}, whence: {whence})")
+                logger.info(f"SEEK: New position {result} (offset: {offset}, whence: {whence})")
                 return result
             except IOError as e:
                 logger.error(f"Seek error: {e}")
@@ -682,12 +682,12 @@ class Journal:
         def reset_counters(self):
             self.total_bytes_read = 0
             self.total_bytes_written = 0
-            logger.debug("I/O counters reset")
+            logger.info("I/O counters reset")
 
         def log_state(self, message="Current I/O state"):
-            logger.debug(f"{message}: Total read: {self.total_bytes_read}, "
-                         f"Total written: {self.total_bytes_written}, "
-                         f"File position: {self._file.tell()}")
+            logger.info(f"{message}: Total read: {self.total_bytes_read}, "
+                        f"Total written: {self.total_bytes_written}, "
+                        f"File position: {self._file.tell()}")
 
 
     class _Metadata:

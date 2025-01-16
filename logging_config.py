@@ -31,6 +31,8 @@ def setup_logging(default_level=logging.WARNING):
     }
 
     logging.config.dictConfig(logging_config)
+    logging.getLogger().setLevel(logging.INFO)
+
 
 
 def get_logger(name):
