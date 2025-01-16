@@ -471,7 +471,8 @@ class Journal:
     def _read_crc_and_padding(self, bytes_read: int, ct_bytes_to_write: int) -> int:
         """Read CRC and padding if there's enough space."""
         if bytes_read + 8 <= ct_bytes_to_write:
-            self.journal_file.read(8)  # Read CRC (4 bytes) and padding (4 bytes)
+            self._file_io.rd_field(4)  # Read CRC
+            self._file_io.rd_field(4)  # Read padding
             bytes_read += 8
         return bytes_read
 
