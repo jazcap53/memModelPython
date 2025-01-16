@@ -527,7 +527,7 @@ class Journal:
     def verify_bytes_read(self):
         """Verify that the number of bytes read matches the expected count."""
         expected_bytes = self.ct_bytes_to_write + self.META_LEN
-        actual_bytes = self.journal_file.tell() - self.META_LEN
+        actual_bytes = self.wrapped_file.total_bytes_read  # Changed from journal_file to wrapped_file
         logger.debug(f"Verifying bytes read - Expected: {expected_bytes}, Actual: {actual_bytes}, "
                      f"ct_bytes_to_write: {self.ct_bytes_to_write}, META_LEN: {self.META_LEN}, "
                      f"Current position: {self.journal_file.tell()}")
