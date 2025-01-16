@@ -103,6 +103,9 @@ class Journal:
         # File initialization
         file_existed = os.path.exists(self.f_name)
         self.journal_file = open(self.f_name, "rb+" if file_existed else "wb+")
+        self.wrapped_file = self._JournalFileWrapper(self)  # Create the wrapper
+        self.journal_file = self.wrapped_file  # Replace the original file object
+
         self.journal_file.seek(0, 2)  # Go to end of file
         current_size = self.journal_file.tell()
         if current_size < u32Const.JRNL_SIZE.value:
@@ -622,6 +625,69 @@ class Journal:
                         os.remove(file)
                     except Exception as e:
                         logger.error(f"Failed to remove file {file}: {e}")
+
+    class _JournalFileWrapper:
+        def __init__(self, journal_instance):
+            self._journal = journal_instance
+            self._file = journal_instance.journal_file
+            self.total_bytes_read = 0
+            self.total_bytes_written = 0
+
+        def read(self, size=-1):
+            try:
+                data = self._file.read(size)
+                bytes_read = len(data) if size == -1 else size
+                self.total_bytes_read += bytes_read
+                logger.debug(f"READ: {bytes_read} bytes (Total read: {self.total_bytes_read}, "
+                             f"Total written: {self.total_bytes_written}, "
+                             f"File position: {self._file.tell()})")
+                return data
+            except IOError as e:
+                logger.error(f"Read error: {e}")
+                raise
+
+        def write(self, data):
+            try:
+                bytes_written = self._file.write(data)
+                self.total_bytes_written += bytes_written
+                logger.debug(f"WRITE: {bytes_written} bytes (Total read: {self.total_bytes_read}, "
+                             f"Total written: {self.total_bytes_written}, "
+                             f"File position: {self._file.tell()})")
+                return bytes_written
+            except IOError as e:
+                logger.error(f"Write error: {e}")
+                raise
+
+        def seek(self, offset, whence=0):
+            try:
+                result = self._file.seek(offset, whence)
+                logger.debug(f"SEEK: New position {result} (offset: {offset}, whence: {whence})")
+                return result
+            except IOError as e:
+                logger.error(f"Seek error: {e}")
+                raise
+
+        def tell(self):
+            return self._file.tell()
+
+        def flush(self):
+            return self._file.flush()
+
+        def close(self):
+            return self._file.close()
+
+        def fileno(self):
+            return self._file.fileno()
+
+        def reset_counters(self):
+            self.total_bytes_read = 0
+            self.total_bytes_written = 0
+            logger.debug("I/O counters reset")
+
+        def log_state(self, message="Current I/O state"):
+            logger.debug(f"{message}: Total read: {self.total_bytes_read}, "
+                         f"Total written: {self.total_bytes_written}, "
+                         f"File position: {self._file.tell()}")
 
 
     class _Metadata:
