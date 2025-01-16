@@ -528,6 +528,9 @@ class Journal:
         """Verify that the number of bytes read matches the expected count."""
         expected_bytes = self.ct_bytes_to_write + self.META_LEN
         actual_bytes = self.journal_file.tell() - self.META_LEN
+        logger.debug(f"Verifying bytes read - Expected: {expected_bytes}, Actual: {actual_bytes}, "
+                     f"ct_bytes_to_write: {self.ct_bytes_to_write}, META_LEN: {self.META_LEN}, "
+                     f"Current position: {self.journal_file.tell()}")
         assert expected_bytes == actual_bytes, f"Byte mismatch: expected {expected_bytes}, got {actual_bytes}"
 
     @contextmanager

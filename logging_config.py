@@ -15,7 +15,7 @@ def setup_logging(default_level=logging.WARNING):
         },
         'handlers': {
             'default': {
-                'level': default_level,
+                'level': logging.INFO,
                 'formatter': 'standard',
                 'class': 'logging.StreamHandler',
                 'stream': sys.stdout,
