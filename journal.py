@@ -13,6 +13,8 @@ Classes:
     Journal: Main class handling journal operations
     NoSelectorsAvailableError: Custom exception for selector exhaustion
 """
+# TODO: spurious comment -- delete
+
 from ajTypes import write_64bit, read_64bit, write_32bit, read_32bit, to_bytes_64bit, from_bytes_64bit
 import struct
 from typing import List, Dict, Tuple, Optional
