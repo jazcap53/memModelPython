@@ -63,6 +63,9 @@ class Journal:
     PAGE_BUFFER_SIZE = 16
     CPP_SELECT_T_SZ = 8
 
+    total_bytes_read = 0
+    total_bytes_written = 0
+
     # Properties for backward compatibility
     @property
     def meta_get(self):
@@ -100,17 +103,19 @@ class Journal:
         self.sz = Journal.CPP_SELECT_T_SZ
         self.end_tag_posn = None
 
+        # Counters for tracking I/O
+        self.total_bytes_read = 0
+        self.total_bytes_written = 0
+
         # File initialization
         file_existed = os.path.exists(self.f_name)
         self.journal_file = open(self.f_name, "rb+" if file_existed else "wb+")
-        self.wrapped_file = self._JournalFileWrapper(self)  # Create the wrapper
-        self.journal_file = self.wrapped_file  # Replace the original file object
 
         self.journal_file.seek(0, 2)  # Go to end of file
         current_size = self.journal_file.tell()
         if current_size < u32Const.JRNL_SIZE.value:
             remaining = u32Const.JRNL_SIZE.value - current_size
-            self.journal_file.write(b'\0' * remaining)
+            self.write(b'\0' * remaining)
         self.journal_file.seek(0)  # Reset to beginning
         logger.debug(f"Journal file {'opened' if file_existed else 'created'}: {self.f_name}")
 
@@ -159,6 +164,57 @@ class Journal:
     def init(self):
         """Initialize journal metadata to default values."""
         self._metadata.init()
+
+    def read(self, size=-1):
+        """Read from journal file with logging."""
+        try:
+            data = self.journal_file.read(size)
+            bytes_read = len(data) if size == -1 else size
+            self.total_bytes_read += bytes_read
+            logger.info(f"READ: {bytes_read} bytes (Total read: {self.total_bytes_read}, "
+                        f"Total written: {self.total_bytes_written}, "
+                        f"File position: {self.journal_file.tell()})")
+            return data
+        except IOError as e:
+            logger.error(f"Read error: {e}")
+            raise
+
+    def write(self, data):
+        """Write to journal file with logging."""
+        try:
+            bytes_written = self.journal_file.write(data)
+            self.total_bytes_written += bytes_written
+            logger.info(f"WRITE: {bytes_written} bytes (Total read: {self.total_bytes_read}, "
+                        f"Total written: {self.total_bytes_written}, "
+                        f"File position: {self.journal_file.tell()})")
+            return bytes_written
+        except IOError as e:
+            logger.error(f"Write error: {e}")
+            raise
+
+    def seek(self, offset, whence=0):
+        """Seek in journal file with logging."""
+        try:
+            result = self.journal_file.seek(offset, whence)
+            logger.info(f"SEEK: New position {result} (offset: {offset}, whence: {whence})")
+            return result
+        except IOError as e:
+            logger.error(f"Seek error: {e}")
+            raise
+
+    def tell(self):
+        """Return current file position."""
+        return self.journal_file.tell()
+
+    def flush(self):
+        """Flush journal file."""
+        return self.journal_file.flush()
+
+    def reset_counters(self):
+        """Reset byte counters."""
+        self.total_bytes_read = 0
+        self.total_bytes_written = 0
+        logger.info("Journal byte counters reset")
 
     def wrt_cg_log_to_jrnl(self, r_cg_log: ChangeLog):
         """Public method to delegate writing change log to journal to the inner _ChangeLogHandler."""
@@ -527,11 +583,10 @@ class Journal:
     def verify_bytes_read(self):
         """Verify that the number of bytes read matches the expected count."""
         expected_bytes = self.ct_bytes_to_write + self.META_LEN
-        actual_bytes = self.wrapped_file.total_bytes_read  # Changed from journal_file to wrapped_file
-        logger.debug(f"Verifying bytes read - Expected: {expected_bytes}, Actual: {actual_bytes}, "
+        logger.debug(f"Verifying bytes read - Expected: {expected_bytes}, Actual: {self.total_bytes_read}, "
                      f"ct_bytes_to_write: {self.ct_bytes_to_write}, META_LEN: {self.META_LEN}, "
-                     f"Current position: {self.journal_file.tell()}")
-        assert expected_bytes == actual_bytes, f"Byte mismatch: expected {expected_bytes}, got {actual_bytes}"
+                     f"Current position: {self.tell()}")
+        assert expected_bytes == self.total_bytes_read, f"Byte mismatch: expected {expected_bytes}, got {self.total_bytes_read}"
 
     @contextmanager
     def track_position(self, operation_name: str):
@@ -628,69 +683,6 @@ class Journal:
                         os.remove(file)
                     except Exception as e:
                         logger.error(f"Failed to remove file {file}: {e}")
-
-    class _JournalFileWrapper:
-        def __init__(self, journal_instance):
-            self._journal = journal_instance
-            self._file = journal_instance.journal_file
-            self.total_bytes_read = 0
-            self.total_bytes_written = 0
-
-        def read(self, size=-1):
-            try:
-                data = self._file.read(size)
-                bytes_read = len(data) if size == -1 else size
-                self.total_bytes_read += bytes_read
-                logger.info(f"READ: {bytes_read} bytes (Total read: {self.total_bytes_read}, "
-                            f"Total written: {self.total_bytes_written}, "
-                            f"File position: {self._file.tell()})")
-                return data
-            except IOError as e:
-                logger.error(f"Read error: {e}")
-                raise
-
-        def write(self, data):
-            try:
-                bytes_written = self._file.write(data)
-                self.total_bytes_written += bytes_written
-                logger.info(f"WRITE: {bytes_written} bytes (Total read: {self.total_bytes_read}, "
-                            f"Total written: {self.total_bytes_written}, "
-                            f"File position: {self._file.tell()})")
-                return bytes_written
-            except IOError as e:
-                logger.error(f"Write error: {e}")
-                raise
-
-        def seek(self, offset, whence=0):
-            try:
-                result = self._file.seek(offset, whence)
-                logger.info(f"SEEK: New position {result} (offset: {offset}, whence: {whence})")
-                return result
-            except IOError as e:
-                logger.error(f"Seek error: {e}")
-                raise
-
-        def tell(self):
-            return self._file.tell()
-
-        def flush(self):
-            return self._file.flush()
-
-        def close(self):
-            return self._file.close()
-
-        def fileno(self):
-            return self._file.fileno()
-
-        def reset_counters(self):
-            self.total_bytes_read = 0
-            self.total_bytes_written = 0
-            logger.info("I/O counters reset")
-
-        def log_state(self, message="Current I/O state"):
-            logger.info(f"{message}: Total read: {self.total_bytes_read}, "
-                        f"Total written: {self.total_bytes_written}, "
-                        f"File position: {self._file.tell()}")
 
 
     class _Metadata:
@@ -1486,17 +1478,65 @@ class Journal:
                 return False
 
 
+def test_basic_io():
+    """Test basic I/O operations."""
+    from status import Status
+    from simDisk import SimDisk
+    from change import ChangeLog
+    from crashChk import CrashChk
+
+    # Setup test files
+    test_journal_file = "test_journal.bin"
+    test_disk_file = "test_disk.bin"
+    test_free_file = "test_free.bin"
+    test_inode_file = "test_inode.bin"
+    test_status_file = "test_status.txt"
+
+    # Create test instances
+    status = Status(test_status_file)
+    sim_disk = SimDisk(status, test_disk_file, test_journal_file,
+                       test_free_file, test_inode_file)
+    change_log = ChangeLog()
+    crash_chk = CrashChk()
+
+    try:
+        # Create journal instance
+        journal = Journal(test_journal_file, sim_disk, change_log,
+                          status, crash_chk)
+
+        # Test write and read
+        test_data = b"test data"
+        journal.seek(journal.META_LEN)
+        bytes_written = journal.write(test_data)
+        print(f"Wrote {bytes_written} bytes")
+        print(f"Total bytes written: {journal.total_bytes_written}")
+
+        journal.seek(journal.META_LEN)
+        read_data = journal.read(len(test_data))
+        print(f"Read {len(read_data)} bytes: {read_data}")
+        print(f"Total bytes read: {journal.total_bytes_read}")
+
+        # Test counter reset
+        journal.reset_counters()
+        print(f"After reset - Total read: {journal.total_bytes_read}, "
+              f"Total written: {journal.total_bytes_written}")
+
+        return True
+
+    except Exception as e:
+        print(f"Test failed: {e}")
+        return False
+    finally:
+        # Clean up test files
+        import os
+        for file in [test_journal_file, test_disk_file, test_free_file,
+                     test_inode_file, test_status_file]:
+            if os.path.exists(file):
+                os.remove(file)
+
+
 if __name__ == "__main__":
-    import sys
-
-    print("Notice: The journal buffer management tests have been moved to the pytest suite.")
-    print("To run these tests, please use one of the following commands:")
-    print("  pytest tests/test_journal.py                  # Run all journal tests")
-    print("  pytest tests/test_journal.py -k buffer        # Run only buffer management tests")
-    print("  pytest tests/test_journal.py -v               # Run all tests with verbose output")
-
-    if len(sys.argv) > 1:
-        print("\nNote: Command-line arguments for individual test cases are no longer supported.")
-        print("Please use pytest's built-in filtering and selection options instead.")
-
-    sys.exit(0)
+    if test_basic_io():
+        print("Basic I/O test passed")
+    else:
+        print("Basic I/O test failed")
