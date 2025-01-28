@@ -210,6 +210,12 @@ class Journal:
         """Flush journal file."""
         return self.journal_file.flush()
 
+    def close(self):
+        return self.journal_file.close()
+
+    def fileno(self):
+        return self.journal_file.fileno()
+
     def reset_counters(self):
         """Reset byte counters."""
         self.total_bytes_read = 0
@@ -750,12 +756,12 @@ class Journal:
 
                 elif dat_len == 4:  # 32-bit value
                     value = int.from_bytes(data, byteorder='little')
-                    write_32bit(self._journal.journal_file, value & ((1 << (bytes_until_end * 8)) - 1))
+                    write_32bit(self._journal, value & ((1 << (bytes_until_end * 8)) - 1))
                     bytes_written += bytes_until_end
                     if do_ct:
                         self._journal.ttl_bytes_written += bytes_until_end
                     self._journal.seek(self._journal.META_LEN)
-                    write_32bit(self._journal.journal_file, value >> (bytes_until_end * 8))
+                    write_32bit(self._journal, value >> (bytes_until_end * 8))
                     bytes_written += overflow_bytes
                     if do_ct:
                         self._journal.ttl_bytes_written += overflow_bytes
@@ -771,9 +777,9 @@ class Journal:
                         self._journal.ttl_bytes_written += overflow_bytes
             else:
                 if dat_len == 8:
-                    write_64bit(self._journal.journal_file, from_bytes_64bit(data))
+                    write_64bit(self._journal, from_bytes_64bit(data))
                 elif dat_len == 4:
-                    write_32bit(self._journal.journal_file, int.from_bytes(data, byteorder='little'))
+                    write_32bit(self._journal, int.from_bytes(data, byteorder='little'))
                 else:
                     self._journal.write(data)
                 bytes_written = dat_len
@@ -820,11 +826,11 @@ class Journal:
 
         def _read_64bit_wraparound(self, under: int) -> bytes:
             """Read a 64-bit value that wraps around in the journal."""
-            low_bits = read_64bit(self._journal.journal_file)
+            low_bits = read_64bit(self._journal)
             self._update_bytes_read(under)
 
             self._journal.seek(self._journal.META_LEN)
-            high_bits = read_64bit(self._journal.journal_file)
+            high_bits = read_64bit(self._journal)
             self._update_bytes_read(8 - under)
 
             value = (high_bits << (under * 8)) | low_bits
@@ -832,11 +838,11 @@ class Journal:
 
         def _read_32bit_wraparound(self, under: int) -> bytes:
             """Read a 32-bit value that wraps around in the journal."""
-            low_bits = read_32bit(self._journal.journal_file)
+            low_bits = read_32bit(self._journal)
             self._update_bytes_read(under)
 
             self._journal.seek(self._journal.META_LEN)
-            high_bits = read_32bit(self._journal.journal_file)
+            high_bits = read_32bit(self._journal)
             self._update_bytes_read(4 - under)
 
             value = (high_bits << (under * 8)) | low_bits
@@ -856,9 +862,9 @@ class Journal:
         def _read_without_wraparound(self, dat_len: int) -> bytes:
             """Read data that fits within the current journal space."""
             if dat_len == 8:
-                data = to_bytes_64bit(read_64bit(self._journal.journal_file))
+                data = to_bytes_64bit(read_64bit(self._journal))
             elif dat_len == 4:
-                data = read_32bit(self._journal.journal_file).to_bytes(4, byteorder='little')
+                data = read_32bit(self._journal).to_bytes(4, byteorder='little')
             else:
                 data = self._journal.read(dat_len)
 
@@ -867,7 +873,7 @@ class Journal:
 
         def _update_bytes_read(self, count: int):
             """Update the total bytes read counter."""
-            self._journal.ttl_bytes_written += count
+            self._journal.total_bytes_read += count
 
         def advance_strm(self, length: int):
             """Advance the file stream position, handling wraparound."""
@@ -879,33 +885,33 @@ class Journal:
 
         def reset_file(self):
             """Reset the journal file to initial state."""
-            self._journal.journal_file.close()
+            self._journal.close()
             self._journal.journal_file = open(self._journal.f_name, "rb+")
             self._journal.seek(0)
 
         def write_start_tag(self):
             """Write the start tag to the journal file."""
-            write_64bit(self._journal.journal_file, self._journal.START_TAG)
+            write_64bit(self._journal, self._journal.START_TAG)
 
         def write_end_tag(self):
             """Write the end tag to the journal file."""
-            write_64bit(self._journal.journal_file, self._journal.END_TAG)
+            write_64bit(self._journal, self._journal.END_TAG)
 
         def write_ct_bytes(self, ct_bytes):
             """Write the count of bytes to the journal file."""
-            write_64bit(self._journal.journal_file, ct_bytes)
+            write_64bit(self._journal, ct_bytes)
 
         def read_start_tag(self):
             """Read the start tag from the journal file."""
-            return read_64bit(self._journal.journal_file)
+            return read_64bit(self._journal)
 
         def read_end_tag(self):
             """Read the end tag from the journal file."""
-            return read_64bit(self._journal.journal_file)
+            return read_64bit(self._journal)
 
         def read_ct_bytes(self):
             """Read the count of bytes from the journal file."""
-            return read_64bit(self._journal.journal_file)
+            return read_64bit(self._journal)
 
         def wrt_cgs_to_jrnl(self, r_cg_log: ChangeLog):
             """Write changes from a change log to the journal."""
@@ -978,8 +984,8 @@ class Journal:
 
         def _finalize_journal_write(self):
             """Finalize the journal write operation."""
-            self._journal.journal_file.flush()
-            os.fsync(self._journal.journal_file.fileno())  # Ensure data is written to disk
+            self._journal.flush()
+            os.fsync(self._journal.fileno())  # Ensure data is written to disk
             logger.debug(f"Total bytes written: {self._journal.ttl_bytes_written}")
 
         @staticmethod
@@ -1271,8 +1277,8 @@ class Journal:
 
         def _flush_and_update_status(self):
             """Flush journal data to disk and update status."""
-            self._journal.journal_file.flush()
-            os.fsync(self._journal.journal_file.fileno())
+            self._journal.flush()
+            os.fsync(self._journal.fileno())
             logger.info(f"Change log written at time {get_cur_time()}")
             self._journal.status.wrt("Change log written")
 
