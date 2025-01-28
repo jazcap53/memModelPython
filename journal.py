@@ -111,22 +111,22 @@ class Journal:
         file_existed = os.path.exists(self.f_name)
         self.journal_file = open(self.f_name, "rb+" if file_existed else "wb+")
 
-        self.journal_file.seek(0, 2)  # Go to end of file
-        current_size = self.journal_file.tell()
+        self.seek(0, 2)  # Go to end of file
+        current_size = self.tell()
         if current_size < u32Const.JRNL_SIZE.value:
             remaining = u32Const.JRNL_SIZE.value - current_size
             self.write(b'\0' * remaining)
-        self.journal_file.seek(0)  # Reset to beginning
+        self.seek(0)  # Reset to beginning
         logger.debug(f"Journal file {'opened' if file_existed else 'created'}: {self.f_name}")
 
         # Verify file size
-        self.journal_file.seek(0, 2)  # Go to end
-        actual_size = self.journal_file.tell()
-        self.journal_file.seek(0)  # Reset to beginning
+        self.seek(0, 2)  # Go to end
+        actual_size = self.tell()
+        self.seek(0)  # Reset to beginning
         if actual_size != u32Const.JRNL_SIZE.value:
             raise RuntimeError(f"Journal file size mismatch. Expected {u32Const.JRNL_SIZE.value}, got {actual_size}")
 
-        self.journal_file.seek(self.META_LEN)
+        self.seek(self.META_LEN)
 
         # Initialize other instance variables
         self.pg_buf = [None] * self.PAGE_BUFFER_SIZE
@@ -173,7 +173,7 @@ class Journal:
             self.total_bytes_read += bytes_read
             logger.info(f"READ: {bytes_read} bytes (Total read: {self.total_bytes_read}, "
                         f"Total written: {self.total_bytes_written}, "
-                        f"File position: {self.journal_file.tell()})")
+                        f"File position: {self.tell()})")
             return data
         except IOError as e:
             logger.error(f"Read error: {e}")
@@ -186,7 +186,7 @@ class Journal:
             self.total_bytes_written += bytes_written
             logger.info(f"WRITE: {bytes_written} bytes (Total read: {self.total_bytes_read}, "
                         f"Total written: {self.total_bytes_written}, "
-                        f"File position: {self.journal_file.tell()})")
+                        f"File position: {self.tell()})")
             return bytes_written
         except IOError as e:
             logger.error(f"Write error: {e}")
@@ -338,12 +338,12 @@ class Journal:
     def rd_last_jrnl(self, r_j_cg_log: ChangeLog):
         """Read the last journal entry into a change log."""
         logger.debug("Entering rd_last_jrnl")
-        current_pos = self.journal_file.tell()
+        current_pos = self.tell()
         logger.debug(f"Initial file position: {current_pos}")
 
         with self.track_position("rd_last_jrnl"):
             start_pos = self._read_journal_metadata()
-            logger.debug(f"After reading metadata, position: {self.journal_file.tell()}")
+            logger.debug(f"After reading metadata, position: {self.tell()}")
             logger.debug(f"Metadata read: get={self.meta_get}, put={self.meta_put}, sz={self.meta_sz}")
 
             if start_pos is None:
@@ -353,7 +353,7 @@ class Journal:
             with self.track_position("read_journal_entry"):
                 logger.debug(f"Starting to read journal entry at position: {start_pos}")
                 ck_start_tag, ck_end_tag, ttl_bytes = self.rd_jrnl(r_j_cg_log, start_pos)
-                logger.debug(f"After reading journal entry, position: {self.journal_file.tell()}")
+                logger.debug(f"After reading journal entry, position: {self.tell()}")
                 logger.debug(f"Read tags - Start: {ck_start_tag:X}, End: {ck_end_tag:X}")
                 logger.debug(f"Total bytes read: {ttl_bytes}")
 
@@ -361,7 +361,7 @@ class Journal:
                 self._verify_journal_tags(ck_start_tag, ck_end_tag)
             except ValueError as e:
                 logger.error(f"Tag verification failed: {str(e)}")
-                logger.error(f"Current file position: {self.journal_file.tell()}")
+                logger.error(f"Current file position: {self.tell()}")
                 raise
 
             self._process_journal_entry(ttl_bytes)
@@ -375,7 +375,7 @@ class Journal:
         """Read journal contents from a given position."""
         logger.debug(f"Starting journal read from position {start_pos}")
 
-        self.journal_file.seek(start_pos)
+        self.seek(start_pos)
 
         # Read start tag
         with self.track_position("read_start_tag"):
@@ -403,7 +403,7 @@ class Journal:
         else:
             logger.debug(f"End tag position without wrap: {end_tag_pos}")
 
-        self.journal_file.seek(end_tag_pos)
+        self.seek(end_tag_pos)
 
         # Read end tag
         with self.track_position("read_end_tag"):
@@ -424,12 +424,12 @@ class Journal:
     def _read_changes(self, r_j_cg_log: ChangeLog, ct_bytes_to_write: int) -> int:
         """Read changes from the journal and populate the change log."""
         bytes_read = 0
-        position_before = self.journal_file.tell()
+        position_before = self.tell()
         logger.debug(
             f"Starting to read changes. Expecting {ct_bytes_to_write} bytes, starting at position {position_before}")
 
         while bytes_read < ct_bytes_to_write:
-            position_now = self.journal_file.tell()
+            position_now = self.tell()
             if self._check_journal_end(bytes_read, ct_bytes_to_write):
                 logger.debug(
                     f"Journal end check stopped read at position {position_now} after reading {bytes_read} bytes")
@@ -459,13 +459,13 @@ class Journal:
         if bytes_read >= ct_bytes_to_write:
             return True
 
-        current_pos = self.journal_file.tell()
+        current_pos = self.tell()
         if current_pos + 16 > u32Const.JRNL_SIZE.value:
             # Before returning True, check if we should wrap
             remaining_bytes = ct_bytes_to_write - bytes_read
             if remaining_bytes > 0:
                 logger.debug(f"Journal end reached but still need {remaining_bytes} bytes. Wrapping to start.")
-                self.journal_file.seek(self.META_LEN)
+                self.seek(self.META_LEN)
                 return False
         return False
 
@@ -501,10 +501,10 @@ class Journal:
 
     def _read_selector(self, bytes_read: int) -> Tuple[Optional[Select], int]:
         """Read a selector from the journal file."""
-        if self.journal_file.tell() + 8 > u32Const.JRNL_SIZE.value:
+        if self.tell() + 8 > u32Const.JRNL_SIZE.value:
             return None, 0
 
-        selector_data = self.journal_file.read(8)
+        selector_data = self.read(8)
         if bytes_read + 8 > self.ct_bytes_to_write:
             return None, 8
 
@@ -518,10 +518,10 @@ class Journal:
                 continue
             if bytes_read + data_bytes_read + u32Const.BYTES_PER_LINE.value > self.ct_bytes_to_write:
                 break
-            if self.journal_file.tell() + u32Const.BYTES_PER_LINE.value > u32Const.JRNL_SIZE.value:
+            if self.tell() + u32Const.BYTES_PER_LINE.value > u32Const.JRNL_SIZE.value:
                 break
 
-            line_data = self.journal_file.read(u32Const.BYTES_PER_LINE.value)
+            line_data = self.read(u32Const.BYTES_PER_LINE.value)
             data_bytes_read += u32Const.BYTES_PER_LINE.value
             cg.new_data.append(line_data)
 
@@ -591,9 +591,9 @@ class Journal:
     @contextmanager
     def track_position(self, operation_name: str):
         """Context manager to track file position changes during operations."""
-        start_pos = self.journal_file.tell()
+        start_pos = self.tell()
         yield
-        end_pos = self.journal_file.tell()
+        end_pos = self.tell()
 
     def verify_page_crc(self, page_tuple: Tuple[bNum_t, Page]) -> bool:
         """Verify the CRC of a page. Public interface for CRC checking."""
@@ -696,24 +696,24 @@ class Journal:
 
         def read(self):
             """Read metadata from journal file."""
-            self._journal.journal_file.seek(0)
+            self._journal.seek(0)
             self.meta_get, self.meta_put, self.meta_sz = struct.unpack('<qqq',
-                                                                       self._journal.journal_file.read(24))
+                                                                       self._journal.read(24))
             return self.meta_get, self.meta_put, self.meta_sz
 
         def write(self, new_g_pos: int, new_p_pos: int, u_ttl_bytes_written: int):
             """Write metadata to journal file."""
-            self._journal.journal_file.seek(0)
+            self._journal.seek(0)
             metadata = struct.pack('<qqq', new_g_pos, new_p_pos, u_ttl_bytes_written)
-            self._journal.journal_file.write(metadata)
+            self._journal.write(metadata)
 
         def init(self):
             """Initialize metadata to default values."""
             rd_pt = -1
             wrt_pt = 24
             bytes_stored = 0
-            self._journal.journal_file.seek(0)
-            self._journal.journal_file.write(struct.pack('<qqq', rd_pt, wrt_pt, bytes_stored))
+            self._journal.seek(0)
+            self._journal.write(struct.pack('<qqq', rd_pt, wrt_pt, bytes_stored))
 
     class _FileIO:
         """Handles file I/O operations for the journal."""
@@ -724,7 +724,7 @@ class Journal:
         def wrt_field(self, data: bytes, dat_len: int, do_ct: bool) -> int:
             """Write a field to the journal file."""
             bytes_written = 0
-            p_pos = self._journal.journal_file.tell()
+            p_pos = self._journal.tell()
             buf_sz = u32Const.JRNL_SIZE.value
             end_pt = p_pos + dat_len
 
@@ -734,16 +734,16 @@ class Journal:
 
                 if dat_len == 8:  # 64-bit value
                     # Write the first part
-                    self._journal.journal_file.write(data[:bytes_until_end])
+                    self._journal.write(data[:bytes_until_end])
                     bytes_written += bytes_until_end
                     if do_ct:
                         self._journal.ttl_bytes_written += bytes_until_end
 
                     # Move to the correct position after wraparound
-                    self._journal.journal_file.seek(self._journal.META_LEN)
+                    self._journal.seek(self._journal.META_LEN)
 
                     # Write the remaining part
-                    self._journal.journal_file.write(data[bytes_until_end:])
+                    self._journal.write(data[bytes_until_end:])
                     bytes_written += overflow_bytes
                     if do_ct:
                         self._journal.ttl_bytes_written += overflow_bytes
@@ -754,18 +754,18 @@ class Journal:
                     bytes_written += bytes_until_end
                     if do_ct:
                         self._journal.ttl_bytes_written += bytes_until_end
-                    self._journal.journal_file.seek(self._journal.META_LEN)
+                    self._journal.seek(self._journal.META_LEN)
                     write_32bit(self._journal.journal_file, value >> (bytes_until_end * 8))
                     bytes_written += overflow_bytes
                     if do_ct:
                         self._journal.ttl_bytes_written += overflow_bytes
                 else:
-                    self._journal.journal_file.write(data[:bytes_until_end])
+                    self._journal.write(data[:bytes_until_end])
                     bytes_written += bytes_until_end
                     if do_ct:
                         self._journal.ttl_bytes_written += bytes_until_end
-                    self._journal.journal_file.seek(self._journal.META_LEN)
-                    self._journal.journal_file.write(data[bytes_until_end:])
+                    self._journal.seek(self._journal.META_LEN)
+                    self._journal.write(data[bytes_until_end:])
                     bytes_written += overflow_bytes
                     if do_ct:
                         self._journal.ttl_bytes_written += overflow_bytes
@@ -775,7 +775,7 @@ class Journal:
                 elif dat_len == 4:
                     write_32bit(self._journal.journal_file, int.from_bytes(data, byteorder='little'))
                 else:
-                    self._journal.journal_file.write(data)
+                    self._journal.write(data)
                 bytes_written = dat_len
                 if do_ct:
                     self._journal.ttl_bytes_written += dat_len
@@ -783,7 +783,7 @@ class Journal:
             if do_ct:
                 logger.debug(f"Wrote {bytes_written} bytes for {data[:10]}...")
 
-            self._journal.final_p_pos = self._journal.journal_file.tell()
+            self._journal.final_p_pos = self._journal.tell()
             return bytes_written
 
         def rd_field(self, dat_len: int) -> bytes:
@@ -795,7 +795,7 @@ class Journal:
             Returns:
                 bytes: Data read from journal file
             """
-            g_pos = self._journal.journal_file.tell()
+            g_pos = self._journal.tell()
             buf_sz = u32Const.JRNL_SIZE.value
             end_pt = g_pos + dat_len
             logger.debug(f"Reading field of length {dat_len} from position {g_pos}")
@@ -823,7 +823,7 @@ class Journal:
             low_bits = read_64bit(self._journal.journal_file)
             self._update_bytes_read(under)
 
-            self._journal.journal_file.seek(self._journal.META_LEN)
+            self._journal.seek(self._journal.META_LEN)
             high_bits = read_64bit(self._journal.journal_file)
             self._update_bytes_read(8 - under)
 
@@ -835,7 +835,7 @@ class Journal:
             low_bits = read_32bit(self._journal.journal_file)
             self._update_bytes_read(under)
 
-            self._journal.journal_file.seek(self._journal.META_LEN)
+            self._journal.seek(self._journal.META_LEN)
             high_bits = read_32bit(self._journal.journal_file)
             self._update_bytes_read(4 - under)
 
@@ -844,11 +844,11 @@ class Journal:
 
         def _read_generic_wraparound(self, under: int, over: int) -> bytes:
             """Read generic data that wraps around in the journal."""
-            data = self._journal.journal_file.read(under)
+            data = self._journal.read(under)
             self._update_bytes_read(under)
 
-            self._journal.journal_file.seek(self._journal.META_LEN)
-            data += self._journal.journal_file.read(over)
+            self._journal.seek(self._journal.META_LEN)
+            data += self._journal.read(over)
             self._update_bytes_read(over)
 
             return data
@@ -860,7 +860,7 @@ class Journal:
             elif dat_len == 4:
                 data = read_32bit(self._journal.journal_file).to_bytes(4, byteorder='little')
             else:
-                data = self._journal.journal_file.read(dat_len)
+                data = self._journal.read(dat_len)
 
             self._update_bytes_read(dat_len)
             return data
@@ -871,17 +871,17 @@ class Journal:
 
         def advance_strm(self, length: int):
             """Advance the file stream position, handling wraparound."""
-            new_pos = self._journal.journal_file.tell() + length
+            new_pos = self._journal.tell() + length
             if new_pos >= u32Const.JRNL_SIZE.value:
                 new_pos -= u32Const.JRNL_SIZE.value
                 new_pos += self._journal.META_LEN
-            self._journal.journal_file.seek(new_pos)
+            self._journal.seek(new_pos)
 
         def reset_file(self):
             """Reset the journal file to initial state."""
             self._journal.journal_file.close()
             self._journal.journal_file = open(self._journal.f_name, "rb+")
-            self._journal.journal_file.seek(0)
+            self._journal.seek(0)
 
         def write_start_tag(self):
             """Write the start tag to the journal file."""
@@ -1291,7 +1291,7 @@ class Journal:
             logger.debug(f"Calculated bytes to write: {self._journal.ct_bytes_to_write}")
 
             # Record start position
-            start_pos = self._journal.journal_file.tell()
+            start_pos = self._journal.tell()
             logger.debug(f"Starting journal write at position: {start_pos}")
 
             self._write_journal_tags(True)  # Write start tag
@@ -1306,12 +1306,12 @@ class Journal:
             else:
                 logger.debug(f"End tag position without wrap: {end_tag_pos}")
 
-            self._journal.journal_file.seek(end_tag_pos)
+            self._journal.seek(end_tag_pos)
             self._write_journal_tags(False)  # Write end tag
 
             # Update metadata
             new_g_pos = self._journal.META_LEN
-            new_p_pos = self._journal.journal_file.tell()
+            new_p_pos = self._journal.tell()
             ttl_bytes = self._journal.ct_bytes_to_write + self._journal.META_LEN
 
             self._update_metadata(new_g_pos, new_p_pos, ttl_bytes)
