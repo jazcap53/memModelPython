@@ -50,6 +50,9 @@ class Driver:
 
     def init(self, args: List[str]):
         self.rd_cl_args(args)
+        from ajUtils import set_test_mode  # Import here to avoid circular imports
+        set_test_mode(self.test)  # Set test mode based on -t switch
+
         if self.help:
             self.display_help()
             sys.exit(0)

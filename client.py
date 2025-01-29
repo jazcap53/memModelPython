@@ -53,7 +53,7 @@ class Client:
         if self.p_drvr.get_test():
             # Seed with a unique repeatable value
             initial_seed = self.p_drvr.get_the_seed()
-            self.rng.seed(initial_seed + self.get_my_id() * initial_seed)
+            self.rng.seed(initial_seed)  # + self.get_my_id() * initial_seed)
         else:
             # Seed with a unique pseudorandom value
             self.rng.seed(get_cur_time())
