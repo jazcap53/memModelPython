@@ -1546,3 +1546,32 @@ if __name__ == "__main__":
         print("Basic I/O test passed")
     else:
         print("Basic I/O test failed")
+
+    # Minimal test for journal purging
+    from ajUtils import set_test_mode
+    from change import Change, ChangeLog
+    from ajTypes import u32Const
+
+    set_test_mode(True)
+
+    # Setup minimal components
+    change_log = ChangeLog(test_sw=True)
+    change = Change(1)
+    change.add_line(0, b'A' * u32Const.BYTES_PER_LINE.value)
+    change_log.add_to_log(change)
+
+    # Create and use a test journal
+    test_journal = Journal("test_journal.bin", None, change_log, None, None)
+    test_journal._change_log_handler.calculate_ct_bytes_to_write(change_log)
+    test_journal._change_log_handler.wrt_cg_log_to_jrnl(change_log)
+
+    # Test purging
+    test_journal.purge_jrnl(True, False)
+
+    print(f"Expected bytes: {test_journal.ct_bytes_to_write + test_journal.META_LEN}")
+    print(f"Actual bytes read: {test_journal.total_bytes_read}")
+
+    # Clean up
+    import os
+
+    os.remove("test_journal.bin")
