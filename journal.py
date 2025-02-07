@@ -107,6 +107,8 @@ class Journal:
         self.total_bytes_read = 0
         self.total_bytes_written = 0
 
+        self.read_log = []
+
         # File initialization
         file_existed = os.path.exists(self.f_name)
         self.journal_file = open(self.f_name, "rb+" if file_existed else "wb+")
@@ -344,78 +346,77 @@ class Journal:
     def rd_last_jrnl(self, r_j_cg_log: ChangeLog):
         """Read the last journal entry into a change log."""
         logger.debug("Entering rd_last_jrnl")
-        current_pos = self.tell()
-        logger.debug(f"Initial file position: {current_pos}")
 
-        with self.track_position("rd_last_jrnl"):
-            start_pos = self._read_journal_metadata()
-            logger.debug(f"After reading metadata, position: {self.tell()}")
-            logger.debug(f"Metadata read: get={self.meta_get}, put={self.meta_put}, sz={self.meta_sz}")
+        start_pos = self._read_journal_metadata()
+        if start_pos is None:
+            logger.warning("No valid start position found")
+            return
 
-            if start_pos is None:
-                logger.warning("No valid start position found")
-                return
+        logger.debug(f"Starting to read journal entry at position: {start_pos}")
+        self.seek(start_pos)
 
-            with self.track_position("read_journal_entry"):
-                logger.debug(f"Starting to read journal entry at position: {start_pos}")
-                ck_start_tag, ck_end_tag, ttl_bytes = self.rd_jrnl(r_j_cg_log, start_pos)
-                logger.debug(f"After reading journal entry, position: {self.tell()}")
-                logger.debug(f"Read tags - Start: {ck_start_tag:X}, End: {ck_end_tag:X}")
-                logger.debug(f"Total bytes read: {ttl_bytes}")
+        ck_start_tag = self._read_start_tag()
+        ct_bytes_to_write = self._read_ct_bytes_to_write()
+        self.ct_bytes_to_write = ct_bytes_to_write
 
-            try:
-                self._verify_journal_tags(ck_start_tag, ck_end_tag)
-            except ValueError as e:
-                logger.error(f"Tag verification failed: {str(e)}")
-                logger.error(f"Current file position: {self.tell()}")
-                raise
+        bytes_read = self._read_changes(r_j_cg_log, ct_bytes_to_write)
 
-            self._process_journal_entry(ttl_bytes)
+        end_tag_pos = self._calculate_end_tag_position(start_pos, ct_bytes_to_write)
+        self.seek(end_tag_pos)
+        ck_end_tag = self._read_end_tag()
 
-            logger.debug(f"Exiting rd_last_jrnl. Read journal entries. Metadata - "
-                         f"get: {self.meta_get}, "
-                         f"put: {self.meta_put}, "
-                         f"size: {self.meta_sz}")
+        try:
+            self._verify_journal_tags(ck_start_tag, ck_end_tag)
+        except ValueError as e:
+            logger.error(f"Tag verification failed: {str(e)}")
+            logger.error(f"Current file position: {self.tell()}")
+            raise
+
+        self._process_journal_entry(bytes_read)
+
+        logger.debug(f"Exiting rd_last_jrnl. Read journal entries. Metadata - "
+                     f"get: {self.meta_get}, "
+                     f"put: {self.meta_put}, "
+                     f"size: {self.meta_sz}")
 
     def rd_jrnl(self, r_j_cg_log: ChangeLog, start_pos: int) -> Tuple[int, int, int]:
         """Read journal contents from a given position."""
         logger.debug(f"Starting journal read from position {start_pos}")
-
         self.seek(start_pos)
 
-        # Read start tag
-        with self.track_position("read_start_tag"):
-            start_tag_bytes = self._file_io.rd_field(8)
-            ck_start_tag = from_bytes_64bit(start_tag_bytes)
-            logger.debug(f"Read start tag: {ck_start_tag:X} at position {start_pos}")
+        # Replace "read_start_tag" context
+        logger.debug(f"Reading start tag at position {self.tell()}")
+        start_tag_bytes = self._file_io.rd_field(8)
+        ck_start_tag = from_bytes_64bit(start_tag_bytes)
+        logger.debug(f"Read start tag: {ck_start_tag:X}")
 
-        # Read ct_bytes_to_write
-        with self.track_position("read_ct_bytes_to_write"):
-            ct_bytes_bytes = self._file_io.rd_field(8)
-            ct_bytes_to_write = from_bytes_64bit(ct_bytes_bytes)
-            self.ct_bytes_to_write = ct_bytes_to_write
-            logger.debug(f"Read ct_bytes_to_write: {ct_bytes_to_write}")
+        # Replace "read_ct_bytes_to_write" context
+        logger.debug(f"Reading ct_bytes_to_write at position {self.tell()}")
+        ct_bytes_bytes = self._file_io.rd_field(8)
+        ct_bytes_to_write = from_bytes_64bit(ct_bytes_bytes)
+        self.ct_bytes_to_write = ct_bytes_to_write
+        logger.debug(f"Read ct_bytes_to_write: {ct_bytes_to_write}")
 
-        # Read changes
-        with self.track_position("read_changes"):
-            bytes_read = self._read_changes(r_j_cg_log, ct_bytes_to_write)
-            logger.debug(f"Read {bytes_read} bytes of changes")
+        # Replace "read_changes" context
+        logger.debug(f"Reading changes at position {self.tell()}")
+        bytes_read = self._read_changes(r_j_cg_log, ct_bytes_to_write)
+        logger.debug(f"Read {bytes_read} bytes of changes")
 
         # Calculate and seek to end tag position
         end_tag_pos = start_pos + ct_bytes_to_write
         if end_tag_pos >= u32Const.JRNL_SIZE.value:
-            end_tag_pos = self._journal.META_LEN + (end_tag_pos - u32Const.JRNL_SIZE.value)
+            end_tag_pos = self.META_LEN + (end_tag_pos - u32Const.JRNL_SIZE.value)
             logger.debug(f"End tag wraps around to position: {end_tag_pos}")
         else:
             logger.debug(f"End tag position without wrap: {end_tag_pos}")
 
         self.seek(end_tag_pos)
 
-        # Read end tag
-        with self.track_position("read_end_tag"):
-            end_tag_bytes = self._file_io.rd_field(8)
-            ck_end_tag = from_bytes_64bit(end_tag_bytes)
-            logger.debug(f"Read end tag: {ck_end_tag:X} at position {end_tag_pos}")
+        # Replace "read_end_tag" context
+        logger.debug(f"Reading end tag at position {self.tell()}")
+        end_tag_bytes = self._file_io.rd_field(8)
+        ck_end_tag = from_bytes_64bit(end_tag_bytes)
+        logger.debug(f"Read end tag: {ck_end_tag:X}")
 
         return ck_start_tag, ck_end_tag, bytes_read
 
@@ -427,37 +428,37 @@ class Journal:
         """Read and return the count of bytes to write from the journal file."""
         return read_64bit(self.journal_file)
 
+    def _calculate_end_tag_position(self, start_pos: int, ct_bytes_to_write: int) -> int:
+        """Calculate the position of the end tag."""
+        end_tag_pos = start_pos + ct_bytes_to_write
+        if end_tag_pos >= u32Const.JRNL_SIZE.value:
+            end_tag_pos = self.META_LEN + (end_tag_pos - u32Const.JRNL_SIZE.value)
+            logger.debug(f"End tag wraps around to position: {end_tag_pos}")
+        else:
+            logger.debug(f"End tag position without wrap: {end_tag_pos}")
+        return end_tag_pos
+
     def _read_changes(self, r_j_cg_log: ChangeLog, ct_bytes_to_write: int) -> int:
         """Read changes from the journal and populate the change log."""
         bytes_read = 0
-        position_before = self.tell()
-        logger.debug(
-            f"Starting to read changes. Expecting {ct_bytes_to_write} bytes, starting at position {position_before}")
+        logger.debug(f"Starting to read changes at position {self.tell()}")
 
         while bytes_read < ct_bytes_to_write:
-            position_now = self.tell()
-            if self._check_journal_end(bytes_read, ct_bytes_to_write):
-                logger.debug(
-                    f"Journal end check stopped read at position {position_now} after reading {bytes_read} bytes")
-                break
-
-            with self.track_position("read_single_change"):
-                cg, new_bytes_read = self._read_single_change(bytes_read)
-                added_bytes = new_bytes_read - bytes_read
-                bytes_read = new_bytes_read
-                logger.debug(f"Read single change: {added_bytes} bytes")
+            # Replace "read_single_change" context
+            position_before = self.tell()
+            cg, new_bytes_read = self._read_single_change(bytes_read)
+            logger.debug(f"Read single change from {position_before} to {self.tell()}")
+            bytes_read = new_bytes_read
 
             if cg:
                 r_j_cg_log.add_to_log(cg)
-            else:
-                logger.debug("No change object returned from _read_single_change")
 
-            with self.track_position("read_crc_and_padding"):
-                old_bytes_read = bytes_read
-                bytes_read = self._read_crc_and_padding(bytes_read, ct_bytes_to_write)
-                logger.debug(f"Read CRC and padding: {bytes_read - old_bytes_read} bytes")
+            # Replace "read_crc_and_padding" context
+            position_before = self.tell()
+            bytes_read = self._read_crc_and_padding(bytes_read, ct_bytes_to_write)
+            logger.debug(f"Read CRC and padding from {position_before} to {self.tell()}")
 
-        logger.debug(f"Finished reading changes. Read {bytes_read} of expected {ct_bytes_to_write} bytes")
+        logger.debug(f"Finished reading changes at position {self.tell()}. Total bytes read: {bytes_read}")
         return bytes_read
 
     def _check_journal_end(self, bytes_read: int, ct_bytes_to_write: int) -> bool:
@@ -588,18 +589,20 @@ class Journal:
 
     def verify_bytes_read(self):
         """Verify that the number of bytes read matches the expected count."""
-        expected_bytes = self.ct_bytes_to_write + self.META_LEN
-        logger.debug(f"Verifying bytes read - Expected: {expected_bytes}, Actual: {self.total_bytes_read}, "
-                     f"ct_bytes_to_write: {self.ct_bytes_to_write}, META_LEN: {self.META_LEN}, "
-                     f"Current position: {self.tell()}")
-        assert expected_bytes == self.total_bytes_read, f"Byte mismatch: expected {expected_bytes}, got {self.total_bytes_read}"
+        expected_reads = [
+            (0, 24),  # Metadata read
+            (24, 8),  # Start tag
+            (32, 8),  # ct_bytes_to_write field
+            (40, self.ct_bytes_to_write),  # Actual changes
+            (40 + self.ct_bytes_to_write, 8)  # End tag
+        ]
 
-    @contextmanager
-    def track_position(self, operation_name: str):
-        """Context manager to track file position changes during operations."""
-        start_pos = self.tell()
-        yield
-        end_pos = self.tell()
+        logger.debug(f"Expected reads: {expected_reads}")
+        logger.debug(f"Actual reads: {self.read_log}")
+
+        assert self.read_log == expected_reads, (
+            f"Read mismatch: expected {expected_reads}, got {self.read_log}"
+        )
 
     def verify_page_crc(self, page_tuple: Tuple[bNum_t, Page]) -> bool:
         """Verify the CRC of a page. Public interface for CRC checking."""
@@ -700,12 +703,21 @@ class Journal:
             self.meta_put = 0
             self.meta_sz = 0
 
-        def read(self):
-            """Read metadata from journal file."""
-            self._journal.seek(0)
-            self.meta_get, self.meta_put, self.meta_sz = struct.unpack('<qqq',
-                                                                       self._journal.read(24))
-            return self.meta_get, self.meta_put, self.meta_sz
+        def read(self, size=-1):
+            """Read from journal file with logging."""
+            try:
+                data = self.journal_file.read(size)
+                bytes_read = len(data) if size == -1 else size
+                self.total_bytes_read += bytes_read
+                position = self.tell()
+                self.read_log.append((position - bytes_read, bytes_read))  # Log the read operation
+                logger.info(f"READ: {bytes_read} bytes (Total read: {self.total_bytes_read}, "
+                            f"Total written: {self.total_bytes_written}, "
+                            f"File position: {position})")
+                return data
+            except IOError as e:
+                logger.error(f"Read error: {e}")
+                raise
 
         def write(self, new_g_pos: int, new_p_pos: int, u_ttl_bytes_written: int):
             """Write metadata to journal file."""
