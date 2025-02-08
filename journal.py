@@ -361,8 +361,7 @@ class Journal:
 
         bytes_read = self._read_changes(r_j_cg_log, ct_bytes_to_write)
 
-        end_tag_pos = self._calculate_end_tag_position(start_pos, ct_bytes_to_write)
-        self.seek(end_tag_pos)
+        # The file position should now be at the end of change data
         ck_end_tag = self._read_end_tag()
 
         try:
@@ -442,16 +441,16 @@ class Journal:
 
     def _read_changes(self, r_j_cg_log: ChangeLog, ct_bytes_to_write: int) -> int:
         """Read changes from the journal and populate the change log."""
-        bytes_read = 0
-        start_position = self.tell()
-
         # Read all change data at once with the actual calculated size
         change_data = self._read_with_log(ct_bytes_to_write)
 
-        # Process the data
+        # Process the data in memory
         data_pos = 0
         while data_pos < ct_bytes_to_write:
             # Process block number and timestamp
+            if data_pos + 16 > ct_bytes_to_write:
+                break
+
             b_num = from_bytes_64bit(change_data[data_pos:data_pos + 8])
             data_pos += 8
             timestamp = from_bytes_64bit(change_data[data_pos:data_pos + 8])
@@ -460,17 +459,18 @@ class Journal:
             cg = Change(b_num)
             cg.time_stamp = timestamp
 
+            # Process selectors and data
             while data_pos < ct_bytes_to_write:
-                # Process selector
                 if data_pos + 8 > ct_bytes_to_write:
                     break
+
                 selector_bytes = change_data[data_pos:data_pos + 8]
                 selector = Select.from_bytes(selector_bytes)
                 data_pos += 8
                 cg.selectors.append(selector)
 
                 # Process data lines
-                for i in range(63):  # Process up to 63 lines
+                for i in range(63):
                     if not selector.is_set(i):
                         continue
                     if data_pos + u32Const.BYTES_PER_LINE.value > ct_bytes_to_write:
@@ -483,16 +483,8 @@ class Journal:
                 if selector.is_last_block():
                     break
 
-            # Process CRC and padding
-            if data_pos + 8 <= ct_bytes_to_write:
-                # Skip CRC and padding
-                data_pos += 8
-
             if cg:
                 r_j_cg_log.add_to_log(cg)
-
-        # Ensure file position is correct after processing
-        self.seek(start_position + ct_bytes_to_write)
 
         return ct_bytes_to_write
 
