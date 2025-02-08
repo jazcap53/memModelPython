@@ -693,37 +693,48 @@ class Journal:
                     except Exception as e:
                         logger.error(f"Failed to remove file {file}: {e}")
 
-
     class _Metadata:
         """Handles journal metadata operations."""
 
-        def __init__(self, journal_instance):
+        def __init__(self, journal_instance: 'Journal'):
             self._journal = journal_instance
             self.meta_get = 0
             self.meta_put = 0
             self.meta_sz = 0
 
-        def read(self, size=-1):
-            """Read from journal file with logging."""
+        def read(self):
+            """Read metadata from journal file.
+
+            Returns:
+                tuple: (meta_get, meta_put, meta_sz)
+            """
+            self._journal.seek(0)
+
             try:
-                data = self.journal_file.read(size)
-                bytes_read = len(data) if size == -1 else size
-                self.total_bytes_read += bytes_read
-                position = self.tell()
-                self.read_log.append((position - bytes_read, bytes_read))  # Log the read operation
-                logger.info(f"READ: {bytes_read} bytes (Total read: {self.total_bytes_read}, "
-                            f"Total written: {self.total_bytes_written}, "
-                            f"File position: {position})")
-                return data
-            except IOError as e:
-                logger.error(f"Read error: {e}")
-                raise
+                meta_get = read_64bit(self._journal)
+                meta_put = read_64bit(self._journal)
+                meta_sz = read_64bit(self._journal)
+
+                # Update instance attributes
+                self.meta_get = meta_get
+                self.meta_put = meta_put
+                self.meta_sz = meta_sz
+
+                return meta_get, meta_put, meta_sz
+            except Exception as e:
+                logger.error(f"Error reading metadata: {str(e)}")
+                return -1, 24, 0  # Default values on error
 
         def write(self, new_g_pos: int, new_p_pos: int, u_ttl_bytes_written: int):
             """Write metadata to journal file."""
             self._journal.seek(0)
             metadata = struct.pack('<qqq', new_g_pos, new_p_pos, u_ttl_bytes_written)
             self._journal.write(metadata)
+
+            # Update instance attributes
+            self.meta_get = new_g_pos
+            self.meta_put = new_p_pos
+            self.meta_sz = u_ttl_bytes_written
 
         def init(self):
             """Initialize metadata to default values."""
@@ -732,11 +743,14 @@ class Journal:
             bytes_stored = 0
             self._journal.seek(0)
             self._journal.write(struct.pack('<qqq', rd_pt, wrt_pt, bytes_stored))
+            self.meta_get = rd_pt
+            self.meta_put = wrt_pt
+            self.meta_sz = bytes_stored
 
     class _FileIO:
         """Handles file I/O operations for the journal."""
 
-        def __init__(self, journal_instance):
+        def __init__(self, journal_instance: 'Journal'):
             self._journal = journal_instance
 
         def wrt_field(self, data: bytes, dat_len: int, do_ct: bool) -> int:
@@ -1021,7 +1035,7 @@ class Journal:
     class _ChangeLogHandler:
         """Manages change log operations for the journal."""
 
-        def __init__(self, journal_instance):
+        def __init__(self, journal_instance: 'Journal'):
             self._journal = journal_instance
             self.pg_buf: List[Optional[Tuple[int, Page]]] = [None] * journal_instance.PAGE_BUFFER_SIZE  # Make this an instance attribute
             # self.intermediate_buf_count = 0  # Also make this an instance attribute
