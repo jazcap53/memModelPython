@@ -422,11 +422,13 @@ class Journal:
 
     def _read_start_tag(self) -> int:
         """Read and return the start tag from the journal file."""
-        return read_64bit(self.journal_file)
+        tag_bytes = self._read_with_log(8)
+        return from_bytes_64bit(tag_bytes)
 
     def _read_ct_bytes_to_write(self) -> int:
-        """Read and return the count of bytes to write from the journal file."""
-        return read_64bit(self.journal_file)
+        """Read and return the count of bytes to write."""
+        bytes_data = self._read_with_log(8)
+        return from_bytes_64bit(bytes_data)
 
     def _calculate_end_tag_position(self, start_pos: int, ct_bytes_to_write: int) -> int:
         """Calculate the position of the end tag."""
@@ -441,25 +443,58 @@ class Journal:
     def _read_changes(self, r_j_cg_log: ChangeLog, ct_bytes_to_write: int) -> int:
         """Read changes from the journal and populate the change log."""
         bytes_read = 0
-        logger.debug(f"Starting to read changes at position {self.tell()}")
+        start_position = self.tell()
 
-        while bytes_read < ct_bytes_to_write:
-            # Replace "read_single_change" context
-            position_before = self.tell()
-            cg, new_bytes_read = self._read_single_change(bytes_read)
-            logger.debug(f"Read single change from {position_before} to {self.tell()}")
-            bytes_read = new_bytes_read
+        # Read all change data at once with the actual calculated size
+        change_data = self._read_with_log(ct_bytes_to_write)
+
+        # Process the data
+        data_pos = 0
+        while data_pos < ct_bytes_to_write:
+            # Process block number and timestamp
+            b_num = from_bytes_64bit(change_data[data_pos:data_pos + 8])
+            data_pos += 8
+            timestamp = from_bytes_64bit(change_data[data_pos:data_pos + 8])
+            data_pos += 8
+
+            cg = Change(b_num)
+            cg.time_stamp = timestamp
+
+            while data_pos < ct_bytes_to_write:
+                # Process selector
+                if data_pos + 8 > ct_bytes_to_write:
+                    break
+                selector_bytes = change_data[data_pos:data_pos + 8]
+                selector = Select.from_bytes(selector_bytes)
+                data_pos += 8
+                cg.selectors.append(selector)
+
+                # Process data lines
+                for i in range(63):  # Process up to 63 lines
+                    if not selector.is_set(i):
+                        continue
+                    if data_pos + u32Const.BYTES_PER_LINE.value > ct_bytes_to_write:
+                        break
+
+                    line_data = change_data[data_pos:data_pos + u32Const.BYTES_PER_LINE.value]
+                    data_pos += u32Const.BYTES_PER_LINE.value
+                    cg.new_data.append(line_data)
+
+                if selector.is_last_block():
+                    break
+
+            # Process CRC and padding
+            if data_pos + 8 <= ct_bytes_to_write:
+                # Skip CRC and padding
+                data_pos += 8
 
             if cg:
                 r_j_cg_log.add_to_log(cg)
 
-            # Replace "read_crc_and_padding" context
-            position_before = self.tell()
-            bytes_read = self._read_crc_and_padding(bytes_read, ct_bytes_to_write)
-            logger.debug(f"Read CRC and padding from {position_before} to {self.tell()}")
+        # Ensure file position is correct after processing
+        self.seek(start_position + ct_bytes_to_write)
 
-        logger.debug(f"Finished reading changes at position {self.tell()}. Total bytes read: {bytes_read}")
-        return bytes_read
+        return ct_bytes_to_write
 
     def _check_journal_end(self, bytes_read: int, ct_bytes_to_write: int) -> bool:
         """Check if we've read all the bytes we need or reached a genuine end."""
@@ -543,8 +578,9 @@ class Journal:
         return bytes_read
 
     def _read_end_tag(self) -> int:
-        """Read and return the end tag from the journal file."""
-        return read_64bit(self.journal_file)
+        """Read and return the end tag."""
+        tag_bytes = self._read_with_log(8)
+        return from_bytes_64bit(tag_bytes)
 
     def write_block_to_disk(self, block_num: bNum_t, page: Page):
         """Write a single block to disk.
@@ -693,6 +729,34 @@ class Journal:
                     except Exception as e:
                         logger.error(f"Failed to remove file {file}: {e}")
 
+    def _read_with_log(self, size: int) -> bytes:
+        """Read bytes using ajTypes functions while maintaining the read log.
+
+        Args:
+            size: Number of bytes to read (typically 4 or 8)
+
+        Returns:
+            The read data as bytes
+        """
+        current_position = self.tell()
+
+        # Use ajTypes functions for actual reading
+        if size == 8:
+            value = read_64bit(self.journal_file)
+            data = to_bytes_64bit(value)
+        elif size == 4:
+            value = read_32bit(self.journal_file)
+            data = struct.pack('<I', value)
+        else:
+            data = self.journal_file.read(size)
+
+        # Log the read operation
+        self.total_bytes_read += len(data)
+        self.read_log.append((current_position, len(data)))
+        logger.debug(f"Logged read: {current_position} to {current_position + len(data)}")
+
+        return data
+
     class _Metadata:
         """Handles journal metadata operations."""
 
@@ -703,19 +767,17 @@ class Journal:
             self.meta_sz = 0
 
         def read(self):
-            """Read metadata from journal file.
-
-            Returns:
-                tuple: (meta_get, meta_put, meta_sz)
-            """
+            """Read metadata using journal's logging capability."""
             self._journal.seek(0)
-
             try:
-                meta_get = read_64bit(self._journal)
-                meta_put = read_64bit(self._journal)
-                meta_sz = read_64bit(self._journal)
+                # Read all 24 bytes at once for correct logging
+                all_metadata = self._journal._read_with_log(24)
 
-                # Update instance attributes
+                # Extract the values from the single read
+                meta_get = from_bytes_64bit(all_metadata[0:8])
+                meta_put = from_bytes_64bit(all_metadata[8:16])
+                meta_sz = from_bytes_64bit(all_metadata[16:24])
+
                 self.meta_get = meta_get
                 self.meta_put = meta_put
                 self.meta_sz = meta_sz
@@ -723,7 +785,7 @@ class Journal:
                 return meta_get, meta_put, meta_sz
             except Exception as e:
                 logger.error(f"Error reading metadata: {str(e)}")
-                return -1, 24, 0  # Default values on error
+                return -1, 24, 0
 
         def write(self, new_g_pos: int, new_p_pos: int, u_ttl_bytes_written: int):
             """Write metadata to journal file."""
