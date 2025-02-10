@@ -29,6 +29,8 @@ from logging_config import get_logger
 
 
 logger = get_logger(__name__)
+end_tag_logger = get_logger('journal.end_tag')
+
 
 
 class NoSelectorsAvailableError(Exception):
@@ -334,9 +336,12 @@ class Journal:
     def _verify_journal_tags(self, ck_start_tag, ck_end_tag):
         """Verify the start and end tags of the journal entry."""
         if ck_start_tag != self.START_TAG:
+            logger.error(f"Start tag mismatch at position {self.tell()}")
             raise ValueError(f"Start tag mismatch: expected {self.START_TAG:X}, got {ck_start_tag:X}")
 
         if ck_end_tag != self.END_TAG:
+            logger.error(f"End tag mismatch at position {self.tell()}")
+            logger.error(f"Journal size: {u32Const.JRNL_SIZE.value}, Current position: {self.tell()}")
             raise ValueError(f"End tag mismatch: expected {self.END_TAG:X}, got {ck_end_tag:X}")
 
     def _process_journal_entry(self, ttl_bytes):
@@ -571,8 +576,12 @@ class Journal:
 
     def _read_end_tag(self) -> int:
         """Read and return the end tag."""
+        current_pos = self.tell()
+        logger.debug(f"Reading end tag at position {current_pos}")
         tag_bytes = self._read_with_log(8)
-        return from_bytes_64bit(tag_bytes)
+        tag_value = from_bytes_64bit(tag_bytes)
+        logger.debug(f"Read end tag value: {tag_value:X} at position {self.tell()}")
+        return tag_value
 
     def write_block_to_disk(self, block_num: bNum_t, page: Page):
         """Write a single block to disk.
@@ -975,7 +984,12 @@ class Journal:
 
         def write_end_tag(self):
             """Write the end tag to the journal file."""
+            current_pos = self._journal.tell()
+            end_tag_logger.debug(f"Writing end tag {self._journal.END_TAG:X} at position {current_pos}")
             write_64bit(self._journal, self._journal.END_TAG)
+            after_pos = self._journal.tell()
+            if after_pos != current_pos + 8:
+                end_tag_logger.warning(f"End tag write changed position from {current_pos} to {after_pos}")
 
         def write_ct_bytes(self, ct_bytes):
             """Write the count of bytes to the journal file."""
@@ -1392,6 +1406,9 @@ class Journal:
             else:
                 logger.debug(f"End tag position without wrap: {end_tag_pos}")
 
+            end_tag_logger.debug(
+                f"End tag calculation: start_pos={start_pos}, ct_bytes_to_write={self._journal.ct_bytes_to_write}")
+            end_tag_logger.debug(f"Seeking to calculated end_tag_pos: {end_tag_pos}")
             self._journal.seek(end_tag_pos)
             self._write_journal_tags(False)  # Write end tag
 

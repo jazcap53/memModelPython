@@ -20,18 +20,29 @@ def setup_logging(default_level=logging.WARNING):
                 'class': 'logging.StreamHandler',
                 'stream': sys.stdout,
             },
+            'end_tag_handler': {  # New handler for end tag operations
+                'level': logging.DEBUG,
+                'formatter': 'standard',
+                'class': 'logging.StreamHandler',
+                'stream': sys.stdout,
+            }
         },
         'loggers': {
             '': {  # root logger
                 'handlers': ['default'],
                 'level': default_level,
                 'propagate': True
+            },
+            'journal.end_tag': {  # Specific logger for end tag operations
+                'handlers': ['end_tag_handler'],
+                'level': logging.DEBUG,
+                'propagate': False
             }
         }
     }
 
     logging.config.dictConfig(logging_config)
-    logging.getLogger().setLevel(logging.INFO)
+    # logging.getLogger().setLevel(logging.INFO)
 
 
 
