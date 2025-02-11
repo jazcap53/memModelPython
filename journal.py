@@ -358,38 +358,24 @@ class Journal:
 
     def rd_last_jrnl(self, r_j_cg_log: ChangeLog):
         """Read the last journal entry into a change log."""
-        logger.debug("Entering rd_last_jrnl")
-
         start_pos = self._read_journal_metadata()
         if start_pos is None:
-            logger.warning("No valid start position found")
             return
 
-        logger.debug(f"Starting to read journal entry at position: {start_pos}")
         self.seek(start_pos)
-
         ck_start_tag = self._read_start_tag()
         ct_bytes_to_write = self._read_ct_bytes_to_write()
         self.ct_bytes_to_write = ct_bytes_to_write
 
         bytes_read = self._read_changes(r_j_cg_log, ct_bytes_to_write)
 
-        # The file position should now be at the end of change data
+        # Calculate end tag position using same logic as when writing
+        end_tag_pos = self._calculate_end_tag_position(start_pos, ct_bytes_to_write)
+        self.seek(end_tag_pos)
         ck_end_tag = self._read_end_tag()
 
-        try:
-            self._verify_journal_tags(ck_start_tag, ck_end_tag)
-        except ValueError as e:
-            logger.error(f"Tag verification failed: {str(e)}")
-            logger.error(f"Current file position: {self.tell()}")
-            raise
-
+        self._verify_journal_tags(ck_start_tag, ck_end_tag)
         self._process_journal_entry(bytes_read)
-
-        logger.debug(f"Exiting rd_last_jrnl. Read journal entries. Metadata - "
-                     f"get: {self.meta_get}, "
-                     f"put: {self.meta_put}, "
-                     f"size: {self.meta_sz}")
 
     def rd_jrnl(self, r_j_cg_log: ChangeLog, start_pos: int) -> Tuple[int, int, int]:
         """Read journal contents from a given position."""
@@ -447,9 +433,6 @@ class Journal:
         end_tag_pos = start_pos + ct_bytes_to_write
         if end_tag_pos >= u32Const.JRNL_SIZE.value:
             end_tag_pos = self.META_LEN + (end_tag_pos - u32Const.JRNL_SIZE.value)
-            logger.debug(f"End tag wraps around to position: {end_tag_pos}")
-        else:
-            logger.debug(f"End tag position without wrap: {end_tag_pos}")
         return end_tag_pos
 
     def _read_changes(self, r_j_cg_log: ChangeLog, ct_bytes_to_write: int) -> int:
