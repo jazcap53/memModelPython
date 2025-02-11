@@ -249,6 +249,14 @@ class Journal:
         self._reset_metadata()
         self._update_status(keep_going)
 
+    def set_wiper_dirty(self, b_num: bNum_t):
+        """Mark a block as dirty in the wiper list.
+
+        Args:
+            b_num: The block number to mark as dirty
+        """
+        self.wipers.set_dirty(b_num)
+
     def _is_journal_empty(self) -> bool:
         """Check if the journal is empty."""
         return not any(self.blks_in_jrnl)

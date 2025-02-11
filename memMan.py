@@ -166,16 +166,17 @@ class MemMan:
 
             assert pg_tab_slot != len(self.pT.pg_tab)
 
-            self.pT.reset_a_time(pg_tab_slot)
-            self.pT.heapify()
+            # Remove the specific entry we want
+            target_entry = self.pT.pg_tab[pg_tab_slot]
+            self.pT.pg_tab[pg_tab_slot] = self.pT.pg_tab[-1]
+            self.pT.pg_tab.pop()
 
-            dummy = self.pT.do_pop_heap()
-
-            assert dummy.block_num == b_num
+            # Restore heap property
+            if pg_tab_slot < len(self.pT.pg_tab):
+                self.pT.heapify()
 
             del self.blk_locs_in_mem[b_num]
             self.blks_in_mem.reset(b_num)
-
             self.p_m.make_avl_mem_slt(mem_slot)
 
             print(f"{self.tabs(2, True)}Evicted page {b_num} from memory slot {mem_slot} at time {get_cur_time()}")
