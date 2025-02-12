@@ -104,6 +104,7 @@ class Journal:
         self.crash_chk = crash_chk
         self.sz = Journal.CPP_SELECT_T_SZ
         self.end_tag_posn = None
+        self._recently_purged = False
 
         # Counters for tracking I/O
         self.total_bytes_read = 0
@@ -232,13 +233,15 @@ class Journal:
 
     def purge_jrnl(self, keep_going: bool, had_crash: bool):
         """Purge the journal, optionally handling crash recovery."""
-        logger.debug(f"Entering purge_jrnl(keep_going={keep_going}, had_crash={had_crash})")
-
         if self.debug:
             return
 
-        self._file_io.reset_file()  # Reset file state before purging
+        # Skip redundant purges unless this is a crash recovery
+        if not had_crash and self._recently_purged:
+            logger.info("Skipping redundant purge - journal was recently purged")
+            return
 
+        self._file_io.reset_file()  # Reset file state before purging
         logger.info(f"Purging journal{'(after crash)' if had_crash else ''}")
 
         if self._is_journal_empty() and not had_crash:
@@ -248,6 +251,7 @@ class Journal:
 
         self._reset_metadata()
         self._update_status(keep_going)
+        self._recently_purged = True
 
     def set_wiper_dirty(self, b_num: bNum_t):
         """Mark a block as dirty in the wiper list.
