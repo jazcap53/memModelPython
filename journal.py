@@ -229,6 +229,10 @@ class Journal:
 
     def wrt_cg_log_to_jrnl(self, r_cg_log: ChangeLog):
         """Public method to delegate writing change log to journal to the inner _ChangeLogHandler."""
+        # Skip if there are no changes to write
+        if not r_cg_log.cg_line_ct:
+            return
+
         self._change_log_handler.wrt_cg_log_to_jrnl(r_cg_log)
 
     def purge_jrnl(self, keep_going: bool, had_crash: bool):
@@ -1414,6 +1418,11 @@ class Journal:
 
             self._update_metadata(new_g_pos, new_p_pos, ttl_bytes)
             self._flush_and_update_status()
+
+            # Reset the recently purged flag in the parent Journal class
+            # This ensures that after writing new changes, the journal can be purged again
+            self._journal._recently_purged = False
+            logger.debug("Reset _recently_purged flag to False after successful journal write")
 
             logger.debug(f"Exiting wrt_cg_log_to_jrnl. Wrote {self._journal.ttl_bytes_written} bytes. Final metadata - "
                          f"get: {self._journal._metadata.meta_get}, "
