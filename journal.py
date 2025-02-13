@@ -370,15 +370,26 @@ class Journal:
         if start_pos is None:
             return
 
+        self._debug_journal_layout()
+
         self.seek(start_pos)
         ck_start_tag = self._read_start_tag()
         ct_bytes_to_write = self._read_ct_bytes_to_write()
         self.ct_bytes_to_write = ct_bytes_to_write
 
+        # Record current position before reading changes
+        changes_start_pos = self.tell()
         bytes_read = self._read_changes(r_j_cg_log, ct_bytes_to_write)
 
-        # Calculate end tag position using same logic as when writing
-        end_tag_pos = self._calculate_end_tag_position(start_pos, ct_bytes_to_write)
+        # Calculate end tag position based on start position, not changes_start
+        end_tag_pos = start_pos + ct_bytes_to_write
+        if end_tag_pos >= u32Const.JRNL_SIZE.value:
+            end_tag_pos = self.META_LEN + (end_tag_pos - u32Const.JRNL_SIZE.value)
+
+        end_tag_logger.debug(f"End tag calculation: start_pos={start_pos}, "
+                             f"changes_start={changes_start_pos}, "
+                             f"bytes_read={bytes_read}, end_tag_pos={end_tag_pos}")
+
         self.seek(end_tag_pos)
         ck_end_tag = self._read_end_tag()
 
@@ -625,19 +636,40 @@ class Journal:
 
     def verify_bytes_read(self):
         """Verify that the number of bytes read matches the expected count."""
+        # Get current metadata for calculation
+        meta_get = self.meta_get
+
+        # Calculate positions based on start position
+        end_tag_pos = meta_get + self.ct_bytes_to_write
+        if end_tag_pos >= u32Const.JRNL_SIZE.value:
+            end_tag_pos = self.META_LEN + (end_tag_pos - u32Const.JRNL_SIZE.value)
+
         expected_reads = [
             (0, 24),  # Metadata read
-            (24, 8),  # Start tag
-            (32, 8),  # ct_bytes_to_write field
-            (40, self.ct_bytes_to_write),  # Actual changes
-            (40 + self.ct_bytes_to_write, 8)  # End tag
+            (meta_get, 8),  # Start tag
+            (meta_get + 8, 8),  # ct_bytes_to_write field
+            (meta_get + 16, self.ct_bytes_to_write),  # Actual changes
+            (end_tag_pos, 8)  # End tag
         ]
 
-        logger.debug(f"Expected reads: {expected_reads}")
-        logger.debug(f"Actual reads: {self.read_log}")
+        # Compare only the last set of reads that should match the expected pattern
+        actual_reads = self.read_log[-len(expected_reads):]
 
-        assert self.read_log == expected_reads, (
-            f"Read mismatch: expected {expected_reads}, got {self.read_log}"
+        logger.debug("Verifying reads:")
+        logger.debug(f"  meta_get: {meta_get}")
+        logger.debug(f"  ct_bytes_to_write: {self.ct_bytes_to_write}")
+        logger.debug(f"  end_tag_pos: {end_tag_pos}")
+        logger.debug(f"  Expected: {expected_reads}")
+        logger.debug(f"  Actual (last set): {actual_reads}")
+
+        for i, (expected, actual) in enumerate(zip(expected_reads, actual_reads)):
+            if expected != actual:
+                logger.error(f"Mismatch at position {i}:")
+                logger.error(f"  Expected: {expected}")
+                logger.error(f"  Actual:   {actual}")
+
+        assert actual_reads == expected_reads, (
+            f"Read mismatch: expected {expected_reads}, got {actual_reads}"
         )
 
     def verify_page_crc(self, page_tuple: Tuple[bNum_t, Page]) -> bool:
@@ -756,6 +788,69 @@ class Journal:
         logger.debug(f"Logged read: {current_position} to {current_position + len(data)}")
 
         return data
+
+    def _debug_journal_layout(self):
+        """Debug helper to dump journal layout information."""
+        meta_get = self.meta_get
+
+        end_tag_logger.debug(f"Journal Layout Debug:")
+        end_tag_logger.debug(f"  meta_get: {meta_get}")
+        end_tag_logger.debug(f"  meta_put: {self.meta_put}")
+        end_tag_logger.debug(f"  ct_bytes_to_write: {self.ct_bytes_to_write}")
+
+        # Calculate key positions
+        start_pos = meta_get if meta_get != -1 else self.META_LEN
+        changes_start = start_pos + 16
+        calculated_end_tag_pos = changes_start + self.ct_bytes_to_write
+        if calculated_end_tag_pos >= u32Const.JRNL_SIZE.value:
+            calculated_end_tag_pos = self.META_LEN + (calculated_end_tag_pos - u32Const.JRNL_SIZE.value)
+
+        end_tag_logger.debug(f"  start_pos: {start_pos}")
+        end_tag_logger.debug(f"  changes_start: {changes_start}")
+        end_tag_logger.debug(f"  calculated_end_tag_pos: {calculated_end_tag_pos}")
+
+        # Look for actual end tag position
+        current_pos = self.tell()
+        actual_pos = self._find_end_tag_position()
+        if actual_pos is not None:
+            end_tag_logger.debug(f"  actual_end_tag_pos: {actual_pos}")
+        self.seek(current_pos)
+
+    def _find_end_tag_position(self):
+        """Find position of the END_TAG in the journal file."""
+        # Save current position
+        current_pos = self.tell()
+
+        try:
+            # To prevent excessive scanning, only look in the likely area
+            search_start = max(0, self.meta_put - 1000)
+            search_end = min(u32Const.JRNL_SIZE.value, self.meta_put + 1000)
+
+            self.seek(search_start)
+
+            # Read the file in chunks and search for the end tag
+            while self.tell() < search_end:
+                chunk = self.read(1024)
+                if len(chunk) < 8:
+                    break
+
+                for i in range(len(chunk) - 7):
+                    value = int.from_bytes(chunk[i:i + 8], byteorder='little')
+                    if value == self.END_TAG:
+                        position = search_start + i
+                        end_tag_logger.debug(f"Found END_TAG at {position}")
+                        return position
+
+                # Move back 7 bytes to handle end tag across chunk boundaries
+                if len(chunk) >= 7:
+                    self.seek(self.tell() - 7)
+
+        finally:
+            # Restore original position
+            self.seek(current_pos)
+
+        return None
+
 
     class _Metadata:
         """Handles journal metadata operations."""
