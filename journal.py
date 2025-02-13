@@ -1747,23 +1747,33 @@ if __name__ == "__main__":
     from ajUtils import set_test_mode
     from change import Change, ChangeLog
     from ajTypes import u32Const
-    from crashChk import CrashChk  # Add this import
-    from status import Status      # Add this import
+    from crashChk import CrashChk
+    from status import Status
+    from simDisk import SimDisk  # Add this import
 
     set_test_mode(True)
 
-    # Setup minimal components
+    # Create test files
+    test_journal_file = "test_journal.bin"
+    test_disk_file = "test_disk.bin"
+    test_free_file = "test_free.bin"
+    test_inode_file = "test_inode.bin"
+    test_status_file = "test_status.txt"
+
+    # Setup proper components
+    status = Status(test_status_file)
+    sim_disk = SimDisk(status, test_disk_file, test_journal_file,
+                       test_free_file, test_inode_file)
     change_log = ChangeLog(test_sw=True)
+    crash_chk = CrashChk()
+
+    # Create a test change
     change = Change(1)
     change.add_line(0, b'A' * u32Const.BYTES_PER_LINE.value)
     change_log.add_to_log(change)
 
-    # Create proper instances instead of None
-    status = Status("test_status.txt")
-    crash_chk = CrashChk()  # Create a CrashChk instance
-
-    # Create and use a test journal with proper instances
-    test_journal = Journal("test_journal.bin", None, change_log, status, crash_chk)  # Use actual instances
+    # Create journal with proper SimDisk instance
+    test_journal = Journal(test_journal_file, sim_disk, change_log, status, crash_chk)
     test_journal._change_log_handler.calculate_ct_bytes_to_write(change_log)
     test_journal._change_log_handler.wrt_cg_log_to_jrnl(change_log)
 
@@ -1775,6 +1785,7 @@ if __name__ == "__main__":
 
     # Clean up
     import os
-    for file in ["test_journal.bin", "test_status.txt"]:
+    for file in [test_journal_file, test_disk_file, test_free_file,
+                 test_inode_file, test_status_file]:
         if os.path.exists(file):
             os.remove(file)

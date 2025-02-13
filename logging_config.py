@@ -29,15 +29,15 @@ def setup_logging(default_level=logging.WARNING):
         },
         'handlers': {
             'default': {
-                'level': logging.INFO,
+                'level': logging.ERROR,  # Changed from INFO to ERROR
                 'formatter': 'standard',
                 'class': 'logging.StreamHandler',
                 'stream': sys.stdout,
                 'filters': ['no_selector_spam']
             },
             'end_tag_handler': {
-                'level': logging.INFO,  # Raised from DEBUG
-                'formatter': 'minimal',  # Using minimal format
+                'level': logging.DEBUG,  # Changed from INFO to DEBUG
+                'formatter': 'standard', # Using standard format for timestamps
                 'class': 'logging.StreamHandler',
                 'stream': sys.stdout,
             }
@@ -45,17 +45,17 @@ def setup_logging(default_level=logging.WARNING):
         'loggers': {
             '': {  # root logger
                 'handlers': ['default'],
-                'level': logging.INFO,  # Raised from WARNING
+                'level': logging.ERROR,  # Changed from INFO to ERROR
                 'propagate': True
             },
             'journal': {
                 'handlers': ['default'],
-                'level': logging.INFO,
+                'level': logging.ERROR, # Changed from INFO to ERROR
                 'propagate': False
             },
             'journal.end_tag': {
                 'handlers': ['end_tag_handler'],
-                'level': logging.INFO,  # Raised from DEBUG
+                'level': logging.DEBUG,  # Keep at DEBUG
                 'propagate': False
             }
         }
