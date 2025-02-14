@@ -897,9 +897,6 @@ class Journal:
                 if do_ct:
                     self._journal.ttl_bytes_written += dat_len
 
-            if do_ct:
-                logger.debug(f"Wrote {bytes_written} bytes for {data[:10]}...")
-
             self._journal.final_p_pos = self._journal.tell()
             return bytes_written
 
@@ -915,10 +912,8 @@ class Journal:
             g_pos = self._journal.tell()
             buf_sz = u32Const.JRNL_SIZE.value
             end_pt = g_pos + dat_len
-            logger.debug(f"Reading field of length {dat_len} from position {g_pos}")
 
             if end_pt > buf_sz:
-                logger.debug(f"Field wraps around journal boundary")
                 return self._read_with_wraparound(dat_len, buf_sz, end_pt)
             else:
                 return self._read_without_wraparound(dat_len)
@@ -1007,11 +1002,8 @@ class Journal:
         def write_end_tag(self):
             """Write the end tag to the journal file."""
             current_pos = self._journal.tell()
-            end_tag_logger.debug(f"Writing end tag {self._journal.END_TAG:X} at position {current_pos}")
             write_64bit(self._journal, self._journal.END_TAG)
             after_pos = self._journal.tell()
-            if after_pos != current_pos + 8:
-                end_tag_logger.warning(f"End tag write changed position from {current_pos} to {after_pos}")
 
         def write_ct_bytes(self, ct_bytes):
             """Write the count of bytes to the journal file."""
@@ -1031,8 +1023,6 @@ class Journal:
 
         def wrt_cgs_to_jrnl(self, r_cg_log: ChangeLog):
             """Write changes from a change log to the journal."""
-            logger.debug(f"Writing {len(r_cg_log.the_log)} change log entries to journal")
-
             for blk_num, changes in r_cg_log.the_log.items():
                 for cg in changes:
                     self._write_change_to_journal(cg)
@@ -1047,11 +1037,8 @@ class Journal:
 
         def _write_change_header(self, cg: Change):
             """Write the header information for a change."""
-            logger.debug(f"Writing block number: {cg.block_num}")
             self.wrt_field(to_bytes_64bit(cg.block_num), 8, True)
             self._journal.blks_in_jrnl[cg.block_num] = True
-
-            logger.debug(f"Writing timestamp: {cg.time_stamp}")
             self.wrt_field(to_bytes_64bit(cg.time_stamp), 8, True)
 
         def _write_change_data(self, cg: Change) -> bytearray:
@@ -1065,7 +1052,6 @@ class Journal:
 
         def _write_selector_and_data(self, selector: Select, cg: Change, page_data: bytearray):
             """Write a selector and its associated data."""
-            logger.debug(f"Writing selector: {selector.value}")
             self.wrt_field(selector.to_bytes(), 8, True)
 
             for i in range(63):  # Process up to 63 lines (excluding MSB)
@@ -1077,12 +1063,10 @@ class Journal:
         def _write_data_line(self, line_num: int, cg: Change, page_data: bytearray):
             """Write a single line of data."""
             if not cg.new_data:
-                logger.warning(f"No data available for set bit {line_num} in selector")
                 return
 
             data = cg.new_data.popleft()
             data_bytes = data if isinstance(data, bytes) else bytes(data)
-            logger.debug(f"Writing data line: {data_bytes[:10]}...")
             self.wrt_field(data_bytes, u32Const.BYTES_PER_LINE.value, True)
 
             start = line_num * u32Const.BYTES_PER_LINE.value
@@ -1092,17 +1076,13 @@ class Journal:
         def _write_change_footer(self, page_data: bytearray):
             """Write the CRC and padding for a change."""
             crc = AJZlibCRC.get_code(page_data[:-4], u32Const.BYTES_PER_PAGE.value - 4)
-            logger.debug(f"Writing CRC: {crc:08x}")
             self.wrt_field(struct.pack('<I', crc), 4, True)
-
-            logger.debug("Writing padding")
             self.wrt_field(b'\0\0\0\0', 4, True)
 
         def _finalize_journal_write(self):
             """Finalize the journal write operation."""
             self._journal.flush()
             os.fsync(self._journal.fileno())  # Ensure data is written to disk
-            logger.debug(f"Total bytes written: {self._journal.ttl_bytes_written}")
 
         @staticmethod
         def _crc_check_pg(p_pr: Tuple[bNum_t, Page]) -> bool:
@@ -1114,21 +1094,17 @@ class Journal:
                                                 u32Const.BYTES_PER_PAGE.value - u32Const.CRC_BYTES.value)
 
             if stored_crc != calculated_crc:
-                logger.warning(f"CRC mismatch for block {block_num}.")
-                logger.warning(f"  Stored:     {stored_crc:04x} {stored_crc >> 16:04x}")
-                logger.warning(f"  Calculated: {calculated_crc:04x} {calculated_crc >> 16:04x}")
                 return False
 
             return True
-
 
     class _ChangeLogHandler:
         """Manages change log operations for the journal."""
 
         def __init__(self, journal_instance: 'Journal'):
             self._journal = journal_instance
-            self.pg_buf: List[Optional[Tuple[int, Page]]] = [None] * journal_instance.PAGE_BUFFER_SIZE  # Make this an instance attribute
-            # self.intermediate_buf_count = 0  # Also make this an instance attribute
+            self.pg_buf: List[Optional[Tuple[int, Page]]] = [
+                                                                None] * journal_instance.PAGE_BUFFER_SIZE  # Make this an instance attribute
 
         def _handle_block_transition(self, block_num: bNum_t, page: Page):
             """Handle transition between blocks during change processing.
@@ -1264,7 +1240,6 @@ class Journal:
 
         def wrt_cg_to_pg(self, cg: Change, pg: Page):
             """Write changes to a page."""
-            logger.debug("Writing change to page")
             cg.arr_next = 0
             try:
                 while True:
@@ -1272,43 +1247,34 @@ class Journal:
                     if lin_num == 0xFF:
                         break
                     if not cg.new_data:
-                        logger.warning("Ran out of data while processing selectors")
                         break
                     temp = cg.new_data.popleft()
                     start = lin_num * u32Const.BYTES_PER_LINE.value
                     end = (lin_num + 1) * u32Const.BYTES_PER_LINE.value
-                    logger.debug(f"Writing line {lin_num} to page")
                     pg.dat[start:end] = temp
 
             except NoSelectorsAvailableError:
-                logger.warning("No selectors available")
+                pass
 
             # Calculate and write CRC
             crc = AJZlibCRC.get_code(pg.dat[:-4], u32Const.BYTES_PER_PAGE.value - 4)
             pg.dat[-4:] = AJZlibCRC.wrt_bytes_little_e(crc, pg.dat[-4:], 4)
-            logger.debug(f"Updated page CRC: {crc:08x}")
 
         def rd_and_wrt_back(self, j_cg_log: ChangeLog, pg_buf: List, buf_page_count: int,
                             prev_blk_num: bNum_t, curr_blk_num: bNum_t, pg: Page):
             """Read changes from log and write them back to disk."""
-            logger.debug(f"Entering rd_and_wrt_back with {len(j_cg_log.the_log)} blocks in change log")
-
             if not j_cg_log.the_log:
-                logger.debug("Change log is empty, returning early")
                 return buf_page_count, prev_blk_num, curr_blk_num, pg
 
             try:
                 blocks = list(j_cg_log.the_log.items())
-                logger.debug(f"Blocks to process: {blocks}")
 
                 # Process all blocks except the last one
                 for i in range(len(blocks) - 1):
                     blk_num, changes = blocks[i]
-                    logger.debug(f"Processing block {blk_num} with {len(changes)} changes")
 
                     for cg in changes:
                         curr_blk_num = cg.block_num
-                        logger.debug(f"Current block number: {curr_blk_num}, Previous: {prev_blk_num}")
 
                         if curr_blk_num != prev_blk_num or prev_blk_num == SENTINEL_INUM:
                             if prev_blk_num != SENTINEL_INUM:
@@ -1316,17 +1282,14 @@ class Journal:
                                 buf_page_count += 1
 
                                 if buf_page_count == self._journal.PAGE_BUFFER_SIZE:
-                                    logger.debug(f"Buffer full ({buf_page_count}), purging")
                                     self.write_buffer_to_disk(False)  # Not the end of processing
                                     buf_page_count = 0
 
                             # Seek and read new block
                             self._journal.sim_disk.get_ds().seek(curr_blk_num * u32Const.BLOCK_BYTES.value)
-                            logger.debug(f"Sought to position: {curr_blk_num * u32Const.BLOCK_BYTES.value}")
 
                             pg = Page()
                             pg.dat = bytearray(self._journal.sim_disk.get_ds().read(u32Const.BLOCK_BYTES.value))
-                            logger.debug(f"Read {u32Const.BLOCK_BYTES.value} bytes from disk")
 
                             prev_blk_num = curr_blk_num
 
@@ -1337,19 +1300,14 @@ class Journal:
                     pg_buf[buf_page_count] = (prev_blk_num, pg)
                     buf_page_count += 1
 
-                logger.debug(f"Exiting rd_and_wrt_back. buf_page_count: {buf_page_count}, "
-                             f"prev_blk_num: {prev_blk_num}, curr_blk_num: {curr_blk_num}")
                 return buf_page_count, prev_blk_num, curr_blk_num, pg
 
             except Exception as e:
-                logger.error(f"Error in rd_and_wrt_back: {str(e)}")
                 raise
 
         def r_and_wb_last(self, cg: Change, pg_buf: List, ctr: int,
                           curr_blk_num: bNum_t, pg: Page):
             """Process the final change and ensure proper buffer handling."""
-            logger.debug(f"Processing final block {curr_blk_num}")
-
             # Read the block from disk
             self._journal.sim_disk.get_ds().seek(curr_blk_num * u32Const.BLOCK_BYTES.value, 0)
             pg.dat = bytearray(self._journal.sim_disk.get_ds().read(u32Const.BLOCK_BYTES.value))
@@ -1374,8 +1332,6 @@ class Journal:
             for i in range(len(pg_buf)):
                 pg_buf[i] = None
 
-            logger.debug("Completed processing final block")
-
         def _write_journal_tags(self, is_start: bool):
             """Write start or end tag to the journal file."""
             if is_start:
@@ -1395,42 +1351,29 @@ class Journal:
             """Flush journal data to disk and update status."""
             self._journal.flush()
             os.fsync(self._journal.fileno())
-            logger.info(f"Change log written at time {get_cur_time()}")
             self._journal.status.wrt("Change log written")
 
         def wrt_cg_log_to_jrnl(self, r_cg_log: ChangeLog):
             """Write entire change log to journal."""
-            logger.debug(f"Entering wrt_cg_log_to_jrnl with {len(r_cg_log.the_log)} blocks in change log")
-
             if not r_cg_log.cg_line_ct:
                 return
 
-            logger.info("Writing change log to journal")
             r_cg_log.print()
 
             self._journal.ttl_bytes_written = 0
             self._journal.ct_bytes_to_write = self.calculate_ct_bytes_to_write(r_cg_log)
-            logger.debug(f"Calculated bytes to write: {self._journal.ct_bytes_to_write}")
 
             # Record start position
             start_pos = self._journal.tell()
-            logger.debug(f"Starting journal write at position: {start_pos}")
 
             self._write_journal_tags(True)  # Write start tag
             self._journal._file_io.wrt_cgs_to_jrnl(r_cg_log)
-            logger.debug(f"Actual bytes written: {self._journal.ttl_bytes_written}")
 
             # Calculate end tag position and seek there
             end_tag_pos = start_pos + self._journal.ct_bytes_to_write
             if end_tag_pos >= u32Const.JRNL_SIZE.value:
                 end_tag_pos = self._journal.META_LEN + (end_tag_pos - u32Const.JRNL_SIZE.value)
-                logger.debug(f"End tag wraps around to position: {end_tag_pos}")
-            else:
-                logger.debug(f"End tag position without wrap: {end_tag_pos}")
 
-            end_tag_logger.debug(
-                f"End tag calculation: start_pos={start_pos}, ct_bytes_to_write={self._journal.ct_bytes_to_write}")
-            end_tag_logger.debug(f"Seeking to calculated end_tag_pos: {end_tag_pos}")
             self._journal.seek(end_tag_pos)
             self._write_journal_tags(False)  # Write end tag
 
@@ -1445,12 +1388,6 @@ class Journal:
             # Reset the recently purged flag in the parent Journal class
             # This ensures that after writing new changes, the journal can be purged again
             self._journal._recently_purged = False
-            logger.debug("Reset _recently_purged flag to False after successful journal write")
-
-            logger.debug(f"Exiting wrt_cg_log_to_jrnl. Wrote {self._journal.ttl_bytes_written} bytes. Final metadata - "
-                         f"get: {self._journal._metadata.meta_get}, "
-                         f"put: {self._journal._metadata.meta_put}, "
-                         f"size: {self._journal._metadata.meta_sz}")
 
             r_cg_log.cg_line_ct = 0
 
@@ -1461,7 +1398,6 @@ class Journal:
                 j_cg_log: The ChangeLog object containing changes to process.
             """
             if not j_cg_log.the_log:
-                logger.debug("Change log is empty, nothing to process")
                 return
 
             # Check for invalid block numbers before processing
@@ -1473,7 +1409,6 @@ class Journal:
             blocks = [(blk_num, changes) for blk_num, changes in j_cg_log.the_log.items() if changes]
 
             if not blocks:
-                logger.debug("No non-empty change lists, nothing to process")
                 return
 
             prev_block_num = SENTINEL_INUM
@@ -1517,8 +1452,6 @@ class Journal:
 
         def _process_last_block(self, cg: Change, curr_blk_num: bNum_t):
             """Process the final block in a series of changes."""
-            logger.debug(f"Processing last block {curr_blk_num}")
-
             # Seek and read the last block
             disk_stream = self._journal.sim_disk.get_ds()
             seek_pos = curr_blk_num * u32Const.BLOCK_BYTES.value
@@ -1557,43 +1490,16 @@ class Journal:
             return sum(1 for item in self.pg_buf if item is not None)
 
         def write_buffer_to_disk(self, is_end: bool = False) -> bool:
-            """Coordinate writing buffered pages to disk.
-
-            This method manages the high-level process of writing buffered pages to disk:
-            1. Iterates through the buffer
-            2. Verifies CRC for each page
-            3. Delegates actual disk writing to Journal.write_block_to_disk
-
-            This method owns the buffer and understands its structure, while
-            delegating physical I/O operations to the Journal class.
-
-            Args:
-                is_end: Whether this is the final write operation in the current sequence.
-                       When True, ensures all buffered pages are written.
-
-            Returns:
-                bool: True if all writes were successful, False otherwise
-
-            See Also:
-                Journal.write_block_to_disk: Handles the actual disk I/O for individual blocks
-            """
             """Coordinate writing buffered pages to disk."""
-            logger.debug(f"Initiating buffer write (is_end={is_end})")
-
             pages_to_write = [item for item in self.pg_buf if item is not None]
-            logger.debug(f"  {len(pages_to_write)} pages to write: {[item[0] for item in pages_to_write if item]}")
 
             if not pages_to_write and not is_end:
-                logger.debug("  No pages to write, returning early")
                 return True
 
             try:
                 for i, (block_num, page) in enumerate(pages_to_write):
-                    logger.debug(f"  Processing page {i + 1}/{len(pages_to_write)} (block {block_num})")
-
                     # Verify CRC
                     if not self._journal.verify_page_crc((block_num, page)):
-                        logger.error(f"    CRC check failed for block {block_num}")
                         return False
 
                     # Delegate to Journal for actual write
@@ -1601,10 +1507,8 @@ class Journal:
 
                 # Clear the buffer
                 self.pg_buf = [None] * self._journal.PAGE_BUFFER_SIZE
-                logger.debug("  Buffer cleared after write operation")
                 return True
             except Exception as e:
-                logger.error(f"  Error during buffer write process: {e}")
                 return False
 
 
