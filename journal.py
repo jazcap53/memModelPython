@@ -781,7 +781,6 @@ class Journal:
 
         return None
 
-
     class _Metadata:
         """Handles journal metadata operations."""
 
@@ -809,7 +808,6 @@ class Journal:
 
                 return meta_get, meta_put, meta_sz
             except Exception as e:
-                logger.error(f"Error reading metadata: {str(e)}")
                 return -1, 24, 0
 
         def write(self, new_g_pos: int, new_p_pos: int, u_ttl_bytes_written: int):
