@@ -122,7 +122,6 @@ class Journal:
             remaining = u32Const.JRNL_SIZE.value - current_size
             self.write(b'\0' * remaining)
         self.seek(0)  # Reset to beginning
-        logger.debug(f"Journal file {'opened' if file_existed else 'created'}: {self.f_name}")
 
         # Verify file size
         self.seek(0, 2)  # Go to end
@@ -176,12 +175,8 @@ class Journal:
             data = self.journal_file.read(size)
             bytes_read = len(data) if size == -1 else size
             self.total_bytes_read += bytes_read
-            logger.info(f"READ: {bytes_read} bytes (Total read: {self.total_bytes_read}, "
-                        f"Total written: {self.total_bytes_written}, "
-                        f"File position: {self.tell()})")
             return data
         except IOError as e:
-            logger.error(f"Read error: {e}")
             raise
 
     def write(self, data):
@@ -189,22 +184,16 @@ class Journal:
         try:
             bytes_written = self.journal_file.write(data)
             self.total_bytes_written += bytes_written
-            logger.info(f"WRITE: {bytes_written} bytes (Total read: {self.total_bytes_read}, "
-                        f"Total written: {self.total_bytes_written}, "
-                        f"File position: {self.tell()})")
             return bytes_written
         except IOError as e:
-            logger.error(f"Write error: {e}")
             raise
 
     def seek(self, offset, whence=0):
         """Seek in journal file with logging."""
         try:
             result = self.journal_file.seek(offset, whence)
-            logger.info(f"SEEK: New position {result} (offset: {offset}, whence: {whence})")
             return result
         except IOError as e:
-            logger.error(f"Seek error: {e}")
             raise
 
     def tell(self):
@@ -225,7 +214,6 @@ class Journal:
         """Reset byte counters."""
         self.total_bytes_read = 0
         self.total_bytes_written = 0
-        logger.info("Journal byte counters reset")
 
     def wrt_cg_log_to_jrnl(self, r_cg_log: ChangeLog):
         """Public method to delegate writing change log to journal to the inner _ChangeLogHandler."""
@@ -242,14 +230,12 @@ class Journal:
 
         # Skip redundant purges unless this is a crash recovery
         if not had_crash and self._recently_purged:
-            logger.info("Skipping redundant purge - journal was recently purged")
             return
 
         self._file_io.reset_file()  # Reset file state before purging
-        logger.info(f"Purging journal{'(after crash)' if had_crash else ''}")
 
         if self._is_journal_empty() and not had_crash:
-            logger.info("Journal is empty: nothing to purge")
+            pass
         else:
             self._process_journal_changes(had_crash)
 
@@ -277,7 +263,7 @@ class Journal:
         self._log_change_summary(j_cg_log)
 
         if not j_cg_log.the_log:
-            logger.info("No changes found in the journal")
+            pass
         else:
             self._apply_changes(j_cg_log)
 
@@ -286,7 +272,7 @@ class Journal:
     def _log_change_summary(self, j_cg_log: ChangeLog):
         """Log a summary of changes in the journal."""
         for block, changes in j_cg_log.the_log.items():
-            logger.debug(f"Block {block}: {len(changes)} changes")
+            pass
 
     def _apply_changes(self, j_cg_log: ChangeLog):
         """Apply changes from the journal to the disk."""
@@ -298,7 +284,7 @@ class Journal:
             cg = j_cg_log.the_log[curr_blk_num][-1]
             self._change_log_handler.r_and_wb_last(cg, self.pg_buf, ctr, curr_blk_num, pg)
         else:
-            logger.warning(f"No changes found for block {curr_blk_num}")
+            pass
 
     def _clear_journal_state(self):
         """Clear the journal state after processing changes."""
@@ -307,16 +293,10 @@ class Journal:
 
     def _reset_metadata(self):
         """Reset the journal metadata."""
-        logger.debug(
-            f"Before reset - meta_get: {self._metadata.meta_get}, meta_put: {self._metadata.meta_put}, meta_sz: {self._metadata.meta_sz}")
-
         self._metadata.meta_get = -1
         self._metadata.meta_put = 24
         self._metadata.meta_sz = 0
         self._metadata.write(-1, 24, 0)
-
-        logger.debug(
-            f"After reset - meta_get: {self._metadata.meta_get}, meta_put: {self._metadata.meta_put}, meta_sz: {self._metadata.meta_sz}")
 
     def _update_status(self, keep_going: bool):
         """Update the status after purging the journal."""
@@ -331,7 +311,6 @@ class Journal:
         if self.wipers.is_dirty(b_num) or self.wipers.is_ripe():
             p_f_m.do_store_inodes()
             p_f_m.do_store_free_list()
-            logger.info("Saving change log and purging journal before adding new block")
             self._change_log_handler.wrt_cg_log_to_jrnl(self.change_log)
             self.purge_jrnl(True, False)
             self.wipers.clear_array()
@@ -341,10 +320,8 @@ class Journal:
         self.meta_get, self.meta_put, self.meta_sz = self._metadata.read()
 
         if self.meta_get == -1:
-            logger.warning("No metadata available. Journal might be empty.")
             return None
         if self.meta_get < self.META_LEN or self.meta_get >= u32Const.JRNL_SIZE.value:
-            logger.error(f"Invalid metadata. meta_get={self.meta_get}")
             return None
 
         return self.META_LEN if self.meta_get == -1 else self.meta_get
@@ -352,12 +329,9 @@ class Journal:
     def _verify_journal_tags(self, ck_start_tag, ck_end_tag):
         """Verify the start and end tags of the journal entry."""
         if ck_start_tag != self.START_TAG:
-            logger.error(f"Start tag mismatch at position {self.tell()}")
             raise ValueError(f"Start tag mismatch: expected {self.START_TAG:X}, got {ck_start_tag:X}")
 
         if ck_end_tag != self.END_TAG:
-            logger.error(f"End tag mismatch at position {self.tell()}")
-            logger.error(f"Journal size: {u32Const.JRNL_SIZE.value}, Current position: {self.tell()}")
             raise ValueError(f"End tag mismatch: expected {self.END_TAG:X}, got {ck_end_tag:X}")
 
     def _process_journal_entry(self, ttl_bytes):
@@ -386,10 +360,6 @@ class Journal:
         if end_tag_pos >= u32Const.JRNL_SIZE.value:
             end_tag_pos = self.META_LEN + (end_tag_pos - u32Const.JRNL_SIZE.value)
 
-        end_tag_logger.debug(f"End tag calculation: start_pos={start_pos}, "
-                             f"changes_start={changes_start_pos}, "
-                             f"bytes_read={bytes_read}, end_tag_pos={end_tag_pos}")
-
         self.seek(end_tag_pos)
         ck_end_tag = self._read_end_tag()
 
@@ -398,42 +368,31 @@ class Journal:
 
     def rd_jrnl(self, r_j_cg_log: ChangeLog, start_pos: int) -> Tuple[int, int, int]:
         """Read journal contents from a given position."""
-        logger.debug(f"Starting journal read from position {start_pos}")
         self.seek(start_pos)
 
         # Replace "read_start_tag" context
-        logger.debug(f"Reading start tag at position {self.tell()}")
         start_tag_bytes = self._file_io.rd_field(8)
         ck_start_tag = from_bytes_64bit(start_tag_bytes)
-        logger.debug(f"Read start tag: {ck_start_tag:X}")
 
         # Replace "read_ct_bytes_to_write" context
-        logger.debug(f"Reading ct_bytes_to_write at position {self.tell()}")
         ct_bytes_bytes = self._file_io.rd_field(8)
         ct_bytes_to_write = from_bytes_64bit(ct_bytes_bytes)
         self.ct_bytes_to_write = ct_bytes_to_write
-        logger.debug(f"Read ct_bytes_to_write: {ct_bytes_to_write}")
 
         # Replace "read_changes" context
-        logger.debug(f"Reading changes at position {self.tell()}")
         bytes_read = self._read_changes(r_j_cg_log, ct_bytes_to_write)
-        logger.debug(f"Read {bytes_read} bytes of changes")
 
         # Calculate and seek to end tag position
         end_tag_pos = start_pos + ct_bytes_to_write
         if end_tag_pos >= u32Const.JRNL_SIZE.value:
             end_tag_pos = self.META_LEN + (end_tag_pos - u32Const.JRNL_SIZE.value)
-            logger.debug(f"End tag wraps around to position: {end_tag_pos}")
         else:
-            logger.debug(f"End tag position without wrap: {end_tag_pos}")
-
+            pass
         self.seek(end_tag_pos)
 
         # Replace "read_end_tag" context
-        logger.debug(f"Reading end tag at position {self.tell()}")
         end_tag_bytes = self._file_io.rd_field(8)
         ck_end_tag = from_bytes_64bit(end_tag_bytes)
-        logger.debug(f"Read end tag: {ck_end_tag:X}")
 
         return ck_start_tag, ck_end_tag, bytes_read
 
@@ -513,7 +472,6 @@ class Journal:
             # Before returning True, check if we should wrap
             remaining_bytes = ct_bytes_to_write - bytes_read
             if remaining_bytes > 0:
-                logger.debug(f"Journal end reached but still need {remaining_bytes} bytes. Wrapping to start.")
                 self.seek(self.META_LEN)
                 return False
         return False
@@ -587,10 +545,8 @@ class Journal:
     def _read_end_tag(self) -> int:
         """Read and return the end tag."""
         current_pos = self.tell()
-        logger.debug(f"Reading end tag at position {current_pos}")
         tag_bytes = self._read_with_log(8)
         tag_value = from_bytes_64bit(tag_bytes)
-        logger.debug(f"Read end tag value: {tag_value:X} at position {self.tell()}")
         return tag_value
 
     def write_block_to_disk(self, block_num: bNum_t, page: Page):
@@ -616,22 +572,17 @@ class Journal:
             _ChangeLogHandler.write_buffer_to_disk: Coordinates the overall buffer writing process
         """
         try:
-            # Log the disk write operation
-            logger.debug(f"Writing block {block_num:3} to disk")
-
             # Seek to correct position
             self.sim_disk.get_ds().seek(block_num * u32Const.BLOCK_BYTES.value)
 
             # Check if block is dirty
             if self.wipers.is_dirty(block_num):
                 # Write zeros for dirty blocks
-                logger.debug(f"  Overwriting dirty block {block_num}")
                 self.sim_disk.get_ds().write(b'\0' * u32Const.BLOCK_BYTES.value)
             else:
                 # Write actual page data
                 self.sim_disk.get_ds().write(page.dat)
         except IOError as e:
-            logger.error(f"Failed to write block {block_num} to disk: {e}")
             raise
 
     def verify_bytes_read(self):
@@ -655,18 +606,9 @@ class Journal:
         # Compare only the last set of reads that should match the expected pattern
         actual_reads = self.read_log[-len(expected_reads):]
 
-        logger.debug("Verifying reads:")
-        logger.debug(f"  meta_get: {meta_get}")
-        logger.debug(f"  ct_bytes_to_write: {self.ct_bytes_to_write}")
-        logger.debug(f"  end_tag_pos: {end_tag_pos}")
-        logger.debug(f"  Expected: {expected_reads}")
-        logger.debug(f"  Actual (last set): {actual_reads}")
-
         for i, (expected, actual) in enumerate(zip(expected_reads, actual_reads)):
             if expected != actual:
-                logger.error(f"Mismatch at position {i}:")
-                logger.error(f"  Expected: {expected}")
-                logger.error(f"  Actual:   {actual}")
+                pass
 
         assert actual_reads == expected_reads, (
             f"Read mismatch: expected {expected_reads}, got {actual_reads}"
@@ -749,7 +691,6 @@ class Journal:
             }
 
         except Exception as e:
-            logger.error(f"Error in check_buffer_management: {e}")
             raise
 
         finally:
@@ -759,7 +700,7 @@ class Journal:
                     try:
                         os.remove(file)
                     except Exception as e:
-                        logger.error(f"Failed to remove file {file}: {e}")
+                        pass
 
     def _read_with_log(self, size: int) -> bytes:
         """Read bytes using ajTypes functions while maintaining the read log.
@@ -785,18 +726,12 @@ class Journal:
         # Log the read operation
         self.total_bytes_read += len(data)
         self.read_log.append((current_position, len(data)))
-        logger.debug(f"Logged read: {current_position} to {current_position + len(data)}")
 
         return data
 
     def _debug_journal_layout(self):
         """Debug helper to dump journal layout information."""
         meta_get = self.meta_get
-
-        end_tag_logger.debug(f"Journal Layout Debug:")
-        end_tag_logger.debug(f"  meta_get: {meta_get}")
-        end_tag_logger.debug(f"  meta_put: {self.meta_put}")
-        end_tag_logger.debug(f"  ct_bytes_to_write: {self.ct_bytes_to_write}")
 
         # Calculate key positions
         start_pos = meta_get if meta_get != -1 else self.META_LEN
@@ -805,15 +740,11 @@ class Journal:
         if calculated_end_tag_pos >= u32Const.JRNL_SIZE.value:
             calculated_end_tag_pos = self.META_LEN + (calculated_end_tag_pos - u32Const.JRNL_SIZE.value)
 
-        end_tag_logger.debug(f"  start_pos: {start_pos}")
-        end_tag_logger.debug(f"  changes_start: {changes_start}")
-        end_tag_logger.debug(f"  calculated_end_tag_pos: {calculated_end_tag_pos}")
-
         # Look for actual end tag position
         current_pos = self.tell()
         actual_pos = self._find_end_tag_position()
         if actual_pos is not None:
-            end_tag_logger.debug(f"  actual_end_tag_pos: {actual_pos}")
+            pass
         self.seek(current_pos)
 
     def _find_end_tag_position(self):
@@ -838,7 +769,6 @@ class Journal:
                     value = int.from_bytes(chunk[i:i + 8], byteorder='little')
                     if value == self.END_TAG:
                         position = search_start + i
-                        end_tag_logger.debug(f"Found END_TAG at {position}")
                         return position
 
                 # Move back 7 bytes to handle end tag across chunk boundaries
