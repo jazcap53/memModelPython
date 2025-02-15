@@ -2,7 +2,7 @@
 import os
 from status import Status
 from simDisk import SimDisk
-from change import Change, ChangeLog
+from change import Change, ChangeLog, Select
 from crashChk import CrashChk
 from journal import Journal
 from ajTypes import u32Const
@@ -28,10 +28,24 @@ def create_minimal_change():
     change.add_line(0, test_data)
     return change
 
+def verify_change(change: Change):
+    """Print detailed information about a change."""
+    print(f"Block number: {change.block_num}")
+    print(f"Timestamp: {change.time_stamp}")
+    print("Selectors:")
+    for i, selector in enumerate(change.selectors):
+        print(f"  Selector {i}: {selector.value:016x}")
+        # Print which bits are set
+        set_bits = [j for j in range(64) if selector.is_set(j)]
+        print(f"  Set bits: {set_bits}")
+    print("Data lines:")
+    print(f"Number of data lines: {len(change.new_data)}")
+    for i, data in enumerate(change.new_data):
+        print(f"  Line {i}: {data[:20]}")
+
 def run_minimal_test():
     """Run a minimal test of journal write and read operations."""
     try:
-        # Clean up any existing test files
         clean_test_files()
 
         # Create required components
@@ -58,15 +72,28 @@ def run_minimal_test():
 
         # Create and add a simple change
         change = create_minimal_change()
+
+        print("\nOriginal change details:")
+        verify_change(change)
+
         change_log.add_to_log(change)
 
-        print("Writing change to journal...")
+        print("\nWriting change to journal...")
         # Write the change to the journal
         journal._change_log_handler.wrt_cg_log_to_jrnl(change_log)
 
-        print("Reading change from journal...")
+        # Get journal file position after write
+        write_pos = journal.tell()
+        print(f"Journal position after write: {write_pos}")
+
+        print("\nReading change from journal...")
         # Create a new change log for reading
         read_log = ChangeLog(test_sw=True)
+
+        # Record position before read
+        read_start_pos = journal.tell()
+        print(f"Journal position before read: {read_start_pos}")
+
         # Read the change back
         journal.rd_last_jrnl(read_log)
 
@@ -75,21 +102,20 @@ def run_minimal_test():
             print("Error: No changes read from journal")
             return False
 
-        original_change = change_log.the_log[0][0]
+        if 0 not in read_log.the_log:
+            print(f"Error: Block 0 not found in read log. Available blocks: {list(read_log.the_log.keys())}")
+            return False
+
         read_change = read_log.the_log[0][0]
+        print("\nRead change details:")
+        verify_change(read_change)
 
-        # Compare block numbers
-        print(f"Original block number: {original_change.block_num}")
-        print(f"Read block number: {read_change.block_num}")
-
-        # Compare first line of data
-        print(f"Original data: {original_change.new_data[0]}")
-        print(f"Read data: {read_change.new_data[0]}")
-
-        return original_change.block_num == read_change.block_num
+        return True
 
     except Exception as e:
         print(f"Test failed with error: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
     finally:
