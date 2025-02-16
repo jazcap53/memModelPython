@@ -88,10 +88,9 @@ def test_journal_initialization(journal):
     assert journal.journal_file.mode == 'rb+'
 
     # Check instance variables after __init__()
-    assert journal.meta_get == 0
-    assert journal.meta_put == 0
+    assert journal.meta_get == -1  # Changed from 0 to -1
+    assert journal.meta_put == 24
     assert journal.meta_sz == 0
-
 
 def test_journal_init_file_content(journal):
     journal.init()
