@@ -437,8 +437,9 @@ class Journal:
             cg = Change(b_num)
             cg.time_stamp = timestamp
 
-            # Process selectors and data
-            while data_pos < ct_bytes_to_write:
+            # Read all selectors for this change
+            has_more_selectors = True
+            while has_more_selectors and data_pos < ct_bytes_to_write:
                 if data_pos + 8 > ct_bytes_to_write:
                     break
 
@@ -447,23 +448,32 @@ class Journal:
                 data_pos += 8
                 cg.selectors.append(selector)
 
-                # Process data lines
+                # Process data lines for this selector
                 for i in range(63):
                     if not selector.is_set(i):
                         continue
 
                     if data_pos + u32Const.BYTES_PER_LINE.value > ct_bytes_to_write:
+                        has_more_selectors = False
                         break
 
                     line_data = change_data[data_pos:data_pos + u32Const.BYTES_PER_LINE.value]
                     data_pos += u32Const.BYTES_PER_LINE.value
                     cg.new_data.append(line_data)
 
+                # If this is the last selector for this change, break inner loop
                 if selector.is_last_block():
-                    break
+                    has_more_selectors = False
 
+            # Add the change to the log if it has any selectors
             if cg.selectors:
                 r_j_cg_log.add_to_log(cg)
+
+            # If we hit the end of data or an incomplete change, stop processing
+            if not has_more_selectors and selector.is_last_block():
+                continue
+            elif data_pos >= ct_bytes_to_write:
+                break
 
         return ct_bytes_to_write
 
