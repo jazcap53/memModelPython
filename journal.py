@@ -1255,6 +1255,8 @@ class Journal:
 
         def wrt_cg_to_pg(self, cg: Change, pg: Page):
             """Write changes to a page."""
+            logger.debug("Writing change to page")
+
             cg.arr_next = 0
             try:
                 while True:
@@ -1274,6 +1276,8 @@ class Journal:
             # Calculate and write CRC
             crc = AJZlibCRC.get_code(pg.dat[:-4], u32Const.BYTES_PER_PAGE.value - 4)
             pg.dat[-4:] = AJZlibCRC.wrt_bytes_little_e(crc, pg.dat[-4:], 4)
+
+            logger.debug("Finished writing change to page")
 
         def rd_and_wrt_back(self, j_cg_log: ChangeLog, pg_buf: List, buf_page_count: int,
                             prev_blk_num: bNum_t, curr_blk_num: bNum_t, pg: Page):
