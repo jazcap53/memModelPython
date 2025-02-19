@@ -313,11 +313,15 @@ class Journal:
     def do_wipe_routine(self, b_num: bNum_t, p_f_m):
         """Perform the wipe routine for a given block."""
         if self.wipers.is_dirty(b_num) or self.wipers.is_ripe():
+            logger.info("Saving change log and purging journal")
+
             p_f_m.do_store_inodes()
             p_f_m.do_store_free_list()
             self._change_log_handler.wrt_cg_log_to_jrnl(self.change_log)
             self.purge_jrnl(True, False)
             self.wipers.clear_array()
+
+            logger.info("Wipe routine completed")
 
     def _read_journal_metadata(self):
         """Read and validate journal metadata."""
