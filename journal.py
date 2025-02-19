@@ -1373,6 +1373,8 @@ class Journal:
             if not r_cg_log.cg_line_ct:
                 return
 
+            logger.debug("Writing change log to journal")  # Added logging
+
             r_cg_log.print()
 
             self._journal.ttl_bytes_written = 0
@@ -1399,6 +1401,8 @@ class Journal:
 
             self._update_metadata(new_g_pos, new_p_pos, ttl_bytes)
             self._flush_and_update_status()
+
+            logger.debug(f"Change log written at time {get_cur_time()}")  # Added logging
 
             # Reset the recently purged flag in the parent Journal class
             # This ensures that after writing new changes, the journal can be purged again
