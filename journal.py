@@ -804,6 +804,155 @@ class Journal:
 
         return None
 
+    # def _read_journal_tags(self, block_start_pos: int) -> Tuple[int, int]:
+    #     """Read the start tag and bytes-to-write field from a journal block.
+    #
+    #     Args:
+    #         block_start_pos: Starting position in the journal file for this block
+    #
+    #     Returns:
+    #         Tuple of (start_tag, bytes_to_write)
+    #
+    #     Notes:
+    #         - Updates file position
+    #         - Handles wraparound at journal end
+    #     """
+    #     # Save current position
+    #     original_pos = self.tell()
+    #
+    #     try:
+    #         # Seek to block start
+    #         self.seek(block_start_pos)
+    #
+    #         # Read start tag (8 bytes)
+    #         if block_start_pos + self.START_TAG_SIZE > u32Const.JRNL_SIZE.value:
+    #             # Handle wraparound for start tag
+    #             bytes_until_end = u32Const.JRNL_SIZE.value - block_start_pos
+    #             first_part = self.read(bytes_until_end)
+    #             self.seek(self.META_LEN)
+    #             second_part = self.read(self.START_TAG_SIZE - bytes_until_end)
+    #             start_tag_bytes = first_part + second_part
+    #         else:
+    #             start_tag_bytes = self.read(self.START_TAG_SIZE)
+    #
+    #         start_tag = from_bytes_64bit(start_tag_bytes)
+    #
+    #         # Current position after reading start tag
+    #         current_pos = self.tell()
+    #
+    #         # Read bytes-to-write field (8 bytes)
+    #         if current_pos + self.CT_BYTES_TO_WRITE_SIZE > u32Const.JRNL_SIZE.value:
+    #             # Handle wraparound for bytes-to-write
+    #             bytes_until_end = u32Const.JRNL_SIZE.value - current_pos
+    #             first_part = self.read(bytes_until_end)
+    #             self.seek(self.META_LEN)
+    #             second_part = self.read(self.CT_BYTES_TO_WRITE_SIZE - bytes_until_end)
+    #             bytes_to_write_data = first_part + second_part
+    #         else:
+    #             bytes_to_write_data = self.read(self.CT_BYTES_TO_WRITE_SIZE)
+    #
+    #         bytes_to_write = from_bytes_64bit(bytes_to_write_data)
+    #
+    #         logger.debug(f"Read journal tags: start_tag={start_tag:x}, bytes_to_write={bytes_to_write}")
+    #         return start_tag, bytes_to_write
+    #
+    #     except Exception as e:
+    #         logger.error(f"Error reading journal tags: {e}")
+    #         raise
+    #
+    # def _read_end_tag(self, expected_position: int) -> int:
+    #     """Read the end tag from the specified position.
+    #
+    #     Args:
+    #         expected_position: Position where end tag should be found
+    #
+    #     Returns:
+    #         The end tag value read from the journal
+    #
+    #     Notes:
+    #         - Updates file position
+    #         - Handles wraparound at journal end
+    #     """
+    #     # Save current position
+    #     original_pos = self.tell()
+    #
+    #     try:
+    #         # Seek to expected end tag position
+    #         self.seek(expected_position)
+    #
+    #         # Read end tag (8 bytes)
+    #         if expected_position + self.END_TAG_SIZE > u32Const.JRNL_SIZE.value:
+    #             # Handle wraparound
+    #             bytes_until_end = u32Const.JRNL_SIZE.value - expected_position
+    #             first_part = self.read(bytes_until_end)
+    #             self.seek(self.META_LEN)
+    #             second_part = self.read(self.END_TAG_SIZE - bytes_until_end)
+    #             end_tag_bytes = first_part + second_part
+    #         else:
+    #             end_tag_bytes = self.read(self.END_TAG_SIZE)
+    #
+    #         end_tag = from_bytes_64bit(end_tag_bytes)
+    #         logger.debug(f"Read end tag: {end_tag:x} at position {expected_position}")
+    #         return end_tag
+    #
+    #     except Exception as e:
+    #         logger.error(f"Error reading end tag: {e}")
+    #         raise
+    #
+    # def _verify_journal_tags(self, start_tag: int, end_tag: int) -> bool:
+    #     """Verify that journal tags match expected values.
+    #
+    #     Args:
+    #         start_tag: Start tag read from journal
+    #         end_tag: End tag read from journal
+    #
+    #     Returns:
+    #         True if both tags are valid, False otherwise
+    #
+    #     Notes:
+    #         - Doesn't modify file position
+    #     """
+    #     # Check start tag
+    #     if start_tag != self.START_TAG:
+    #         logger.error(f"Invalid start tag: expected {self.START_TAG:x}, got {start_tag:x}")
+    #         return False
+    #
+    #     # Check end tag
+    #     if end_tag != self.END_TAG:
+    #         logger.error(f"Invalid end tag: expected {self.END_TAG:x}, got {end_tag:x}")
+    #         return False
+    #
+    #     logger.debug("Journal tags verified successfully")
+    #     return True
+    #
+    # def _calculate_end_tag_position(self, start_pos: int, bytes_to_write: int) -> int:
+    #     """Calculate the position where the end tag should be found.
+    #
+    #     Args:
+    #         start_pos: Starting position of the journal block
+    #         bytes_to_write: Number of bytes in the block (including tags)
+    #
+    #     Returns:
+    #         Position where end tag should be found
+    #
+    #     Notes:
+    #         - Doesn't modify file position
+    #         - Handles wraparound at journal end
+    #     """
+    #     # Calculate raw end position
+    #     end_pos = start_pos + bytes_to_write
+    #
+    #     # Handle wraparound
+    #     if end_pos >= u32Const.JRNL_SIZE.value:
+    #         # Adjust for metadata section after wraparound
+    #         end_pos = self.META_LEN + (end_pos - u32Const.JRNL_SIZE.value)
+    #         logger.debug(f"End tag position wrapped around to {end_pos}")
+    #     else:
+    #         logger.debug(f"End tag position calculated as {end_pos}")
+    #
+    #     return end_pos
+
+
     class _Metadata:
         """Handles journal metadata operations."""
 
