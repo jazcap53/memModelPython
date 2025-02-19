@@ -225,6 +225,8 @@ class Journal:
 
     def purge_jrnl(self, keep_going: bool, had_crash: bool):
         """Purge the journal, optionally handling crash recovery."""
+        logger.info("Purging journal")
+
         if self.debug:
             return
 
@@ -242,6 +244,8 @@ class Journal:
         self._reset_metadata()
         self._update_status(keep_going)
         self._recently_purged = True
+
+        logger.info(f"Journal purge completed at time {get_cur_time()}")
 
     def set_wiper_dirty(self, b_num: bNum_t):
         """Mark a block as dirty in the wiper list.
