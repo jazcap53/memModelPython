@@ -324,15 +324,26 @@ class Journal:
             logger.info("Wipe routine completed")
 
     def _read_journal_metadata(self):
-        """Read and validate journal metadata."""
+        """Read and validate journal metadata.
+
+        Returns:
+            int or None: The position to start reading from, or None if no valid data
+        """
+        # Read metadata values
         self.meta_get, self.meta_put, self.meta_sz = self._metadata.read()
 
+        # Special case: meta_get of -1 means start at META_LEN
+        # (beginning of data section)
         if self.meta_get == -1:
-            return None
+            return self.META_LEN
+
+        # Validate meta_get is in valid range
         if self.meta_get < self.META_LEN or self.meta_get >= u32Const.JRNL_SIZE.value:
+            logger.warning(f"Invalid meta_get value: {self.meta_get}")
             return None
 
-        return self.META_LEN if self.meta_get == -1 else self.meta_get
+        # Valid meta_get value
+        return self.meta_get
 
     def _verify_journal_tags(self, ck_start_tag, ck_end_tag):
         """Verify the start and end tags of the journal entry."""
