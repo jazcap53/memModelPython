@@ -114,8 +114,32 @@ def run_multiple_test():
         read_start_pos = journal.tell()
         print(f"Journal position before read: {read_start_pos}")
 
-        # Read the changes back
-        journal.rd_last_jrnl(read_log)
+        # CAPTURE THE ACTUAL READ POSITION
+        original_seek = journal.seek
+        actual_read_pos = None
+
+        def seek_wrapper(pos, whence=0):
+            nonlocal actual_read_pos
+            if whence == 0 and pos >= journal.META_LEN and pos < u32Const.JRNL_SIZE.value:
+                if actual_read_pos is None:  # Only capture the first seek
+                    actual_read_pos = pos
+                    print(f"!!! ACTUAL JOURNAL READ STARTING AT: {pos} !!!")
+            return original_seek(pos, whence)
+
+        journal.seek = seek_wrapper
+
+        try:
+            # Read the changes back
+            journal.rd_last_jrnl(read_log)
+        finally:
+            # Restore original seek method
+            journal.seek = original_seek
+
+        # Print journal metadata
+        print(f"\nJournal Metadata:")
+        print(f"meta_get: {journal.meta_get}")
+        print(f"meta_put: {journal.meta_put}")
+        print(f"meta_sz: {journal.meta_sz}")
 
         # Verify the reads
         if not read_log.the_log:
@@ -135,6 +159,17 @@ def run_multiple_test():
         original_count = len(changes)
         read_count = len(read_log.the_log[0])
         print(f"\nNumber of changes - Original: {original_count}, Read: {read_count}")
+
+        # Debug: dump the content of the journal file for examination
+        print("\nDumping portion of journal file for analysis:")
+        journal.seek(journal.META_LEN)
+        journal_data = journal.read(200)  # Read first 200 bytes after metadata
+        print(f"Journal data hex dump:")
+        for i in range(0, len(journal_data), 16):
+            chunk = journal_data[i:i+16]
+            hex_values = ' '.join(f'{b:02x}' for b in chunk)
+            ascii_repr = ''.join(chr(b) if 32 <= b < 127 else '.' for b in chunk)
+            print(f"{i:04x}: {hex_values:<47} {ascii_repr}")
 
         return original_count == read_count
 

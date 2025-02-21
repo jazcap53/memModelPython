@@ -94,8 +94,28 @@ def run_minimal_test():
         read_start_pos = journal.tell()
         print(f"Journal position before read: {read_start_pos}")
 
-        # Read the change back
-        journal.rd_last_jrnl(read_log)
+        # CAPTURE THE ACTUAL READ POSITION
+        original_seek = journal.seek
+
+        def seek_wrapper(pos, whence=0):
+            if whence == 0 and pos >= journal.META_LEN and pos < u32Const.JRNL_SIZE.value:
+                print(f"!!! ACTUAL JOURNAL READ STARTING AT: {pos} !!!")
+            return original_seek(pos, whence)
+
+        journal.seek = seek_wrapper
+
+        try:
+            # Read the change back
+            journal.rd_last_jrnl(read_log)
+        finally:
+            # Restore original seek method
+            journal.seek = original_seek
+
+        # Print journal metadata
+        print(f"\nJournal Metadata:")
+        print(f"meta_get: {journal.meta_get}")
+        print(f"meta_put: {journal.meta_put}")
+        print(f"meta_sz: {journal.meta_sz}")
 
         # Verify the read
         if not read_log.the_log:
