@@ -433,7 +433,15 @@ class Journal:
         return end_tag_pos
 
     def _read_changes(self, r_j_cg_log: ChangeLog, ct_bytes_to_write: int) -> int:
-        """Read changes from the journal and populate the change log."""
+        """Read changes from the journal and populate the change log.
+
+        Args:
+            r_j_cg_log: The change log to populate
+            ct_bytes_to_write: Number of bytes to read
+
+        Returns:
+            int: Number of bytes read
+        """
         # Read all change data at once to match expected read pattern
         change_data = self._read_with_log(ct_bytes_to_write)
 
