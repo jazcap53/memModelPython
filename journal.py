@@ -984,14 +984,22 @@ class Journal:
 
         def write(self, new_g_pos: int, new_p_pos: int, u_ttl_bytes_written: int):
             """Write metadata to journal file."""
-            self._journal.seek(0)
-            metadata = struct.pack('<qqq', new_g_pos, new_p_pos, u_ttl_bytes_written)
-            self._journal.write(metadata)
+            # Save current position
+            original_position = self._journal.tell()
 
-            # Update instance attributes
-            self.meta_get = new_g_pos
-            self.meta_put = new_p_pos
-            self.meta_sz = u_ttl_bytes_written
+            try:
+                # Seek to start of file for metadata update
+                self._journal.seek(0)
+                metadata = struct.pack('<qqq', new_g_pos, new_p_pos, u_ttl_bytes_written)
+                self._journal.write(metadata)
+
+                # Update instance attributes
+                self.meta_get = new_g_pos
+                self.meta_put = new_p_pos
+                self.meta_sz = u_ttl_bytes_written
+            finally:
+                # Restore original position
+                self._journal.seek(original_position)
 
         def init(self):
             """Initialize metadata to default values."""
