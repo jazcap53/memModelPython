@@ -398,22 +398,30 @@ class Journal:
             ValueError: If start_pos is invalid
         """
         # Validate start position
-        if start_pos < self.META_LEN:
+        if start_pos < self.META_LEN or start_pos >= u32Const.JRNL_SIZE.value:
             raise ValueError(f"Invalid start position: {start_pos}")
 
         self.seek(start_pos)
 
-        # Read and validate tags
-        start_tag = self._file_io.rd_field(8)
-        ct_bytes_to_write = self._file_io.rd_field(8)
+        # Read start tag and convert to integer
+        start_tag_bytes = self._file_io.rd_field(8)
+        start_tag = from_bytes_64bit(start_tag_bytes)
 
-        # Read changes
+        # Read bytes-to-write count and convert to integer
+        ct_bytes_bytes = self._file_io.rd_field(8)
+        ct_bytes_to_write = from_bytes_64bit(ct_bytes_bytes)
+        self.ct_bytes_to_write = ct_bytes_to_write
+
+        # Read changes (now passing an integer)
         bytes_read = self._read_changes(r_j_cg_log, ct_bytes_to_write)
 
-        # Calculate and verify end tag position
+        # Calculate and seek to end tag position
         end_tag_pos = self._calculate_end_tag_position(start_pos, ct_bytes_to_write)
         self.seek(end_tag_pos)
-        end_tag = self._file_io.rd_field(8)
+
+        # Read end tag and convert to integer
+        end_tag_bytes = self._file_io.rd_field(8)
+        end_tag = from_bytes_64bit(end_tag_bytes)
 
         # Verify tags
         self._verify_journal_tags(start_tag, end_tag)
