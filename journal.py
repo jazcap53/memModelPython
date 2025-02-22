@@ -447,52 +447,72 @@ class Journal:
 
     def _read_changes(self, r_j_cg_log: ChangeLog, ct_bytes_to_write: int) -> int:
         """Read changes from the journal and populate the change log."""
-        bytes_read = 0
-        change_data = self._read_with_log(ct_bytes_to_write)
-        data_pos = 0
+        current_position = self.tell()
 
-        while data_pos < ct_bytes_to_write:
-            if data_pos + 16 > ct_bytes_to_write:  # Need at least 16 bytes for block number and timestamp
+        # Track how many bytes we've processed
+        bytes_processed = 0
+        while bytes_processed < ct_bytes_to_write:
+            # Check if we have enough data for block number and timestamp
+            if bytes_processed + 16 > ct_bytes_to_write:
                 break
 
-            # Read block number and timestamp
-            b_num = from_bytes_64bit(change_data[data_pos:data_pos + 8])
-            data_pos += 8
-            timestamp = from_bytes_64bit(change_data[data_pos:data_pos + 8])
-            data_pos += 8
+            # Read block number and timestamp using proper endianness functions
+            block_data = self._read_with_log(8)
+            b_num = from_bytes_64bit(block_data)
+            bytes_processed += 8
 
+            # Validate block number
+            if b_num >= bNum_tConst.NUM_DISK_BLOCKS.value:
+                break
+
+            timestamp_data = self._read_with_log(8)
+            timestamp = from_bytes_64bit(timestamp_data)
+            bytes_processed += 8
+
+            # Create and initialize change object
             cg = Change(b_num)
             cg.time_stamp = timestamp
 
-            # Continue reading selectors and data until we hit the last selector or run out of data
-            while data_pos < ct_bytes_to_write:
-                if data_pos + 8 > ct_bytes_to_write:  # Need 8 bytes for selector
+            # Process selectors and their data
+            has_more_selectors = True
+            while has_more_selectors and bytes_processed < ct_bytes_to_write:
+                if bytes_processed + 8 > ct_bytes_to_write:
                     break
 
-                selector_bytes = change_data[data_pos:data_pos + 8]
-                selector = Select.from_bytes(selector_bytes)
-                data_pos += 8
+                # Read selector using proper endianness
+                selector_data = self._read_with_log(8)
+                bytes_processed += 8
+
+                # Create selector with precise bit positions preserved
+                selector = Select.from_bytes(selector_data)
                 cg.selectors.append(selector)
 
-                # Read data for each bit set in the selector
-                for i in range(63):  # Exclude MSB which marks last selector
+                # Process data lines for each set bit in selector
+                for i in range(63):  # Ignore MSB (bit 63)
                     if not selector.is_set(i):
                         continue
 
-                    if data_pos + u32Const.BYTES_PER_LINE.value > ct_bytes_to_write:
+                    if bytes_processed + u32Const.BYTES_PER_LINE.value > ct_bytes_to_write:
+                        has_more_selectors = False
                         break
 
-                    line_data = change_data[data_pos:data_pos + u32Const.BYTES_PER_LINE.value]
-                    data_pos += u32Const.BYTES_PER_LINE.value
+                    # Read line data
+                    line_data = self._read_with_log(u32Const.BYTES_PER_LINE.value)
+                    bytes_processed += u32Const.BYTES_PER_LINE.value
                     cg.new_data.append(line_data)
 
-                # If this was the last selector, add the change and move to next change
+                # Check if this is the last selector for this change
                 if selector.is_last_block():
-                    r_j_cg_log.add_to_log(cg)
-                    break
+                    has_more_selectors = False
 
-            # Skip CRC and padding (8 bytes) before next change
-            data_pos += 8
+            # Skip CRC and padding (8 bytes)
+            if bytes_processed + 8 <= ct_bytes_to_write:
+                self._read_with_log(8)  # Read and discard CRC+padding
+                bytes_processed += 8
+
+            # Add the complete change to our log
+            if cg.selectors:
+                r_j_cg_log.add_to_log(cg)
 
         return ct_bytes_to_write
 
