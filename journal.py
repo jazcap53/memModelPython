@@ -446,41 +446,27 @@ class Journal:
         return end_pos
 
     def _read_changes(self, r_j_cg_log: ChangeLog, ct_bytes_to_write: int) -> int:
-        """Read changes from the journal and populate the change log.
-
-        Args:
-            r_j_cg_log: The change log to populate
-            ct_bytes_to_write: Number of bytes to read
-
-        Returns:
-            int: Number of bytes read
-        """
-        # Read all change data at once to match expected read pattern
+        """Read changes from the journal and populate the change log."""
+        bytes_read = 0
         change_data = self._read_with_log(ct_bytes_to_write)
-
-        # Process the data in memory
         data_pos = 0
+
         while data_pos < ct_bytes_to_write:
-            # Process block number and timestamp
-            if data_pos + 16 > ct_bytes_to_write:
+            if data_pos + 16 > ct_bytes_to_write:  # Need at least 16 bytes for block number and timestamp
                 break
 
+            # Read block number and timestamp
             b_num = from_bytes_64bit(change_data[data_pos:data_pos + 8])
             data_pos += 8
-
-            if b_num >= bNum_tConst.NUM_DISK_BLOCKS.value:
-                break  # Invalid block number, stop reading
-
             timestamp = from_bytes_64bit(change_data[data_pos:data_pos + 8])
             data_pos += 8
 
             cg = Change(b_num)
             cg.time_stamp = timestamp
 
-            # Read all selectors for this change
-            has_more_selectors = True
-            while has_more_selectors and data_pos < ct_bytes_to_write:
-                if data_pos + 8 > ct_bytes_to_write:
+            # Continue reading selectors and data until we hit the last selector or run out of data
+            while data_pos < ct_bytes_to_write:
+                if data_pos + 8 > ct_bytes_to_write:  # Need 8 bytes for selector
                     break
 
                 selector_bytes = change_data[data_pos:data_pos + 8]
@@ -488,32 +474,25 @@ class Journal:
                 data_pos += 8
                 cg.selectors.append(selector)
 
-                # Process data lines for this selector
-                for i in range(63):
+                # Read data for each bit set in the selector
+                for i in range(63):  # Exclude MSB which marks last selector
                     if not selector.is_set(i):
                         continue
 
                     if data_pos + u32Const.BYTES_PER_LINE.value > ct_bytes_to_write:
-                        has_more_selectors = False
                         break
 
                     line_data = change_data[data_pos:data_pos + u32Const.BYTES_PER_LINE.value]
                     data_pos += u32Const.BYTES_PER_LINE.value
                     cg.new_data.append(line_data)
 
-                # If this is the last selector for this change, break inner loop
+                # If this was the last selector, add the change and move to next change
                 if selector.is_last_block():
-                    has_more_selectors = False
+                    r_j_cg_log.add_to_log(cg)
+                    break
 
-            # Add the change to the log if it has any selectors
-            if cg.selectors:
-                r_j_cg_log.add_to_log(cg)
-
-            # If we hit the end of data or an incomplete change, stop processing
-            if not has_more_selectors and selector.is_last_block():
-                continue
-            elif data_pos >= ct_bytes_to_write:
-                break
+            # Skip CRC and padding (8 bytes) before next change
+            data_pos += 8
 
         return ct_bytes_to_write
 
