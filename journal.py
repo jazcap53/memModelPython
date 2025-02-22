@@ -345,13 +345,12 @@ class Journal:
         # Valid meta_get value
         return self.meta_get
 
-    def _verify_journal_tags(self, ck_start_tag, ck_end_tag):
-        """Verify the start and end tags of the journal entry."""
-        if ck_start_tag != self.START_TAG:
-            raise ValueError(f"Start tag mismatch: expected {self.START_TAG:X}, got {ck_start_tag:X}")
-
-        if ck_end_tag != self.END_TAG:
-            raise ValueError(f"End tag mismatch: expected {self.END_TAG:X}, got {ck_end_tag:X}")
+    def _verify_journal_tags(self, start_tag: int, end_tag: int):
+        """Verify journal tags match expected values."""
+        if start_tag != self.START_TAG:
+            raise ValueError(f"Invalid start tag: {start_tag:x}")
+        if end_tag != self.END_TAG:
+            raise ValueError(f"Invalid end tag: {end_tag:x}")
 
     def _process_journal_entry(self, ttl_bytes):
         """Process the journal entry after reading."""
@@ -386,34 +385,40 @@ class Journal:
         self._process_journal_entry(bytes_read)
 
     def rd_jrnl(self, r_j_cg_log: ChangeLog, start_pos: int) -> Tuple[int, int, int]:
-        """Read journal contents from a given position."""
+        """Read journal contents from a given position.
+
+        Args:
+            r_j_cg_log: Change log to populate
+            start_pos: Position to start reading from
+
+        Returns:
+            Tuple of (start_tag, end_tag, bytes_read)
+
+        Raises:
+            ValueError: If start_pos is invalid
+        """
+        # Validate start position
+        if start_pos < self.META_LEN:
+            raise ValueError(f"Invalid start position: {start_pos}")
+
         self.seek(start_pos)
 
-        # Replace "read_start_tag" context
-        start_tag_bytes = self._file_io.rd_field(8)
-        ck_start_tag = from_bytes_64bit(start_tag_bytes)
+        # Read and validate tags
+        start_tag = self._file_io.rd_field(8)
+        ct_bytes_to_write = self._file_io.rd_field(8)
 
-        # Replace "read_ct_bytes_to_write" context
-        ct_bytes_bytes = self._file_io.rd_field(8)
-        ct_bytes_to_write = from_bytes_64bit(ct_bytes_bytes)
-        self.ct_bytes_to_write = ct_bytes_to_write
-
-        # Replace "read_changes" context
+        # Read changes
         bytes_read = self._read_changes(r_j_cg_log, ct_bytes_to_write)
 
-        # Calculate and seek to end tag position
-        end_tag_pos = start_pos + ct_bytes_to_write
-        if end_tag_pos >= u32Const.JRNL_SIZE.value:
-            end_tag_pos = self.META_LEN + (end_tag_pos - u32Const.JRNL_SIZE.value)
-        else:
-            pass
+        # Calculate and verify end tag position
+        end_tag_pos = self._calculate_end_tag_position(start_pos, ct_bytes_to_write)
         self.seek(end_tag_pos)
+        end_tag = self._file_io.rd_field(8)
 
-        # Replace "read_end_tag" context
-        end_tag_bytes = self._file_io.rd_field(8)
-        ck_end_tag = from_bytes_64bit(end_tag_bytes)
+        # Verify tags
+        self._verify_journal_tags(start_tag, end_tag)
 
-        return ck_start_tag, ck_end_tag, bytes_read
+        return start_tag, end_tag, bytes_read
 
     def _read_start_tag(self) -> int:
         """Read and return the start tag from the journal file."""
@@ -426,11 +431,11 @@ class Journal:
         return from_bytes_64bit(bytes_data)
 
     def _calculate_end_tag_position(self, start_pos: int, ct_bytes_to_write: int) -> int:
-        """Calculate the position of the end tag."""
-        end_tag_pos = start_pos + ct_bytes_to_write
-        if end_tag_pos >= u32Const.JRNL_SIZE.value:
-            end_tag_pos = self.META_LEN + (end_tag_pos - u32Const.JRNL_SIZE.value)
-        return end_tag_pos
+        """Calculate position of end tag."""
+        end_pos = start_pos + ct_bytes_to_write
+        if end_pos >= u32Const.JRNL_SIZE.value:
+            end_pos = self.META_LEN + (end_pos - u32Const.JRNL_SIZE.value)
+        return end_pos
 
     def _read_changes(self, r_j_cg_log: ChangeLog, ct_bytes_to_write: int) -> int:
         """Read changes from the journal and populate the change log.
@@ -822,6 +827,7 @@ class Journal:
             self.seek(current_pos)
 
         return None
+
 
     # def _read_journal_tags(self, block_start_pos: int) -> Tuple[int, int]:
     #     """Read the start tag and bytes-to-write field from a journal block.
