@@ -94,12 +94,44 @@ def run_minimal_test():
         read_start_pos = journal.tell()
         print(f"Journal position before read: {read_start_pos}")
 
-        # CAPTURE THE ACTUAL READ POSITION
+        # Store the calculated end tag position
+        journal.ct_bytes_to_write = journal._change_log_handler.calculate_ct_bytes_to_write(change_log)
+        expected_end_tag_pos = journal.meta_get + journal.ct_bytes_to_write
+        if expected_end_tag_pos >= u32Const.JRNL_SIZE.value:
+            expected_end_tag_pos = journal.META_LEN + (expected_end_tag_pos - u32Const.JRNL_SIZE.value)
+        journal.end_tag_posn = expected_end_tag_pos
+        print(f"JOURNAL: End tag should be at position {journal.end_tag_posn}")
+
+        # CAPTURE THE ACTUAL READ POSITION with improved context
         original_seek = journal.seek
 
         def seek_wrapper(pos, whence=0):
-            if whence == 0 and pos >= journal.META_LEN and pos < u32Const.JRNL_SIZE.value:
-                print(f"!!! ACTUAL JOURNAL READ STARTING AT: {pos} !!!")
+            current_pos = journal.tell()
+
+            # Only log meaningful journal read operations
+            if whence == 0:
+                if pos == 0:
+                    print(f"JOURNAL: Reading metadata from position 0")
+                elif pos == journal.META_LEN:
+                    print(f"JOURNAL: Positioning to start of journal data section (position {pos})")
+                elif pos == journal.meta_get:
+                    print(f"JOURNAL: Positioning to most recent journal entry at {pos}")
+                elif pos == journal.meta_put:
+                    print(f"JOURNAL: Positioning to end of journal data at {pos}")
+                elif journal.meta_get <= pos < journal.meta_put:
+                    # Identify what journal component is being read
+                    offset = pos - journal.meta_get
+                    if offset == 0:
+                        print(f"JOURNAL: Reading START_TAG at position {pos}")
+                    elif offset == 8:
+                        print(f"JOURNAL: Reading ct_bytes_to_write field at position {pos}")
+                    elif offset == 16:
+                        print(f"JOURNAL: Reading change data starting at position {pos}")
+                    elif pos == journal.end_tag_posn:
+                        print(f"JOURNAL: Reading END_TAG at position {pos}")
+                    else:
+                        print(f"JOURNAL: Seeking within change data to position {pos}")
+
             return original_seek(pos, whence)
 
         journal.seek = seek_wrapper
