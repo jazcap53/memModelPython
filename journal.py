@@ -399,9 +399,7 @@ class Journal:
                 end_tag_logger.error(f"Error in rd_last_jrnl: {e}")
             else:
                 logger.error(f"Error in rd_last_jrnl: {e}")
-            # # Try to continue even if there's an error
-            # return 0
-            raise
+            raise  # Re-raise the exception instead of continuing with potentially corrupted stateFc
 
     def rd_jrnl(self, r_j_cg_log: ChangeLog, start_pos: int) -> Tuple[int, int, int]:
         """Read journal contents from a given position.
