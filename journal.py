@@ -395,9 +395,13 @@ class Journal:
             self._process_journal_entry_new(bytes_read)
             return bytes_read
         except Exception as e:
-            logger.error(f"Error in rd_last_jrnl: {e}")
-            # Try to continue even if there's an error
-            return 0
+            if "Invalid end tag" in str(e):
+                end_tag_logger.error(f"Error in rd_last_jrnl: {e}")
+            else:
+                logger.error(f"Error in rd_last_jrnl: {e}")
+            # # Try to continue even if there's an error
+            # return 0
+            raise
 
     def rd_jrnl(self, r_j_cg_log: ChangeLog, start_pos: int) -> Tuple[int, int, int]:
         """Read journal contents from a given position.
@@ -838,6 +842,7 @@ class Journal:
                     value = int.from_bytes(chunk[i:i + 8], byteorder='little')
                     if value == self.END_TAG:
                         position = search_start + i
+                        end_tag_logger.debug(f"Found END_TAG at position {position}")
                         return position
 
                 # Move back 7 bytes to handle end tag across chunk boundaries
@@ -917,7 +922,7 @@ class Journal:
         if start_tag != self.START_TAG:
             logger.error(f"Invalid start tag: {start_tag:x}, expected {self.START_TAG:x}")
         if end_tag != self.END_TAG:
-            logger.error(f"Invalid end tag: {end_tag:x}, expected {self.END_TAG:x}")
+            end_tag_logger.error(f"Invalid end tag: {end_tag:x}, expected {self.END_TAG:x}")
 
         # Handle verification without failing immediately to match original behavior
         try:
@@ -1039,7 +1044,7 @@ class Journal:
             raise ValueError(f"Invalid start tag: {start_tag:x}")
 
         if end_tag != self.END_TAG:
-            logger.error(f"End tag verification failed. Expected {self.END_TAG:x}, got {end_tag:x}")
+            end_tag_logger.error(f"End tag verification failed. Expected {self.END_TAG:x}, got {end_tag:x}")
             raise ValueError(f"Invalid end tag: {end_tag:x}")
 
         return True
