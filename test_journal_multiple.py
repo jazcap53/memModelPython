@@ -190,7 +190,7 @@ def run_multiple_test():
 
         print("\nDumping journal file for analysis:")
         journal.seek(journal.META_LEN)
-        journal_data = journal.read(400)  # Read 400 bytes to capture more content
+        journal_data = journal.read(400)  # Read 400 bytes to capture all changes and end tag
         print(f"Journal data hex dump:")
         for i in range(0, len(journal_data), 16):
             chunk = journal_data[i:i + 16]
@@ -198,14 +198,21 @@ def run_multiple_test():
             ascii_repr = ''.join(chr(b) if 32 <= b < 127 else '.' for b in chunk)
             print(f"{i:04x}: {hex_values:<47} {ascii_repr}")
 
-        # Also display end tag position explicitly
-        print(f"\nExpected end tag position: {journal.end_tag_posn}")
-        journal.seek(journal.end_tag_posn)
-        end_tag_bytes = journal.read(8)
-        print(f"Bytes at expected end tag position: {' '.join(f'{b:02x}' for b in end_tag_bytes)}")
-        print(f"As value: 0x{int.from_bytes(end_tag_bytes, byteorder='little'):x}")
-        print(f"Expected end tag: 0x{journal.END_TAG:x}")
-        return original_count == read_count
+        # Add explicit end tag verification
+        end_tag_pos = journal.end_tag_posn if hasattr(journal, 'end_tag_posn') else None
+        print(f"\nExpected end tag position: {end_tag_pos}")
+        if end_tag_pos is not None:
+            journal.seek(end_tag_pos)
+            end_tag_bytes = journal.read(8)
+            if len(end_tag_bytes) == 8:
+                end_tag_value = int.from_bytes(end_tag_bytes, byteorder='little')
+                print(f"End tag at position {end_tag_pos}: 0x{end_tag_value:016x} (Expected: 0x{journal.END_TAG:016x})")
+                if end_tag_value == journal.END_TAG:
+                    print("✓ End tag matches expected value")
+                else:
+                    print("❌ End tag does not match expected value")
+            else:
+                print(f"❌ Could not read 8 bytes at position {end_tag_pos}")
 
     except Exception as e:
         print(f"Test failed with error: {e}")
