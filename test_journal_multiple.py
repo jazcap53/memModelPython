@@ -188,17 +188,23 @@ def run_multiple_test():
         read_count = len(read_log.the_log[0])
         print(f"\nNumber of changes - Original: {original_count}, Read: {read_count}")
 
-        # Debug: dump the content of the journal file for examination
-        print("\nDumping portion of journal file for analysis:")
+        print("\nDumping journal file for analysis:")
         journal.seek(journal.META_LEN)
-        journal_data = journal.read(200)  # Read first 200 bytes after metadata
+        journal_data = journal.read(400)  # Read 400 bytes to capture more content
         print(f"Journal data hex dump:")
         for i in range(0, len(journal_data), 16):
-            chunk = journal_data[i:i+16]
+            chunk = journal_data[i:i + 16]
             hex_values = ' '.join(f'{b:02x}' for b in chunk)
             ascii_repr = ''.join(chr(b) if 32 <= b < 127 else '.' for b in chunk)
             print(f"{i:04x}: {hex_values:<47} {ascii_repr}")
 
+        # Also display end tag position explicitly
+        print(f"\nExpected end tag position: {journal.end_tag_posn}")
+        journal.seek(journal.end_tag_posn)
+        end_tag_bytes = journal.read(8)
+        print(f"Bytes at expected end tag position: {' '.join(f'{b:02x}' for b in end_tag_bytes)}")
+        print(f"As value: 0x{int.from_bytes(end_tag_bytes, byteorder='little'):x}")
+        print(f"Expected end tag: 0x{journal.END_TAG:x}")
         return original_count == read_count
 
     except Exception as e:
