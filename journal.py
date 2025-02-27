@@ -15,7 +15,7 @@ Classes:
 """
 from ajTypes import write_64bit, read_64bit, write_32bit, read_32bit, to_bytes_64bit, from_bytes_64bit
 import struct
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, BinaryIO
 from collections import deque
 from ajTypes import bNum_t, lNum_t, u32Const, bNum_tConst, SENTINEL_INUM
 from ajCrc import AJZlibCRC
@@ -254,6 +254,10 @@ class Journal:
             b_num: The block number to mark as dirty
         """
         self.wipers.set_dirty(b_num)
+
+    def get_file(self) -> BinaryIO:
+        """Return the journal's file object."""
+        return self.journal_file
 
     def _is_journal_empty(self) -> bool:
         """Check if the journal is empty."""
@@ -879,41 +883,48 @@ class Journal:
         # Clear read log before starting
         self.read_log = []
 
-        # Read metadata (position 0, 24 bytes)
+        # Use meaningful constants instead of magic numbers
+        METADATA_SIZE = 24  # Size of metadata (meta_get, meta_put, meta_sz combined)
+        START_TAG_SIZE = 8  # Size of the START_TAG field
+        BYTES_COUNT_SIZE = 8  # Size of the ct_bytes_to_write field
+        HEADER_SIZE = START_TAG_SIZE + BYTES_COUNT_SIZE  # Combined size of START_TAG and bytes count
+        END_TAG_SIZE = 8  # Size of the END_TAG field
+
+        # Read metadata (position 0, METADATA_SIZE bytes)
         meta_get, meta_put, meta_sz = self._read_metadata_new()
 
         # Determine start position for journal read
         start_pos = self.META_LEN if meta_get == -1 else meta_get
 
-        # Read start tag (8 bytes)
+        # Read start tag (START_TAG_SIZE bytes)
         self.seek(start_pos)
-        start_tag_bytes = self.read(8)
-        self.read_log.append((start_pos, 8))
+        start_tag_bytes = self.read(START_TAG_SIZE)
+        self.read_log.append((start_pos, START_TAG_SIZE))
         start_tag = from_bytes_64bit(start_tag_bytes)
 
-        # Read bytes count (8 bytes)
-        bytes_count_pos = start_pos + 8
+        # Read bytes count (BYTES_COUNT_SIZE bytes)
+        bytes_count_pos = start_pos + START_TAG_SIZE
         self.seek(bytes_count_pos)
-        bytes_count_data = self.read(8)
-        self.read_log.append((bytes_count_pos, 8))
+        bytes_count_data = self.read(BYTES_COUNT_SIZE)
+        self.read_log.append((bytes_count_pos, BYTES_COUNT_SIZE))
         ct_bytes_to_write = from_bytes_64bit(bytes_count_data)
         self.ct_bytes_to_write = ct_bytes_to_write
 
         # Read changes (ct_bytes_to_write bytes)
-        changes_start_pos = start_pos + 16
+        changes_start_pos = start_pos + HEADER_SIZE
         self.seek(changes_start_pos)
         bytes_read = self._read_changes_new(r_j_cg_log, ct_bytes_to_write, changes_start_pos)
         self.read_log.append((changes_start_pos, ct_bytes_to_write))
 
         # Calculate end tag position
-        end_tag_pos = start_pos + 16 + ct_bytes_to_write
+        end_tag_pos = start_pos + HEADER_SIZE + ct_bytes_to_write
         if end_tag_pos >= u32Const.JRNL_SIZE.value:
             end_tag_pos = self.META_LEN + (end_tag_pos - u32Const.JRNL_SIZE.value)
 
         # Read end tag
         self.seek(end_tag_pos)
-        end_tag_bytes = self.read(8)
-        self.read_log.append((end_tag_pos, 8))
+        end_tag_bytes = self.read(END_TAG_SIZE)
+        self.read_log.append((end_tag_pos, END_TAG_SIZE))
         end_tag = from_bytes_64bit(end_tag_bytes)
 
         # Verify start and end tags
@@ -952,9 +963,9 @@ class Journal:
             bytes_to_end = u32Const.JRNL_SIZE.value - current_pos
             bytes_to_read = min(bytes_remaining, bytes_to_end)
 
-            # Read chunk
+            # Read chunk using existing file I/O methods
             self.seek(current_pos)
-            chunk = self.read(bytes_to_read)
+            chunk = self._file_io.rd_field(bytes_to_read)
             if not chunk:  # If we hit EOF unexpectedly
                 break
 
@@ -973,7 +984,10 @@ class Journal:
                 break
 
             # Read block number
-            b_num = from_bytes_64bit(all_data[data_pos:data_pos + 8])
+            block_num_bytes = all_data[data_pos:data_pos + 8]
+            b_num = from_bytes_64bit(block_num_bytes)
+            if self.debug:
+                print(f"Reading block number: {b_num}")
             data_pos += 8
 
             # Validate block number
@@ -982,7 +996,10 @@ class Journal:
                 break
 
             # Read timestamp
-            timestamp = from_bytes_64bit(all_data[data_pos:data_pos + 8])
+            timestamp_bytes = all_data[data_pos:data_pos + 8]
+            timestamp = from_bytes_64bit(timestamp_bytes)
+            if self.debug:
+                print(f"Reading timestamp: {timestamp}")
             data_pos += 8
 
             # Create change object
@@ -997,7 +1014,11 @@ class Journal:
                         break
 
                     selector_bytes = all_data[data_pos:data_pos + 8]
+                    if self.debug:
+                        print(f"Reading selector bytes: {':'.join(f'{b:02x}' for b in selector_bytes)}")
                     selector = Select.from_bytes(selector_bytes)
+                    if self.debug:
+                        print(f"Selector value: {selector.value:016x}")
                     data_pos += 8
                     cg.selectors.append(selector)
 
@@ -1266,52 +1287,108 @@ class Journal:
             else:
                 return self._read_generic_wraparound(under, over)
 
+        def _read_without_wraparound(self, dat_len: int) -> bytes:
+            """Read data that fits within the current journal space."""
+            file_obj = self._journal.get_file()
+
+            if dat_len == 8:
+                value = read_64bit(file_obj)
+                return to_bytes_64bit(value)
+            elif dat_len == 4:
+                value = read_32bit(file_obj)
+                return to_bytes_32bit(value)
+            else:
+                # For other lengths, read in chunks of appropriate size
+                data = bytearray()
+                remaining = dat_len
+                while remaining > 0:
+                    if remaining >= 8:
+                        value = read_64bit(file_obj)
+                        data.extend(to_bytes_64bit(value))
+                        remaining -= 8
+                    elif remaining >= 4:
+                        value = read_32bit(file_obj)
+                        data.extend(to_bytes_32bit(value))
+                        remaining -= 4
+                    else:
+                        # Read remaining bytes one at a time
+                        data.extend(to_bytes_32bit(read_32bit(file_obj))[:remaining])
+                        remaining = 0
+                return bytes(data)
+
         def _read_64bit_wraparound(self, under: int) -> bytes:
             """Read a 64-bit value that wraps around in the journal."""
-            low_bits = read_64bit(self._journal)
+            file_obj = self._journal.get_file()
+
+            # Read low bits
+            low_value = read_64bit(file_obj)
             self._update_bytes_read(under)
 
+            # Read high bits from start of data section
             self._journal.seek(self._journal.META_LEN)
-            high_bits = read_64bit(self._journal)
+            high_value = read_64bit(file_obj)
             self._update_bytes_read(8 - under)
 
-            value = (high_bits << (under * 8)) | low_bits
-            return to_bytes_64bit(value)
+            # Combine values
+            combined_value = (high_value << (under * 8)) | low_value
+            return to_bytes_64bit(combined_value)
 
         def _read_32bit_wraparound(self, under: int) -> bytes:
             """Read a 32-bit value that wraps around in the journal."""
-            low_bits = read_32bit(self._journal)
+            file_obj = self._journal.get_file()
+
+            # Read low bits
+            low_value = read_32bit(file_obj)
             self._update_bytes_read(under)
 
+            # Read high bits from start of data section
             self._journal.seek(self._journal.META_LEN)
-            high_bits = read_32bit(self._journal)
+            high_value = read_32bit(file_obj)
             self._update_bytes_read(4 - under)
 
-            value = (high_bits << (under * 8)) | low_bits
-            return value.to_bytes(4, byteorder='little')
+            # Combine values
+            combined_value = (high_value << (under * 8)) | low_value
+            return to_bytes_32bit(combined_value)
 
         def _read_generic_wraparound(self, under: int, over: int) -> bytes:
             """Read generic data that wraps around in the journal."""
-            data = self._journal.read(under)
+            file_obj = self._journal.get_file()
+            data = bytearray()
+
+            # Read first part
+            remaining = under
+            while remaining > 0:
+                if remaining >= 8:
+                    value = read_64bit(file_obj)
+                    data.extend(to_bytes_64bit(value))
+                    remaining -= 8
+                elif remaining >= 4:
+                    value = read_32bit(file_obj)
+                    data.extend(to_bytes_32bit(value))
+                    remaining -= 4
+                else:
+                    data.extend(to_bytes_32bit(read_32bit(file_obj))[:remaining])
+                    remaining = 0
             self._update_bytes_read(under)
 
+            # Read second part from start of data section
             self._journal.seek(self._journal.META_LEN)
-            data += self._journal.read(over)
+            remaining = over
+            while remaining > 0:
+                if remaining >= 8:
+                    value = read_64bit(file_obj)
+                    data.extend(to_bytes_64bit(value))
+                    remaining -= 8
+                elif remaining >= 4:
+                    value = read_32bit(file_obj)
+                    data.extend(to_bytes_32bit(value))
+                    remaining -= 4
+                else:
+                    data.extend(to_bytes_32bit(read_32bit(file_obj))[:remaining])
+                    remaining = 0
             self._update_bytes_read(over)
 
-            return data
-
-        def _read_without_wraparound(self, dat_len: int) -> bytes:
-            """Read data that fits within the current journal space."""
-            if dat_len == 8:
-                data = to_bytes_64bit(read_64bit(self._journal))
-            elif dat_len == 4:
-                data = read_32bit(self._journal).to_bytes(4, byteorder='little')
-            else:
-                data = self._journal.read(dat_len)
-
-            self._update_bytes_read(dat_len)
-            return data
+            return bytes(data)
 
         def _update_bytes_read(self, count: int):
             """Update the total bytes read counter."""
@@ -1388,7 +1465,10 @@ class Journal:
 
         def _write_selector_and_data(self, selector: Select, cg: Change, page_data: bytearray):
             """Write a selector and its associated data."""
-            self.wrt_field(selector.to_bytes(), 8, True)
+            selector_bytes = selector.to_bytes()
+            print(f"Writing selector: {selector.value:016x}, bytes: {':'.join(f'{b:02x}' for b in selector_bytes)}")
+
+            self.wrt_field(selector_bytes, 8, True)
 
             for i in range(63):  # Process up to 63 lines (excluding MSB)
                 if not selector.is_set(i):

@@ -67,6 +67,13 @@ def from_bytes_64bit(bytes_value: bytes) -> int:
     low_32, high_32 = struct.unpack('<II', bytes_value)
     return (high_32 << 32) | low_32
 
+def to_bytes_32bit(value: int) -> bytes:
+    return struct.pack('<I', value)
+
+def from_bytes_32bit(bytes_value: bytes) -> int:
+    return struct.unpack('<I', bytes_value)[0]
+
+
 class RangedBNum:
     def __init__(self, value: int):
         if not (0 <= value <= 0xFFFFFFFF):
