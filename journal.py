@@ -362,34 +362,6 @@ class Journal:
         """Process the journal entry after reading."""
         self.verify_bytes_read()
 
-    # def rd_last_jrnl(self, r_j_cg_log: ChangeLog):
-    #     """Read the last journal entry into a change log."""
-    #     start_pos = self._read_journal_metadata()
-    #     if start_pos is None:
-    #         return
-    #
-    #     self._debug_journal_layout()
-    #
-    #     self.seek(start_pos)
-    #     ck_start_tag = self._read_start_tag()
-    #     ct_bytes_to_write = self._read_ct_bytes_to_write()
-    #     self.ct_bytes_to_write = ct_bytes_to_write
-    #
-    #     # Record current position before reading changes
-    #     changes_start_pos = self.tell()
-    #     bytes_read = self._read_changes(r_j_cg_log, ct_bytes_to_write)
-    #
-    #     # Calculate end tag position based on start position, not changes_start
-    #     end_tag_pos = start_pos + ct_bytes_to_write
-    #     if end_tag_pos >= u32Const.JRNL_SIZE.value:
-    #         end_tag_pos = self.META_LEN + (end_tag_pos - u32Const.JRNL_SIZE.value)
-    #
-    #     self.seek(end_tag_pos)
-    #     ck_end_tag = self._read_end_tag()
-    #
-    #     self._verify_journal_tags(ck_start_tag, ck_end_tag)
-    #     self._process_journal_entry(bytes_read)
-
     def rd_last_jrnl(self, r_j_cg_log: ChangeLog):
         """Bridge method that calls the new implementation."""
         # Clear the read log
