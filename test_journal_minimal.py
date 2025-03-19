@@ -29,58 +29,50 @@ def create_minimal_change():
 
 def run_minimal_test():
     """Run a minimal test of journal write and read operations."""
-    try:
-        clean_test_files()
+    clean_test_files()
 
-        # Create required components
-        status = Status('test_status.txt')
-        sim_disk = SimDisk(
-            status,
-            'test_disk.bin',
-            'test_journal.bin',
-            'test_free.bin',
-            'test_inode.bin'
-        )
-        change_log = ChangeLog(test_sw=True)
-        crash_chk = CrashChk()
+    # Create required components
+    status = Status('test_status.txt')
+    sim_disk = SimDisk(
+        status,
+        'test_disk.bin',
+        'test_journal.bin',
+        'test_free.bin',
+        'test_inode.bin'
+    )
+    change_log = ChangeLog(test_sw=True)
+    crash_chk = CrashChk()
 
-        # Create journal
-        journal = Journal(
-            'test_journal.bin',
-            sim_disk,
-            change_log,
-            status,
-            crash_chk
-        )
+    # Create journal
+    journal = Journal(
+        'test_journal.bin',
+        sim_disk,
+        change_log,
+        status,
+        crash_chk
+    )
 
-        # Create and add a simple change
-        change = create_minimal_change()
-        change_log.add_to_log(change)
+    # Create and add a simple change
+    change = create_minimal_change()
+    change_log.add_to_log(change)
 
-        # Write the change to the journal
-        print("Writing...")
-        journal._change_log_handler.wrt_cg_log_to_jrnl(change_log)
+    # Write the change to the journal
+    print("Writing...")
+    journal._change_log_handler.wrt_cg_log_to_jrnl(change_log)
 
-        # Create a new change log for reading
-        read_log = ChangeLog(test_sw=True)
+    # Create a new change log for reading
+    read_log = ChangeLog(test_sw=True)
 
-        # Read the change back
-        print("Reading...")
-        journal.rd_last_jrnl(read_log)
+    # Read the change back
+    print("Reading...")
+    journal.rd_last_jrnl(read_log)
 
-        # Verify the end tag
-        if journal._file_io.read_end_tag() != journal.END_TAG:
-            raise ValueError("End tag verification failed")
+    # Verify the end tag
+    end_tag = journal._file_io.read_end_tag()
+    if end_tag != journal.END_TAG:
+        raise ValueError(f"End tag verification failed. Expected {journal.END_TAG:x}, got {end_tag:x}")
 
-        return True
-
-    except Exception as e:
-        print(f"Test failed with error: {e}")
-        return False
-
-    finally:
-        clean_test_files()
 
 if __name__ == "__main__":
-    success = run_minimal_test()
-    print("Test passed" if success else "Test failed")
+    run_minimal_test()
+    print("Test passed")
