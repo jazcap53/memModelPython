@@ -303,7 +303,7 @@ class Journal:
 
     def _reset_metadata(self):
         """Reset the journal metadata."""
-        self._metadata.meta_get = START_RW_AT_META_LEN
+        self._metadata.meta_get = self.START_RW_AT_META_LEN
         self._metadata.meta_put = 24
         self._metadata.meta_sz = 0
         self._metadata.write(-1, 24, 0)
@@ -340,7 +340,7 @@ class Journal:
 
         # Special case: meta_get of -1 means start at META_LEN
         # (beginning of data section)
-        if self.meta_get == START_RW_AT_META_LEN:
+        if self.meta_get == self.START_RW_AT_META_LEN:
             return self.META_LEN
 
         # Validate meta_get is in valid range
@@ -1130,7 +1130,7 @@ class Journal:
 
                 return meta_get, meta_put, meta_sz
             except Exception as e:
-                return START_RW_AT_META_LEN, 24, 0
+                return self._journal.START_RW_AT_META_LEN, 24, 0
 
         def write(self, new_g_pos: int, new_p_pos: int, u_ttl_bytes_written: int):
             """Write metadata to journal file."""
