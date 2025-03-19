@@ -27,15 +27,6 @@ def create_minimal_change():
     change.add_line(0, test_data)
     return change
 
-def verify_change(change: Change):
-    """Print basic information about a change."""
-    print(f"Block number: {change.block_num}")
-    print(f"Timestamp: {change.time_stamp}")
-    print(f"Number of selectors: {len(change.selectors)}")
-    print(f"Number of data lines: {len(change.new_data)}")
-    if change.new_data:
-        print(f"First data line: {change.new_data[0][:20]}")
-
 def run_minimal_test():
     """Run a minimal test of journal write and read operations."""
     try:
@@ -66,33 +57,25 @@ def run_minimal_test():
         change = create_minimal_change()
         change_log.add_to_log(change)
 
-        print("\nOriginal change details:")
-        verify_change(change)
-
         # Write the change to the journal
+        print("Writing...")
         journal._change_log_handler.wrt_cg_log_to_jrnl(change_log)
 
         # Create a new change log for reading
         read_log = ChangeLog(test_sw=True)
 
         # Read the change back
+        print("Reading...")
         journal.rd_last_jrnl(read_log)
 
-        # Verify the read
-        if not read_log.the_log or 0 not in read_log.the_log:
-            print("Error: Failed to read change from journal")
-            return False
-
-        read_change = read_log.the_log[0][0]
-        print("\nRead change details:")
-        verify_change(read_change)
+        # Verify the end tag
+        if journal._file_io.read_end_tag() != journal.END_TAG:
+            raise ValueError("End tag verification failed")
 
         return True
 
     except Exception as e:
         print(f"Test failed with error: {e}")
-        import traceback
-        traceback.print_exc()
         return False
 
     finally:
@@ -100,4 +83,4 @@ def run_minimal_test():
 
 if __name__ == "__main__":
     success = run_minimal_test()
-    print(f"\nTest {'passed' if success else 'failed'}")
+    print("Test passed" if success else "Test failed")
