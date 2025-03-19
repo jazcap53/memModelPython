@@ -373,9 +373,11 @@ class Journal:
             return bytes_read
         except Exception as e:
             if "Invalid end tag" in str(e):
-                end_tag_logger.error(f"Error in rd_last_jrnl: {e}")
+                if self.debug:
+                    end_tag_logger.error(f"Error in rd_last_jrnl: {e}")
             else:
-                logger.error(f"Error in rd_last_jrnl: {e}")
+                if self.debug:
+                    logger.error(f"Error in rd_last_jrnl: {e}")
             raise  # Re-raise the exception instead of continuing with potentially corrupted stateFc
 
     def rd_jrnl(self, r_j_cg_log: ChangeLog, start_pos: int) -> Tuple[int, int, int]:
@@ -1032,11 +1034,13 @@ class Journal:
         with better error reporting.
         """
         if start_tag != self.START_TAG:
-            logger.error(f"Start tag verification failed. Expected {self.START_TAG:x}, got {start_tag:x}")
+            if self.debug:
+                logger.error(f"Start tag verification failed. Expected {self.START_TAG:x}, got {start_tag:x}")
             raise ValueError(f"Invalid start tag: {start_tag:x}")
 
         if end_tag != self.END_TAG:
-            end_tag_logger.error(f"End tag verification failed. Expected {self.END_TAG:x}, got {end_tag:x}")
+            if self.debug:
+                end_tag_logger.error(f"End tag verification failed. Expected {self.END_TAG:x}, got {end_tag:x}")
             raise ValueError(f"Invalid end tag: {end_tag:x}")
 
         return True
@@ -1439,7 +1443,9 @@ class Journal:
         def _write_selector_and_data(self, selector: Select, cg: Change, page_data: bytearray):
             """Write a selector and its associated data."""
             selector_bytes = selector.to_bytes()
-            print(f"Writing selector: {selector.value:016x}, bytes: {':'.join(f'{b:02x}' for b in selector_bytes)}")
+
+            if self._journal.debug:
+                print(f"Writing selector: {selector.value:016x}, bytes: {':'.join(f'{b:02x}' for b in selector_bytes)}")
 
             self.wrt_field(selector_bytes, 8, True)
 
@@ -1753,7 +1759,7 @@ class Journal:
 
             logger.debug("Writing change log to journal")  # Added logging
 
-            r_cg_log.print()
+            # r_cg_log.print()
 
             self._journal.ttl_bytes_written = 0
             self._journal.ct_bytes_to_write = self.calculate_ct_bytes_to_write(r_cg_log)
