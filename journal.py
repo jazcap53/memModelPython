@@ -24,6 +24,7 @@ from wipeList import WipeList
 from change import Change, ChangeLog, Select
 from myMemory import Page
 import os
+import io
 from contextlib import contextmanager
 from logging_config import get_logger
 
@@ -115,7 +116,7 @@ class Journal:
 
         # File initialization
         file_existed = os.path.exists(self.f_name)
-        self.journal_file = open(self.f_name, "rb+" if file_existed else "wb+")
+        self.journal_file: BinaryIO = io.open(self.f_name, "rb+" if file_existed else "wb+")
 
         self.seek(0, 2)  # Go to end of file
         current_size = self.tell()
@@ -871,19 +872,17 @@ class Journal:
         # Determine start position for journal read
         start_pos = self.META_LEN if meta_get == -1 else meta_get
 
-        # Read start tag (START_TAG_SIZE bytes)
+        # Read start tag using read_64bit
         self.seek(start_pos)
-        start_tag_bytes = self.read(START_TAG_SIZE)
+        start_tag = read_64bit(self.journal_file)
         self.read_log.append((start_pos, START_TAG_SIZE))
-        start_tag = from_bytes_64bit(start_tag_bytes)
 
-        # Read bytes count (BYTES_COUNT_SIZE bytes)
+        # Read bytes count using read_64bit
         bytes_count_pos = start_pos + START_TAG_SIZE
         self.seek(bytes_count_pos)
-        bytes_count_data = self.read(BYTES_COUNT_SIZE)
-        self.read_log.append((bytes_count_pos, BYTES_COUNT_SIZE))
-        ct_bytes_to_write = from_bytes_64bit(bytes_count_data)
+        ct_bytes_to_write = read_64bit(self.journal_file)
         self.ct_bytes_to_write = ct_bytes_to_write
+        self.read_log.append((bytes_count_pos, BYTES_COUNT_SIZE))
 
         # Read changes (ct_bytes_to_write bytes)
         changes_start_pos = start_pos + HEADER_SIZE
@@ -896,11 +895,10 @@ class Journal:
         if end_tag_pos >= u32Const.JRNL_SIZE.value:
             end_tag_pos = self.META_LEN + (end_tag_pos - u32Const.JRNL_SIZE.value)
 
-        # Read end tag
+        # Read end tag using read_64bit
         self.seek(end_tag_pos)
-        end_tag_bytes = self.read(END_TAG_SIZE)
+        end_tag = read_64bit(self.journal_file)
         self.read_log.append((end_tag_pos, END_TAG_SIZE))
-        end_tag = from_bytes_64bit(end_tag_bytes)
 
         # Verify start and end tags
         if start_tag != self.START_TAG:
@@ -1201,38 +1199,15 @@ class Journal:
 
                 elif dat_len == 4:  # 32-bit value
                     value = int.from_bytes(data, byteorder='little')
-                    write_32bit(self._journal, value & ((1 << (bytes_until_end * 8)) - 1))
+                    write_32bit(self._journal.journal_file, value & ((1 << (bytes_until_end * 8)) - 1))
                     bytes_written += bytes_until_end
                     if do_ct:
                         self._journal.ttl_bytes_written += bytes_until_end
                     self._journal.seek(self._journal.META_LEN)
-                    write_32bit(self._journal, value >> (bytes_until_end * 8))
+                    write_32bit(self._journal.journal_file, value >> (bytes_until_end * 8))
                     bytes_written += overflow_bytes
                     if do_ct:
                         self._journal.ttl_bytes_written += overflow_bytes
-                else:
-                    self._journal.write(data[:bytes_until_end])
-                    bytes_written += bytes_until_end
-                    if do_ct:
-                        self._journal.ttl_bytes_written += bytes_until_end
-                    self._journal.seek(self._journal.META_LEN)
-                    self._journal.write(data[bytes_until_end:])
-                    bytes_written += overflow_bytes
-                    if do_ct:
-                        self._journal.ttl_bytes_written += overflow_bytes
-            else:
-                if dat_len == 8:
-                    write_64bit(self._journal, from_bytes_64bit(data))
-                elif dat_len == 4:
-                    write_32bit(self._journal, int.from_bytes(data, byteorder='little'))
-                else:
-                    self._journal.write(data)
-                bytes_written = dat_len
-                if do_ct:
-                    self._journal.ttl_bytes_written += dat_len
-
-            self._journal.final_p_pos = self._journal.tell()
-            return bytes_written
 
         def rd_field(self, dat_len: int) -> bytes:
             """Read a field from the journal file.
@@ -1387,29 +1362,32 @@ class Journal:
 
         def write_start_tag(self):
             """Write the start tag to the journal file."""
-            write_64bit(self._journal, self._journal.START_TAG)
+            write_64bit(self._journal.journal_file, self._journal.START_TAG)
 
         def write_end_tag(self):
             """Write the end tag to the journal file."""
             current_pos = self._journal.tell()
-            write_64bit(self._journal, self._journal.END_TAG)
+            write_64bit(self._journal.journal_file, self._journal.END_TAG)
             after_pos = self._journal.tell()
+            if self._journal.debug:
+                logger.debug(f"Writing end tag at position {current_pos}, "
+                             f"new position {after_pos}")
 
         def write_ct_bytes(self, ct_bytes):
             """Write the count of bytes to the journal file."""
-            write_64bit(self._journal, ct_bytes)
+            write_64bit(self._journal.journal_file, ct_bytes)
 
         def read_start_tag(self):
             """Read the start tag from the journal file."""
-            return read_64bit(self._journal)
+            return read_64bit(self._journal.journal_file)
 
         def read_end_tag(self):
             """Read the end tag from the journal file."""
-            return read_64bit(self._journal)
+            return read_64bit(self._journal.journal_file)
 
         def read_ct_bytes(self):
             """Read the count of bytes from the journal file."""
-            return read_64bit(self._journal)
+            return read_64bit(self._journal.journal_file)
 
         def wrt_cgs_to_jrnl(self, r_cg_log: ChangeLog):
             """Write changes from a change log to the journal."""
@@ -1757,9 +1735,7 @@ class Journal:
             if not r_cg_log.cg_line_ct:
                 return
 
-            logger.debug("Writing change log to journal")  # Added logging
-
-            # r_cg_log.print()
+            logger.debug("Writing change log to journal")
 
             self._journal.ttl_bytes_written = 0
             self._journal.ct_bytes_to_write = self.calculate_ct_bytes_to_write(r_cg_log)
@@ -1767,7 +1743,10 @@ class Journal:
             # Record start position
             start_pos = self._journal.tell()
 
-            self._write_journal_tags(True)  # Write start tag
+            # Write start tag and bytes count using write_64bit
+            write_64bit(self._journal.journal_file, self._journal.START_TAG)
+            write_64bit(self._journal.journal_file, self._journal.ct_bytes_to_write)
+
             self._journal._file_io.wrt_cgs_to_jrnl(r_cg_log)
 
             # Calculate end tag position and seek there
@@ -1776,7 +1755,7 @@ class Journal:
                 end_tag_pos = self._journal.META_LEN + (end_tag_pos - u32Const.JRNL_SIZE.value)
 
             self._journal.seek(end_tag_pos)
-            self._write_journal_tags(False)  # Write end tag
+            write_64bit(self._journal.journal_file, self._journal.END_TAG)  # Write end tag directly
 
             # Update metadata
             new_g_pos = self._journal.META_LEN
@@ -1786,10 +1765,9 @@ class Journal:
             self._update_metadata(new_g_pos, new_p_pos, ttl_bytes)
             self._flush_and_update_status()
 
-            logger.debug(f"Change log written at time {get_cur_time()}")  # Added logging
+            logger.debug(f"Change log written at time {get_cur_time()}")
 
             # Reset the recently purged flag in the parent Journal class
-            # This ensures that after writing new changes, the journal can be purged again
             self._journal._recently_purged = False
 
             r_cg_log.cg_line_ct = 0
