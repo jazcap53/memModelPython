@@ -349,7 +349,7 @@ class Journal:
 
     def _process_journal_entry(self, ttl_bytes):
         """Process the journal entry after reading."""
-        self.verify_bytes_read()
+        self._verify_bytes_read()
 
     def rd_last_jrnl(self, r_j_cg_log: ChangeLog):
         """Bridge method that calls the new implementation."""
@@ -773,7 +773,7 @@ class Journal:
             END_TAG_SIZE = 8  # Size of the END_TAG field
 
             # Read metadata (position 0, METADATA_SIZE bytes)
-            meta_get, meta_put, meta_sz = self._read_journal_metadata()
+            meta_get, meta_put, meta_sz = self._metadata.read()
 
             # Determine start position for journal read
             start_pos = self.META_LEN if meta_get == -1 else meta_get
@@ -1672,15 +1672,30 @@ class Journal:
             write_64bit(self._journal.journal_file, self._journal.START_TAG)
             write_64bit(self._journal.journal_file, self._journal.ct_bytes_to_write)
 
+            # Record position after writing header
+            data_start_pos = self._journal.tell()
+
             self._journal._file_io.wrt_cgs_to_jrnl(r_cg_log)
 
-            # Calculate end tag position and seek there
-            end_tag_pos = start_pos + self._journal.ct_bytes_to_write
+            # Calculate end tag position more explicitly
+            # The offset is 16 (START_TAG + ct_bytes_to_write fields) plus the data
+            end_tag_pos = start_pos + 16 + self._journal.ct_bytes_to_write
             if end_tag_pos >= u32Const.JRNL_SIZE.value:
                 end_tag_pos = self._journal.META_LEN + (end_tag_pos - u32Const.JRNL_SIZE.value)
 
-            self._journal.seek(end_tag_pos)
-            write_64bit(self._journal.journal_file, self._journal.END_TAG)  # Write end tag directly
+            # Store the end tag position for later validation
+            self._journal.end_tag_posn = end_tag_pos
+
+            # Use the stored position for seeking
+            self._journal.seek(self._journal.end_tag_posn)
+
+            # Verify position before writing end tag
+            actual_end_pos = self._journal.tell()
+            if actual_end_pos != end_tag_pos:
+                logger.error(f"End tag position mismatch: expected {end_tag_pos}, got {actual_end_pos}")
+
+            # Write end tag
+            write_64bit(self._journal.journal_file, self._journal.END_TAG)
 
             # Update metadata
             new_g_pos = self._journal.META_LEN
