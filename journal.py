@@ -269,7 +269,7 @@ class Journal:
         """Process changes in the journal."""
         j_cg_log = ChangeLog()
         # self.rd_last_jrnl(j_cg_log)
-        self.rd_last_jrnl_new(j_cg_log)
+        self.rd_last_jrnl(j_cg_log)
 
         self._log_change_summary(j_cg_log)
 
@@ -333,31 +333,19 @@ class Journal:
     def _read_journal_metadata(self):
         """Read and validate journal metadata.
 
+        This is a bridge method to the newer implementation.
+
         Returns:
             int or None: The position to start reading from, or None if no valid data
         """
-        # Read metadata values
-        self.meta_get, self.meta_put, self.meta_sz = self._metadata.read()
-
-        # Special case: meta_get of -1 means start at META_LEN
-        # (beginning of data section)
-        if self.meta_get == self.START_RW_AT_META_LEN:
-            return self.META_LEN
-
-        # Validate meta_get is in valid range
-        if self.meta_get < self.META_LEN or self.meta_get >= u32Const.JRNL_SIZE.value:
-            logger.warning(f"Invalid meta_get value: {self.meta_get}")
-            return None
-
-        # Valid meta_get value
-        return self.meta_get
+        return self._read_journal_metadata_new()
 
     def _verify_journal_tags(self, start_tag: int, end_tag: int):
-        """Verify journal tags match expected values."""
-        if start_tag != self.START_TAG:
-            raise ValueError(f"Invalid start tag: {start_tag:x}")
-        if end_tag != self.END_TAG:
-            raise ValueError(f"Invalid end tag: {end_tag:x}")
+        """Verify journal tags match expected values.
+
+        This is a bridge method to the newer implementation.
+        """
+        return self._verify_journal_tags_new(start_tag, end_tag)
 
     def _process_journal_entry(self, ttl_bytes):
         """Process the journal entry after reading."""
@@ -365,21 +353,7 @@ class Journal:
 
     def rd_last_jrnl(self, r_j_cg_log: ChangeLog):
         """Bridge method that calls the new implementation."""
-        # Clear the read log
-        self.read_log = []
-
-        try:
-            bytes_read = self.rd_last_jrnl_new(r_j_cg_log)
-            self._process_journal_entry_new(bytes_read)
-            return bytes_read
-        except Exception as e:
-            if "Invalid end tag" in str(e):
-                if self.debug:
-                    end_tag_logger.error(f"Error in rd_last_jrnl: {e}")
-            else:
-                if self.debug:
-                    logger.error(f"Error in rd_last_jrnl: {e}")
-            raise  # Re-raise the exception instead of continuing with potentially corrupted stateFc
+        return self.rd_last_jrnl_new(r_j_cg_log)
 
     def rd_jrnl(self, r_j_cg_log: ChangeLog, start_pos: int) -> Tuple[int, int, int]:
         """Read journal contents from a given position.
@@ -443,75 +417,21 @@ class Journal:
         return end_pos
 
     def _read_changes(self, r_j_cg_log: ChangeLog, ct_bytes_to_write: int) -> int:
-        """Read changes from the journal and populate the change log."""
-        current_position = self.tell()
+        """Read changes from the journal and populate the change log.
 
-        # Track how many bytes we've processed
-        bytes_processed = 0
-        while bytes_processed < ct_bytes_to_write:
-            # Check if we have enough data for block number and timestamp
-            if bytes_processed + 16 > ct_bytes_to_write:
-                break
+        This is a bridge method to the newer implementation that reads all data at once
+        instead of processing it line by line, which helps avoid position errors.
 
-            # Read block number and timestamp using proper endianness functions
-            block_data = self._read_with_log(8)
-            b_num = from_bytes_64bit(block_data)
-            bytes_processed += 8
+        Args:
+            r_j_cg_log: Change log to populate
+            ct_bytes_to_write: Number of bytes to read
 
-            # Validate block number
-            if b_num >= bNum_tConst.NUM_DISK_BLOCKS.value:
-                break
-
-            timestamp_data = self._read_with_log(8)
-            timestamp = from_bytes_64bit(timestamp_data)
-            bytes_processed += 8
-
-            # Create and initialize change object
-            cg = Change(b_num)
-            cg.time_stamp = timestamp
-
-            # Process selectors and their data
-            has_more_selectors = True
-            while has_more_selectors and bytes_processed < ct_bytes_to_write:
-                if bytes_processed + 8 > ct_bytes_to_write:
-                    break
-
-                # Read selector using proper endianness
-                selector_data = self._read_with_log(8)
-                bytes_processed += 8
-
-                # Create selector with precise bit positions preserved
-                selector = Select.from_bytes(selector_data)
-                cg.selectors.append(selector)
-
-                # Process data lines for each set bit in selector
-                for i in range(63):  # Ignore MSB (bit 63)
-                    if not selector.is_set(i):
-                        continue
-
-                    if bytes_processed + u32Const.BYTES_PER_LINE.value > ct_bytes_to_write:
-                        has_more_selectors = False
-                        break
-
-                    # Read line data
-                    line_data = self._read_with_log(u32Const.BYTES_PER_LINE.value)
-                    bytes_processed += u32Const.BYTES_PER_LINE.value
-                    cg.new_data.append(line_data)
-
-                # Check if this is the last selector for this change
-                if selector.is_last_block():
-                    has_more_selectors = False
-
-            # Skip CRC and padding (8 bytes)
-            if bytes_processed + 8 <= ct_bytes_to_write:
-                self._read_with_log(8)  # Read and discard CRC+padding
-                bytes_processed += 8
-
-            # Add the complete change to our log
-            if cg.selectors:
-                r_j_cg_log.add_to_log(cg)
-
-        return ct_bytes_to_write
+        Returns:
+            Number of bytes read
+        """
+        # Get the current position to pass to the new implementation
+        start_pos = self.tell()
+        return self._read_changes_new(r_j_cg_log, ct_bytes_to_write, start_pos)
 
     def _check_journal_end(self, bytes_read: int, ct_bytes_to_write: int) -> bool:
         """Check if we've read all the bytes we need or reached a genuine end."""
@@ -636,34 +556,12 @@ class Journal:
         except IOError as e:
             raise
 
-    def verify_bytes_read(self):
-        """Verify that the number of bytes read matches the expected count."""
-        # Get current metadata for calculation
-        meta_get = self.meta_get
+    def _verify_bytes_read(self):
+        """Verify that the number of bytes read matches the expected count.
 
-        # Calculate positions based on start position
-        end_tag_pos = meta_get + self.ct_bytes_to_write
-        if end_tag_pos >= u32Const.JRNL_SIZE.value:
-            end_tag_pos = self.META_LEN + (end_tag_pos - u32Const.JRNL_SIZE.value)
-
-        expected_reads = [
-            (0, 24),  # Metadata read
-            (meta_get, 8),  # Start tag
-            (meta_get + 8, 8),  # ct_bytes_to_write field
-            (meta_get + 16, self.ct_bytes_to_write),  # Actual changes
-            (end_tag_pos, 8)  # End tag
-        ]
-
-        # Compare only the last set of reads that should match the expected pattern
-        actual_reads = self.read_log[-len(expected_reads):]
-
-        for i, (expected, actual) in enumerate(zip(expected_reads, actual_reads)):
-            if expected != actual:
-                pass
-
-        assert actual_reads == expected_reads, (
-            f"Read mismatch: expected {expected_reads}, got {actual_reads}"
-        )
+        This is a bridge method to the newer implementation.
+        """
+        self._verify_bytes_read_new()
 
     def verify_page_crc(self, page_tuple: Tuple[bNum_t, Page]) -> bool:
         """Verify the CRC of a page. Public interface for CRC checking."""
@@ -756,29 +654,15 @@ class Journal:
     def _read_with_log(self, size: int) -> bytes:
         """Read bytes using ajTypes functions while maintaining the read log.
 
+        This is a bridge method to the newer implementation.
+
         Args:
             size: Number of bytes to read (typically 4 or 8)
 
         Returns:
             The read data as bytes
         """
-        current_position = self.tell()
-
-        # Use ajTypes functions for actual reading
-        if size == 8:
-            value = read_64bit(self.journal_file)
-            data = to_bytes_64bit(value)
-        elif size == 4:
-            value = read_32bit(self.journal_file)
-            data = struct.pack('<I', value)
-        else:
-            data = self.journal_file.read(size)
-
-        # Log the read operation
-        self.total_bytes_read += len(data)
-        self.read_log.append((current_position, len(data)))
-
-        return data
+        return self._read_with_log_new(size)
 
     def _debug_journal_layout(self):
         """Debug helper to dump journal layout information."""
@@ -833,8 +717,12 @@ class Journal:
 
         return None
 
-    def _read_metadata_new(self):
-        """Read metadata from journal file with position tracking."""
+    def _read_journal_metadata_new(self):
+        """Read metadata from journal file with position tracking.
+
+        Returns:
+            int or None: The position to start reading from, or None if no valid data
+        """
         original_pos = self.tell()
         try:
             self.seek(0)
@@ -848,7 +736,24 @@ class Journal:
             meta_put = from_bytes_64bit(meta_put_bytes)
             meta_sz = from_bytes_64bit(meta_sz_bytes)
 
-            return meta_get, meta_put, meta_sz
+            # Set the properties to maintain backward compatibility
+            self.meta_get = meta_get
+            self.meta_put = meta_put
+            self.meta_sz = meta_sz
+
+            # Special case: meta_get of -1 means start at META_LEN
+            # (beginning of data section)
+            if meta_get == self.START_RW_AT_META_LEN:
+                return self.META_LEN
+
+            # Validate meta_get is in valid range
+            if meta_get < self.META_LEN or meta_get >= u32Const.JRNL_SIZE.value:
+                logger.warning(f"Invalid meta_get value: {meta_get}")
+                return None
+
+            # Valid meta_get value
+            return meta_get
+
         finally:
             # Restore original position if needed
             if original_pos != self.tell():
@@ -859,64 +764,75 @@ class Journal:
         # Clear read log before starting
         self.read_log = []
 
-        # Use meaningful constants instead of magic numbers
-        METADATA_SIZE = 24  # Size of metadata (meta_get, meta_put, meta_sz combined)
-        START_TAG_SIZE = 8  # Size of the START_TAG field
-        BYTES_COUNT_SIZE = 8  # Size of the ct_bytes_to_write field
-        HEADER_SIZE = START_TAG_SIZE + BYTES_COUNT_SIZE  # Combined size of START_TAG and bytes count
-        END_TAG_SIZE = 8  # Size of the END_TAG field
-
-        # Read metadata (position 0, METADATA_SIZE bytes)
-        meta_get, meta_put, meta_sz = self._read_metadata_new()
-
-        # Determine start position for journal read
-        start_pos = self.META_LEN if meta_get == -1 else meta_get
-
-        # Read start tag using read_64bit
-        self.seek(start_pos)
-        start_tag = read_64bit(self.journal_file)
-        self.read_log.append((start_pos, START_TAG_SIZE))
-
-        # Read bytes count using read_64bit
-        bytes_count_pos = start_pos + START_TAG_SIZE
-        self.seek(bytes_count_pos)
-        ct_bytes_to_write = read_64bit(self.journal_file)
-        self.ct_bytes_to_write = ct_bytes_to_write
-        self.read_log.append((bytes_count_pos, BYTES_COUNT_SIZE))
-
-        # Read changes (ct_bytes_to_write bytes)
-        changes_start_pos = start_pos + HEADER_SIZE
-        self.seek(changes_start_pos)
-        bytes_read = self._read_changes_new(r_j_cg_log, ct_bytes_to_write, changes_start_pos)
-        self.read_log.append((changes_start_pos, ct_bytes_to_write))
-
-        # Calculate end tag position
-        end_tag_pos = start_pos + HEADER_SIZE + ct_bytes_to_write
-        if end_tag_pos >= u32Const.JRNL_SIZE.value:
-            end_tag_pos = self.META_LEN + (end_tag_pos - u32Const.JRNL_SIZE.value)
-
-        # Read end tag using read_64bit
-        self.seek(end_tag_pos)
-        end_tag = read_64bit(self.journal_file)
-        self.read_log.append((end_tag_pos, END_TAG_SIZE))
-
-        # Verify start and end tags
-        if start_tag != self.START_TAG:
-            logger.error(f"Invalid start tag: {start_tag:x}, expected {self.START_TAG:x}")
-        if end_tag != self.END_TAG:
-            end_tag_logger.error(f"Invalid end tag: {end_tag:x}, expected {self.END_TAG:x}")
-
-        # Handle verification without failing immediately to match original behavior
         try:
-            self._verify_journal_tags_new(start_tag, end_tag)
-        except ValueError as e:
-            logger.error(f"Tag verification error: {e}")
-            # We continue even after tag verification failure
+            # Use meaningful constants instead of magic numbers
+            METADATA_SIZE = 24  # Size of metadata (meta_get, meta_put, meta_sz combined)
+            START_TAG_SIZE = 8  # Size of the START_TAG field
+            BYTES_COUNT_SIZE = 8  # Size of the ct_bytes_to_write field
+            HEADER_SIZE = START_TAG_SIZE + BYTES_COUNT_SIZE  # Combined size of START_TAG and bytes count
+            END_TAG_SIZE = 8  # Size of the END_TAG field
 
-        return bytes_read
+            # Read metadata (position 0, METADATA_SIZE bytes)
+            meta_get, meta_put, meta_sz = self._read_journal_metadata()
+
+            # Determine start position for journal read
+            start_pos = self.META_LEN if meta_get == -1 else meta_get
+
+            # Read start tag using read_64bit
+            self.seek(start_pos)
+            start_tag = read_64bit(self.journal_file)
+            self.read_log.append((start_pos, START_TAG_SIZE))
+
+            # Read bytes count using read_64bit
+            bytes_count_pos = start_pos + START_TAG_SIZE
+            self.seek(bytes_count_pos)
+            ct_bytes_to_write = read_64bit(self.journal_file)
+            self.ct_bytes_to_write = ct_bytes_to_write
+            self.read_log.append((bytes_count_pos, BYTES_COUNT_SIZE))
+
+            # Read changes (ct_bytes_to_write bytes)
+            changes_start_pos = start_pos + HEADER_SIZE
+            self.seek(changes_start_pos)
+            bytes_read = self._read_changes(r_j_cg_log, ct_bytes_to_write)
+            self.read_log.append((changes_start_pos, ct_bytes_to_write))
+
+            # Calculate end tag position
+            end_tag_pos = start_pos + HEADER_SIZE + ct_bytes_to_write
+            if end_tag_pos >= u32Const.JRNL_SIZE.value:
+                end_tag_pos = self.META_LEN + (end_tag_pos - u32Const.JRNL_SIZE.value)
+
+            # Read end tag using read_64bit
+            self.seek(end_tag_pos)
+            end_tag = read_64bit(self.journal_file)
+            self.read_log.append((end_tag_pos, END_TAG_SIZE))
+
+            # Verify start and end tags
+            try:
+                self._verify_journal_tags(start_tag, end_tag)
+            except ValueError as e:
+                if "Invalid end tag" in str(e):
+                    if self.debug:
+                        end_tag_logger.error(f"Error in rd_last_jrnl: {e}")
+                else:
+                    if self.debug:
+                        logger.error(f"Error in rd_last_jrnl: {e}")
+                raise  # Re-raise the exception
+
+            # Process the journal entry
+            self._process_journal_entry(bytes_read)
+
+            return bytes_read
+        except Exception as e:
+            if "Invalid end tag" not in str(e) and self.debug:
+                logger.error(f"Error in rd_last_jrnl_new: {e}")
+            raise  # Re-raise all exceptions
 
     def _read_changes_new(self, r_j_cg_log: ChangeLog, ct_bytes_to_write: int, start_pos: int) -> int:
         """Read changes data with safer positioning and improved error handling.
+
+        This implementation reads all data at once to avoid position errors that
+        could occur when reading incrementally, especially when dealing with
+        wrapped-around journal entries.
 
         Args:
             r_j_cg_log: Change log to populate with read data
@@ -987,11 +903,7 @@ class Journal:
                         break
 
                     selector_bytes = all_data[data_pos:data_pos + 8]
-                    if self.debug:
-                        print(f"Reading selector bytes: {':'.join(f'{b:02x}' for b in selector_bytes)}")
                     selector = Select.from_bytes(selector_bytes)
-                    if self.debug:
-                        print(f"Selector value: {selector.value:016x}")
                     data_pos += 8
                     cg.selectors.append(selector)
 
@@ -1021,9 +933,9 @@ class Journal:
 
             except Exception as e:
                 logger.error(f"Error processing change: {e}")
-                break
+                raise  # Propagate exception as requested
 
-        return ct_bytes_to_write  # Return expected bytes to match original behavior
+        return ct_bytes_to_write  # Return expected bytes
 
     def _verify_journal_tags_new(self, start_tag: int, end_tag: int):
         """Verify journal tags more robustly.
@@ -1041,21 +953,34 @@ class Journal:
                 end_tag_logger.error(f"End tag verification failed. Expected {self.END_TAG:x}, got {end_tag:x}")
             raise ValueError(f"Invalid end tag: {end_tag:x}")
 
-        return True
-
     def _read_with_log_new(self, size: int) -> bytes:
-        """Read bytes and track in log with precise positioning."""
-        current_pos = self.tell()
-        try:
-            data = self.read(size)
-            self.total_bytes_read += len(data)
-            # Only append to log if we actually read anything
-            if data:
-                self.read_log.append((current_pos, len(data)))
-            return data
-        except Exception as e:
-            logger.error(f"Error in _read_with_log_new: {e}")
-            raise
+        """Read bytes using ajTypes functions while maintaining the read log.
+
+        Args:
+            size: Number of bytes to read (typically 4 or 8)
+
+        Returns:
+            The read data as bytes
+        """
+        current_position = self.tell()
+
+        # Use ajTypes functions for actual reading
+        if size == 8:
+            value = read_64bit(self.journal_file)
+            data = to_bytes_64bit(value)
+        elif size == 4:
+            value = read_32bit(self.journal_file)
+            data = struct.pack('<I', value)
+        else:
+            data = self.journal_file.read(size)
+
+        # Log the read operation
+        self.total_bytes_read += len(data)
+        # Only append to log if we actually read anything
+        if data:
+            self.read_log.append((current_position, len(data)))
+
+        return data
 
     def _process_journal_entry_new(self, bytes_read):
         """Process the journal entry after reading it.
@@ -1064,7 +989,7 @@ class Journal:
         to better match original behavior.
         """
         try:
-            self._verify_bytes_read_new()
+            self._verify_bytes_read()
         except AssertionError as e:
             logger.warning(f"Read verification warning: {e}")
 
@@ -1072,19 +997,19 @@ class Journal:
         """Verify journal reads with more precise logging and handling.
 
         This method compares actual versus expected read patterns with
-        improved diagnostics and more flexible matching.
+        improved diagnostics and matching.
         """
-        # Get current metadata
-        meta_get = self.meta_get if hasattr(self, 'meta_get') else -1
+        # Get current metadata for calculation
+        meta_get = self.meta_get
 
-        # Calculate positions
-        end_tag_pos = meta_get + self.ct_bytes_to_write + 16  # +16 for header
+        # Calculate positions based on start position
+        # Note: Using original calculation which does not include the header size
+        end_tag_pos = meta_get + self.ct_bytes_to_write
         if end_tag_pos >= u32Const.JRNL_SIZE.value:
             end_tag_pos = self.META_LEN + (end_tag_pos - u32Const.JRNL_SIZE.value)
 
-        # Expected read pattern
         expected_reads = [
-            (0, 24),  # Metadata read (always from position 0)
+            (0, 24),  # Metadata read
             (meta_get, 8),  # Start tag
             (meta_get + 8, 8),  # ct_bytes_to_write field
             (meta_get + 16, self.ct_bytes_to_write),  # Actual changes
@@ -1095,14 +1020,14 @@ class Journal:
         actual_reads = self.read_log[-len(expected_reads):] if len(self.read_log) >= len(
             expected_reads) else self.read_log
 
-        # More flexible verification - log differences but don't fail
+        # Compare and assert like the original method
         for i, (expected, actual) in enumerate(zip(expected_reads, actual_reads)):
             if expected != actual:
                 logger.debug(f"Read {i} mismatch: expected {expected}, got {actual}")
 
-        # Just log without asserting to match original behavior
-        if actual_reads != expected_reads:
-            logger.warning(f"Read pattern mismatch: expected {expected_reads}, got {actual_reads}")
+        assert actual_reads == expected_reads, (
+            f"Read mismatch: expected {expected_reads}, got {actual_reads}"
+        )
 
 
     class _Metadata:
