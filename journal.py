@@ -1164,6 +1164,12 @@ class Journal:
                     bytes_written += overflow_bytes
                     if do_ct:
                         self._journal.ttl_bytes_written += overflow_bytes
+            else:
+                # Add this new case
+                bytes_written = self._journal.write(data)
+                if do_ct:
+                    self._journal.ttl_bytes_written += bytes_written
+                return bytes_written
 
         def rd_field(self, dat_len: int) -> bytes:
             """Read a field from the journal file.

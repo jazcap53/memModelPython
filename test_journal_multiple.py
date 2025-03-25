@@ -5,7 +5,7 @@ from simDisk import SimDisk
 from change import Change, ChangeLog
 from crashChk import CrashChk
 from journal import Journal
-from ajTypes import u32Const
+from ajTypes import u32Const, from_bytes_64bit
 
 
 def clean_test_files():
@@ -45,6 +45,51 @@ def create_changes():
     changes.append(change3)
 
     return changes
+
+
+def dump_journal_file(journal, title, start_pos=None, length=400):
+    """Dump the contents of the journal file for analysis."""
+    original_pos = journal.tell()
+
+    print(f"\n{title}:")
+    start = journal.META_LEN if start_pos is None else start_pos
+    journal.seek(start)
+    journal_data = journal.read(length)
+
+    print(f"Journal data hex dump (starting at position {start}):")
+    for i in range(0, len(journal_data), 16):
+        chunk = journal_data[i:i + 16]
+        hex_values = ' '.join(f'{b:02x}' for b in chunk)
+        ascii_repr = ''.join(chr(b) if 32 <= b < 127 else '.' for b in chunk)
+        offset = start + i
+        print(f"{offset:04x}: {hex_values:<47} {ascii_repr}")
+
+    # Restore original position
+    journal.seek(original_pos)
+
+    # Check start tag
+    journal.seek(journal.META_LEN)
+    start_tag_bytes = journal.read(8)
+    start_tag = from_bytes_64bit(start_tag_bytes)
+    print(f"START_TAG at position {journal.META_LEN}: 0x{start_tag:016x} (Expected: 0x{journal.START_TAG:016x})")
+
+    # Check bytes count
+    bytes_count_bytes = journal.read(8)
+    bytes_count = from_bytes_64bit(bytes_count_bytes)
+    print(f"Bytes count at position {journal.META_LEN + 8}: {bytes_count} bytes")
+
+    # Check end tag if available
+    if hasattr(journal, 'end_tag_posn') and journal.end_tag_posn is not None:
+        journal.seek(journal.end_tag_posn)
+        end_tag_bytes = journal.read(8)
+        if len(end_tag_bytes) == 8:
+            end_tag = from_bytes_64bit(end_tag_bytes)
+            print(f"END_TAG at position {journal.end_tag_posn}: 0x{end_tag:016x} (Expected: 0x{journal.END_TAG:016x})")
+        else:
+            print(f"Could not read 8 bytes for END_TAG at position {journal.end_tag_posn}")
+
+    # Restore original position again
+    journal.seek(original_pos)
 
 
 def verify_change(change: Change):
@@ -106,6 +151,9 @@ def run_multiple_test():
         journal.write_change_log_to_journal(change_log)
         print(f"Journal position after write: {journal.tell()}")
 
+        # DUMP JOURNAL FILE AFTER WRITING
+        dump_journal_file(journal, "Journal content AFTER WRITING")
+
         print("\nReading changes from journal...")
         # Create a new change log for reading
         read_log = ChangeLog(test_sw=True)
@@ -163,6 +211,9 @@ def run_multiple_test():
             # Restore original seek method
             journal.seek = original_seek
 
+        # DUMP JOURNAL FILE AFTER READING
+        dump_journal_file(journal, "Journal content AFTER READING")
+
         # Print journal metadata
         print(f"\nJournal Metadata:")
         print(f"meta_get: {journal.meta_get}")
@@ -187,32 +238,6 @@ def run_multiple_test():
         original_count = len(changes)
         read_count = len(read_log.the_log[0])
         print(f"\nNumber of changes - Original: {original_count}, Read: {read_count}")
-
-        print("\nDumping journal file for analysis:")
-        journal.seek(journal.META_LEN)
-        journal_data = journal.read(400)  # Read 400 bytes to capture all changes and end tag
-        print(f"Journal data hex dump:")
-        for i in range(0, len(journal_data), 16):
-            chunk = journal_data[i:i + 16]
-            hex_values = ' '.join(f'{b:02x}' for b in chunk)
-            ascii_repr = ''.join(chr(b) if 32 <= b < 127 else '.' for b in chunk)
-            print(f"{i:04x}: {hex_values:<47} {ascii_repr}")
-
-        # Add explicit end tag verification
-        end_tag_pos = journal.end_tag_posn if hasattr(journal, 'end_tag_posn') else None
-        print(f"\nExpected end tag position: {end_tag_pos}")
-        if end_tag_pos is not None:
-            journal.seek(end_tag_pos)
-            end_tag_bytes = journal.read(8)
-            if len(end_tag_bytes) == 8:
-                end_tag_value = int.from_bytes(end_tag_bytes, byteorder='little')
-                print(f"End tag at position {end_tag_pos}: 0x{end_tag_value:016x} (Expected: 0x{journal.END_TAG:016x})")
-                if end_tag_value == journal.END_TAG:
-                    print("✓ End tag matches expected value")
-                else:
-                    print("❌ End tag does not match expected value")
-            else:
-                print(f"❌ Could not read 8 bytes at position {end_tag_pos}")
 
     except Exception as e:
         print(f"Test failed with error: {e}")
