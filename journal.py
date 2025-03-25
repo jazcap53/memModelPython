@@ -1127,13 +1127,14 @@ class Journal:
             self._journal = journal_instance
 
         def wrt_field(self, data: bytes, dat_len: int, do_ct: bool) -> int:
-            """Write a field to the journal file."""
+            """Write a field to the journal file"""
             bytes_written = 0
             p_pos = self._journal.tell()
             buf_sz = u32Const.JRNL_SIZE.value
             end_pt = p_pos + dat_len
 
             if end_pt > buf_sz:
+                # Existing wraparound handling code
                 overflow_bytes = end_pt - buf_sz
                 bytes_until_end = dat_len - overflow_bytes
 
@@ -1165,11 +1166,12 @@ class Journal:
                     if do_ct:
                         self._journal.ttl_bytes_written += overflow_bytes
             else:
-                # Add this new case
                 bytes_written = self._journal.write(data)
                 if do_ct:
                     self._journal.ttl_bytes_written += bytes_written
-                return bytes_written
+
+            assert bytes_written == dat_len, f"Expected to write {dat_len} bytes, but wrote {bytes_written} bytes"
+            return bytes_written
 
         def rd_field(self, dat_len: int) -> bytes:
             """Read a field from the journal file.
@@ -1564,7 +1566,8 @@ class Journal:
             bytes_written += self._journal._file_io.wrt_field(to_bytes_64bit(cg.block_num), 8, True)
             bytes_written += self._journal._file_io.wrt_field(to_bytes_64bit(cg.time_stamp), 8, True)
             for s in cg.selectors:
-                bytes_written += self._journal._file_io.wrt_field(s.to_bytearray(), self._journal.sz, True)
+                # below line changed `s.to_bytearray()` to `s.to_bytes()`
+                bytes_written += self._journal._file_io.wrt_field(s.to_bytes(), self._journal.sz, True)
             for d in cg.new_data:
                 bytes_written += self._journal._file_io.wrt_field(
                     d if isinstance(d, bytes) else bytes(d),

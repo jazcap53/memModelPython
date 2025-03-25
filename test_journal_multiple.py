@@ -47,25 +47,34 @@ def create_changes():
     return changes
 
 
-def dump_journal_file(journal, title, start_pos=None, length=400):
+def dump_journal_file(journal, title, start_pos=0, length=400):
     """Dump the contents of the journal file for analysis."""
     original_pos = journal.tell()
 
     print(f"\n{title}:")
-    start = journal.META_LEN if start_pos is None else start_pos
-    journal.seek(start)
+    journal.seek(start_pos)
     journal_data = journal.read(length)
 
-    print(f"Journal data hex dump (starting at position {start}):")
+    print(f"Journal data hex dump (starting at position {start_pos}):")
     for i in range(0, len(journal_data), 16):
         chunk = journal_data[i:i + 16]
         hex_values = ' '.join(f'{b:02x}' for b in chunk)
         ascii_repr = ''.join(chr(b) if 32 <= b < 127 else '.' for b in chunk)
-        offset = start + i
+        offset = start_pos + i
         print(f"{offset:04x}: {hex_values:<47} {ascii_repr}")
 
-    # Restore original position
-    journal.seek(original_pos)
+    # Check metadata
+    journal.seek(0)
+    meta_get_bytes = journal.read(8)
+    meta_put_bytes = journal.read(8)
+    meta_sz_bytes = journal.read(8)
+    meta_get = from_bytes_64bit(meta_get_bytes)
+    meta_put = from_bytes_64bit(meta_put_bytes)
+    meta_sz = from_bytes_64bit(meta_sz_bytes)
+    print(f"Metadata:")
+    print(f"  meta_get: {meta_get}")
+    print(f"  meta_put: {meta_put}")
+    print(f"  meta_sz: {meta_sz}")
 
     # Check start tag
     journal.seek(journal.META_LEN)
