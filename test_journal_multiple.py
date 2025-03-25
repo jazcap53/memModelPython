@@ -103,7 +103,7 @@ def run_multiple_test():
         print(f"Journal position before write: {journal.tell()}")
         print("\nWriting changes to journal...")
         # Write all changes to the journal
-        journal._change_log_handler.wrt_cg_log_to_jrnl(change_log)
+        journal.write_change_log_to_journal(change_log)
         print(f"Journal position after write: {journal.tell()}")
 
         print("\nReading changes from journal...")
