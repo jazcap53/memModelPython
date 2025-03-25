@@ -171,6 +171,40 @@ class Journal:
         """Initialize journal metadata to default values."""
         self._metadata.init()
 
+    def calculate_end_tag_position(self, start_pos: int, data_size: int, include_header: bool = True) -> int:
+        """Calculate the consistent position for an end tag.
+
+        This method provides a unified calculation that can be used by both read and write operations
+        to ensure consistency in end tag positioning. Handles multiple wraparounds if necessary.
+
+        Args:
+            start_pos: Starting position of the journal entry (where the START_TAG begins)
+            data_size: Size of the data portion (ct_bytes_to_write)
+            include_header: Whether to include the header size in calculation
+                            (True for normal operation, False for special cases)
+
+        Returns:
+            The absolute file position where the end tag should be placed
+        """
+        # Header is START_TAG (8 bytes) + ct_bytes_to_write field (8 bytes)
+        header_size = 16 if include_header else 0
+
+        # Calculate end position
+        end_tag_pos = start_pos + header_size + data_size
+
+        # Handle wraparound, potentially multiple times
+        while end_tag_pos >= u32Const.JRNL_SIZE.value:
+            end_tag_pos = self.META_LEN + (end_tag_pos - u32Const.JRNL_SIZE.value)
+
+        # Validate final position is within bounds
+        assert self.META_LEN <= end_tag_pos < u32Const.JRNL_SIZE.value, \
+            f"End tag position {end_tag_pos} outside valid range [{self.META_LEN}, {u32Const.JRNL_SIZE.value})"
+
+        # Store this for debugging purposes
+        self.end_tag_posn = end_tag_pos
+
+        return end_tag_pos
+
     def read(self, size=-1):
         """Read from journal file with logging."""
         try:
@@ -387,7 +421,7 @@ class Journal:
         bytes_read = self._read_changes(r_j_cg_log, ct_bytes_to_write)
 
         # Calculate and seek to end tag position
-        end_tag_pos = self._calculate_end_tag_position(start_pos, ct_bytes_to_write)
+        end_tag_pos = self.calculate_end_tag_position(start_pos, ct_bytes_to_write)
         self.seek(end_tag_pos)
 
         # Read end tag and convert to integer
@@ -411,10 +445,7 @@ class Journal:
 
     def _calculate_end_tag_position(self, start_pos: int, ct_bytes_to_write: int) -> int:
         """Calculate position of end tag."""
-        end_pos = start_pos + ct_bytes_to_write
-        if end_pos >= u32Const.JRNL_SIZE.value:
-            end_pos = self.META_LEN + (end_pos - u32Const.JRNL_SIZE.value)
-        return end_pos
+        return self.calculate_end_tag_position(start_pos, ct_bytes_to_write)
 
     def _read_changes(self, r_j_cg_log: ChangeLog, ct_bytes_to_write: int) -> int:
         """Read changes from the journal and populate the change log.
@@ -797,9 +828,10 @@ class Journal:
             self.read_log.append((changes_start_pos, ct_bytes_to_write))
 
             # Calculate end tag position
-            end_tag_pos = start_pos + HEADER_SIZE + ct_bytes_to_write
-            if end_tag_pos >= u32Const.JRNL_SIZE.value:
-                end_tag_pos = self.META_LEN + (end_tag_pos - u32Const.JRNL_SIZE.value)
+            end_tag_pos = self.calculate_end_tag_position(
+                start_pos,
+                ct_bytes_to_write
+            )
 
             # Read end tag using read_64bit
             self.seek(end_tag_pos)
@@ -1002,11 +1034,11 @@ class Journal:
         # Get current metadata for calculation
         meta_get = self.meta_get
 
-        # Calculate positions based on start position
-        # Note: Using original calculation which does not include the header size
-        end_tag_pos = meta_get + self.ct_bytes_to_write
-        if end_tag_pos >= u32Const.JRNL_SIZE.value:
-            end_tag_pos = self.META_LEN + (end_tag_pos - u32Const.JRNL_SIZE.value)
+        # Calculate end tag position
+        end_tag_pos = self.calculate_end_tag_position(
+            meta_get,
+            self.ct_bytes_to_write
+        )
 
         expected_reads = [
             (0, 24),  # Metadata read
@@ -1679,9 +1711,10 @@ class Journal:
 
             # Calculate end tag position more explicitly
             # The offset is 16 (START_TAG + ct_bytes_to_write fields) plus the data
-            end_tag_pos = start_pos + 16 + self._journal.ct_bytes_to_write
-            if end_tag_pos >= u32Const.JRNL_SIZE.value:
-                end_tag_pos = self._journal.META_LEN + (end_tag_pos - u32Const.JRNL_SIZE.value)
+            end_tag_pos = self._journal.calculate_end_tag_position(
+                start_pos,
+                self._journal.ct_bytes_to_write
+            )
 
             # Store the end tag position for later validation
             self._journal.end_tag_posn = end_tag_pos
