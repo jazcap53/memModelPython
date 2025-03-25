@@ -251,13 +251,12 @@ class Journal:
         self.total_bytes_read = 0
         self.total_bytes_written = 0
 
-    def wrt_cg_log_to_jrnl(self, r_cg_log: ChangeLog):
-        """Public method to delegate writing change log to journal to the inner _ChangeLogHandler."""
-        # Skip if there are no changes to write
+    def write_change_log_to_journal(self, r_cg_log: ChangeLog):
+        """Write a change log to the journal. Public interface method."""
         if not r_cg_log.cg_line_ct:
             return
 
-        self._change_log_handler.wrt_cg_log_to_jrnl(r_cg_log)
+        self._change_log_handler._implement_journal_write(r_cg_log)
 
     def purge_jrnl(self, keep_going: bool, had_crash: bool):
         """Purge the journal, optionally handling crash recovery."""
@@ -358,7 +357,7 @@ class Journal:
 
             p_f_m.do_store_inodes()
             p_f_m.do_store_free_list()
-            self._change_log_handler.wrt_cg_log_to_jrnl(self.change_log)
+            self.write_change_log_to_journal(self.change_log)
             self.purge_jrnl(True, False)
             self.wipers.clear_array()
 
@@ -1687,8 +1686,8 @@ class Journal:
             os.fsync(self._journal.fileno())
             self._journal.status.wrt("Change log written")
 
-        def wrt_cg_log_to_jrnl(self, r_cg_log: ChangeLog):
-            """Write entire change log to journal."""
+        def _implement_journal_write(self, r_cg_log: ChangeLog):
+            """Implement the actual journal write operation. Internal use only."""
             if not r_cg_log.cg_line_ct:
                 return
 
@@ -1961,7 +1960,7 @@ if __name__ == "__main__":
     # Create journal with proper SimDisk instance
     test_journal = Journal(test_journal_file, sim_disk, change_log, status, crash_chk)
     test_journal._change_log_handler.calculate_ct_bytes_to_write(change_log)
-    test_journal._change_log_handler.wrt_cg_log_to_jrnl(change_log)
+    test_journal.write_change_log_to_journal(change_log)
 
     # Test purging
     test_journal.purge_jrnl(True, False)

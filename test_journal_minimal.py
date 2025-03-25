@@ -58,7 +58,7 @@ def run_minimal_test():
 
     # Write the change to the journal
     print("Writing...")
-    journal._change_log_handler.wrt_cg_log_to_jrnl(change_log)
+    journal.write_change_log_to_journal(change_log)
 
     # Create a new change log for reading
     read_log = ChangeLog(test_sw=True)
