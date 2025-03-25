@@ -63,7 +63,7 @@ def dump_journal_file(journal, title, start_pos=0, length=400):
         offset = start_pos + i
         print(f"{offset:04x}: {hex_values:<47} {ascii_repr}")
 
-    # Check metadata
+    # Check metadata (without redundant seeks)
     journal.seek(0)
     meta_get_bytes = journal.read(8)
     meta_put_bytes = journal.read(8)
@@ -97,7 +97,7 @@ def dump_journal_file(journal, title, start_pos=0, length=400):
         else:
             print(f"Could not read 8 bytes for END_TAG at position {journal.end_tag_posn}")
 
-    # Restore original position again
+    # Restore original position
     journal.seek(original_pos)
 
 
@@ -173,9 +173,10 @@ def run_multiple_test():
 
         # Store the calculated end tag position
         journal.ct_bytes_to_write = journal._change_log_handler.calculate_ct_bytes_to_write(change_log)
-        expected_end_tag_pos = journal.meta_get + journal.ct_bytes_to_write
-        if expected_end_tag_pos >= u32Const.JRNL_SIZE.value:
-            expected_end_tag_pos = journal.META_LEN + (expected_end_tag_pos - u32Const.JRNL_SIZE.value)
+        expected_end_tag_pos = journal.calculate_end_tag_position(
+            journal.META_LEN,  # Start at META_LEN
+            journal.ct_bytes_to_write
+        )
         journal.end_tag_posn = expected_end_tag_pos
         print(f"JOURNAL: End tag should be at position {journal.end_tag_posn}")
 
@@ -247,6 +248,8 @@ def run_multiple_test():
         original_count = len(changes)
         read_count = len(read_log.the_log[0])
         print(f"\nNumber of changes - Original: {original_count}, Read: {read_count}")
+
+        return original_count == read_count
 
     except Exception as e:
         print(f"Test failed with error: {e}")
