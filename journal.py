@@ -1404,6 +1404,11 @@ class Journal:
 
             data = cg.new_data.popleft()
             data_bytes = data if isinstance(data, bytes) else bytes(data)
+
+            # Add assertion to check data length BEFORE attempting to write
+            assert len(data_bytes) == u32Const.BYTES_PER_LINE.value, \
+                f"Data line length mismatch: got {len(data_bytes)}, expected {u32Const.BYTES_PER_LINE.value}"
+
             self.wrt_field(data_bytes, u32Const.BYTES_PER_LINE.value, True)
 
             start = line_num * u32Const.BYTES_PER_LINE.value
