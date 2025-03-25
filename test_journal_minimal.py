@@ -63,11 +63,15 @@ def run_minimal_test():
     # Create a new change log for reading
     read_log = ChangeLog(test_sw=True)
 
+    # Save the end tag position before reading
+    end_tag_pos = journal.end_tag_posn
+
     # Read the change back
     print("Reading...")
     journal.rd_last_jrnl(read_log)
 
-    # Verify the end tag
+    # Verify the end tag by seeking to its known position
+    journal.seek(end_tag_pos)
     end_tag = journal._file_io.read_end_tag()
     if end_tag != journal.END_TAG:
         raise ValueError(f"End tag verification failed. Expected {journal.END_TAG:x}, got {end_tag:x}")
