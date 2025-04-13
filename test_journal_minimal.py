@@ -20,10 +20,25 @@ def clean_test_files():
         if os.path.exists(file):
             os.remove(file)
 
+def create_padded_data(text, total_length=u32Const.BYTES_PER_LINE.value):
+    """Create data with proper padding to ensure exact length."""
+    if isinstance(text, str):
+        text = text.encode('utf-8')
+
+    # Calculate padding needed
+    padding_length = total_length - len(text)
+    if padding_length < 0:
+        # If text is too long, truncate it
+        return text[:total_length]
+
+    # Add padding to reach exact length
+    return text + b'\x00' * padding_length
+
 def create_minimal_change():
     """Create a simple change for testing."""
     change = Change(0)  # Write to block 0
-    test_data = b'Test data line 1\x00' + b'\x00' * (u32Const.BYTES_PER_LINE.value - 16)
+    test_data = create_padded_data(b'Test data line 1\x00')
+    print(f"Test data length: {len(test_data)} bytes")  # Verification
     change.add_line(0, test_data)
     return change
 
@@ -75,8 +90,24 @@ def run_minimal_test():
     end_tag = journal._file_io.read_end_tag()
     if end_tag != journal.END_TAG:
         raise ValueError(f"End tag verification failed. Expected {journal.END_TAG:x}, got {end_tag:x}")
+    else:
+        print(f"End tag verification successful at position {end_tag_pos}")
+
+    # Verify reading worked
+    if not read_log.the_log:
+        print("Error: No changes read from journal")
+        return False
+
+    if 0 not in read_log.the_log:
+        print(f"Error: Block 0 not found in read log")
+        return False
+
+    read_change = read_log.the_log[0][0]
+    print(f"Successfully read back change for block {read_change.block_num}")
+
+    return True
 
 
 if __name__ == "__main__":
-    run_minimal_test()
-    print("Test passed")
+    success = run_minimal_test()
+    print(f"Test {'passed' if success else 'failed'}")

@@ -22,25 +22,43 @@ def clean_test_files():
             os.remove(file)
 
 
+def create_padded_data(text, total_length=u32Const.BYTES_PER_LINE.value):
+    """Create data with proper padding to ensure exact length."""
+    if isinstance(text, str):
+        text = text.encode('utf-8')
+
+    # Calculate padding needed
+    padding_length = total_length - len(text)
+    if padding_length < 0:
+        # If text is too long, truncate it
+        return text[:total_length]
+
+    # Add padding to reach exact length
+    return text + b'\x00' * padding_length
+
+
 def create_changes():
     """Create a sequence of changes to the same block."""
     changes = []
 
     # First change - write to first line
     change1 = Change(0)
-    test_data1 = b'First change\x00' + b'\x00' * (u32Const.BYTES_PER_LINE.value - 12)
+    test_data1 = create_padded_data(b'First change\x00')
+    print(f"Data1 length: {len(test_data1)} bytes")  # Verification
     change1.add_line(0, test_data1)
     changes.append(change1)
 
     # Second change - write to second line
     change2 = Change(0)
-    test_data2 = b'Second change' + b'\x00' * (u32Const.BYTES_PER_LINE.value - 12)
+    test_data2 = create_padded_data(b'Second change')
+    print(f"Data2 length: {len(test_data2)} bytes")  # Verification
     change2.add_line(1, test_data2)
     changes.append(change2)
 
     # Third change - write to third line
     change3 = Change(0)
-    test_data3 = b'Third change\x00' + b'\x00' * (u32Const.BYTES_PER_LINE.value - 12)
+    test_data3 = create_padded_data(b'Third change\x00')
+    print(f"Data3 length: {len(test_data3)} bytes")  # Verification
     change3.add_line(2, test_data3)
     changes.append(change3)
 
