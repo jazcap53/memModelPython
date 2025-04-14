@@ -255,8 +255,11 @@ class Journal:
         """Write a change log to the journal. Public interface method."""
         if not r_cg_log.cg_line_ct:
             return
-
         self._change_log_handler._implement_journal_write(r_cg_log)
+
+    def wrt_cg_log_to_jrnl(self, r_cg_log: ChangeLog):
+        """Alias for write_change_log_to_journal for backward compatibility."""
+        return self.write_change_log_to_journal(r_cg_log)
 
     def purge_jrnl(self, keep_going: bool, had_crash: bool):
         """Purge the journal, optionally handling crash recovery."""
