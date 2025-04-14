@@ -247,6 +247,9 @@ def test_rd_last_jrnl_new_wraparound(journal):
 
 def test_rd_last_jrnl_new_empty_journal(journal):
     """Test reading from an empty journal."""
+    # Ensure a clean start
+    journal.init()  # Initialize metadata explicitly
+
     change_log = ChangeLog(test_sw=True)
     bytes_read = journal.rd_last_jrnl_new(change_log)
 
