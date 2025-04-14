@@ -157,7 +157,7 @@ def test_write_change(journal, mocker):
     mock_change = mocker.Mock(spec=Change)
     mock_change.block_num = 1
     mock_change.time_stamp = 12345
-    mock_change.selectors = [mocker.Mock(to_bytearray=mocker.Mock(return_value=b'selector'))]
+    mock_change.selectors = [mocker.Mock(to_bytes=mocker.Mock(return_value=b'selector'))]
     mock_change.new_data = [b'data1', b'data2']
 
     # Mock the wrt_field method

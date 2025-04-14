@@ -1703,6 +1703,10 @@ class Journal:
             os.fsync(self._journal.fileno())
             self._journal.status.wrt("Change log written")
 
+        def wrt_cg_log_to_jrnl(self, r_cg_log: ChangeLog):
+            """Alias for _implement_journal_write for backward compatibility."""
+            return self._implement_journal_write(r_cg_log)
+
         def _implement_journal_write(self, r_cg_log: ChangeLog):
             """Implement the actual journal write operation. Internal use only."""
             if not r_cg_log.cg_line_ct:
