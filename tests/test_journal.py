@@ -564,6 +564,11 @@ def test_process_changes_invalid_block(journal, mocker):
 
 
 @pytest.mark.skip(reason="Known issue with tag verification after purge delay")
+# TODO: Investigate why journal tags become invalid after a purge delay.
+# Possible causes:
+# - End tag position calculation may be incorrect after wrapping
+# - Metadata might not be properly updated after a purge
+# - Endianness handling inconsistency between reads/writes
 def test_journal_tags_after_purge_delay(temp_journal_file):
     """Test that journal tags remain valid after JRNL_PURGE_DELAY_USEC threshold."""
     # Create actual components instead of mocks for this integration test
