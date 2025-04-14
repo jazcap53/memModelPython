@@ -2,10 +2,11 @@
 import pytest
 from journal import Journal
 from change import Change, ChangeLog, Select
-from ajTypes import u32Const, from_bytes_64bit
+from ajTypes import u32Const, bNum_tConst, from_bytes_64bit, write_64bit
 import os
 import logging
 from typing import Dict, List
+
 
 logger = logging.getLogger(__name__)
 
@@ -17,18 +18,18 @@ def basic_journal(journal):
     journal.seek(journal.META_LEN)
 
     # Write start tag
-    journal.journal_file.write(journal.START_TAG.to_bytes(8, byteorder='little'))
+    write_64bit(journal.journal_file, journal.START_TAG)
 
     # Write size (32 bytes of change data)
-    journal.journal_file.write((32).to_bytes(8, byteorder='little'))
+    write_64bit(journal.journal_file, 32)
 
     # Write a simple change (block 1, timestamp 12345)
-    journal.journal_file.write((1).to_bytes(8, byteorder='little'))  # block number
-    journal.journal_file.write((12345).to_bytes(8, byteorder='little'))  # timestamp
+    write_64bit(journal.journal_file, 1)  # block number
+    write_64bit(journal.journal_file, 12345)  # timestamp
 
     # Write a selector with bit 0 and MSB set
     selector_value = (1 << 63) | 1  # 0x8000000000000001
-    journal.journal_file.write(selector_value.to_bytes(8, byteorder='little'))
+    write_64bit(journal.journal_file, selector_value)
 
     # Write data line
     journal.journal_file.write(b'Test data' + b'\x00' * 56)
@@ -37,7 +38,7 @@ def basic_journal(journal):
     journal.journal_file.write(b'\x00' * 8)
 
     # Write end tag
-    journal.journal_file.write(journal.END_TAG.to_bytes(8, byteorder='little'))
+    write_64bit(journal.journal_file, journal.END_TAG)
 
     # Update metadata
     journal._metadata.write(journal.META_LEN, journal.tell(), 32)
@@ -120,25 +121,25 @@ def test_rd_last_jrnl_new_multiple_changes(journal):
     total_bytes = change1_bytes + change2_bytes
 
     # Write start tag and size
-    journal.journal_file.write(journal.START_TAG.to_bytes(8, byteorder='little'))
-    journal.journal_file.write(total_bytes.to_bytes(8, byteorder='little'))
+    write_64bit(journal.journal_file, journal.START_TAG)
+    write_64bit(journal.journal_file, total_bytes)
 
     # Write first change
-    journal.journal_file.write((1).to_bytes(8, byteorder='little'))  # block 1
-    journal.journal_file.write((12345).to_bytes(8, byteorder='little'))  # timestamp
-    journal.journal_file.write(((1 << 63) | 1).to_bytes(8, byteorder='little'))  # selector
+    write_64bit(journal.journal_file, 1)  # block 1
+    write_64bit(journal.journal_file, 12345)  # timestamp
+    write_64bit(journal.journal_file, (1 << 63) | 1)  # selector
     journal.journal_file.write(b'Change 1' + b'\x00' * 56)  # data
     journal.journal_file.write(b'\x00' * 8)  # CRC + padding
 
     # Write second change
-    journal.journal_file.write((2).to_bytes(8, byteorder='little'))  # block 2
-    journal.journal_file.write((12346).to_bytes(8, byteorder='little'))  # timestamp
-    journal.journal_file.write(((1 << 63) | 2).to_bytes(8, byteorder='little'))  # selector
+    write_64bit(journal.journal_file, 2)  # block 2
+    write_64bit(journal.journal_file, 12346)  # timestamp
+    write_64bit(journal.journal_file, (1 << 63) | 2)  # selector
     journal.journal_file.write(b'Change 2' + b'\x00' * 56)  # data
     journal.journal_file.write(b'\x00' * 8)  # CRC + padding
 
     # Write end tag
-    journal.journal_file.write(journal.END_TAG.to_bytes(8, byteorder='little'))
+    write_64bit(journal.journal_file, journal.END_TAG)
 
     # Update metadata
     journal._metadata.write(journal.META_LEN, journal.tell(), total_bytes)
@@ -186,11 +187,11 @@ def test_rd_last_jrnl_new_wraparound(journal):
     journal.seek(wrap_start_pos)
 
     # Write start tag and size
-    journal.journal_file.write(journal.START_TAG.to_bytes(8, byteorder='little'))
-    journal.journal_file.write((40).to_bytes(8, byteorder='little'))  # Will wrap around
+    write_64bit(journal.journal_file, journal.START_TAG)
+    write_64bit(journal.journal_file, 40)  # Will wrap around
 
     # Write change header
-    journal.journal_file.write((3).to_bytes(8, byteorder='little'))  # block 3
+    write_64bit(journal.journal_file, 3)  # block 3
 
     # Calculate bytes until end
     bytes_written = 24  # Start tag + size + block number
@@ -209,7 +210,7 @@ def test_rd_last_jrnl_new_wraparound(journal):
         journal.journal_file.write(timestamp_bytes[first_part:])
 
     # Write selector
-    journal.journal_file.write(((1 << 63) | 1).to_bytes(8, byteorder='little'))
+    write_64bit(journal.journal_file, (1 << 63) | 1)
 
     # Write data
     journal.journal_file.write(b'Wrapped data' + b'\x00' * 52)
@@ -218,7 +219,7 @@ def test_rd_last_jrnl_new_wraparound(journal):
     journal.journal_file.write(b'\x00' * 8)
 
     # Write end tag
-    journal.journal_file.write(journal.END_TAG.to_bytes(8, byteorder='little'))
+    write_64bit(journal.journal_file, journal.END_TAG)
 
     # Update metadata
     journal._metadata.write(wrap_start_pos, journal.tell(), 40)
@@ -262,18 +263,18 @@ def test_rd_last_jrnl_new_invalid_block(journal):
     journal.seek(journal.META_LEN)
 
     # Write start tag and size
-    journal.journal_file.write(journal.START_TAG.to_bytes(8, byteorder='little'))
-    journal.journal_file.write((32).to_bytes(8, byteorder='little'))
+    write_64bit(journal.journal_file, journal.START_TAG)
+    write_64bit(journal.journal_file, 32)
 
     # Write invalid block number
-    invalid_block = u32Const.NUM_DISK_BLOCKS.value + 1
-    journal.journal_file.write(invalid_block.to_bytes(8, byteorder='little'))
+    invalid_block = bNum_tConst.NUM_DISK_BLOCKS.value + 1
+    write_64bit(journal.journal_file, invalid_block)
 
     # Write rest of change data
     journal.journal_file.write(b'\x00' * 24)  # Padding
 
     # Write end tag
-    journal.journal_file.write(journal.END_TAG.to_bytes(8, byteorder='little'))
+    write_64bit(journal.journal_file, journal.END_TAG)
 
     # Update metadata
     journal._metadata.write(journal.META_LEN, journal.tell(), 32)
