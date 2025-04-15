@@ -173,20 +173,7 @@ class Journal:
         self._metadata.init()
 
     def calculate_end_tag_position(self, start_pos: int, data_size: int, include_header: bool = True) -> int:
-        """Calculate the consistent position for an end tag.
-
-        This method provides a unified calculation that can be used by both read and write operations
-        to ensure consistency in end tag positioning. Handles multiple wraparounds if necessary.
-
-        Args:
-            start_pos: Starting position of the journal entry (where the START_TAG begins)
-            data_size: Size of the data portion (ct_bytes_to_write)
-            include_header: Whether to include the header size in calculation
-                            (True for normal operation, False for special cases)
-
-        Returns:
-            The absolute file position where the end tag should be placed
-        """
+        """Calculate the consistent position for an end tag."""
         # Header is START_TAG (8 bytes) + ct_bytes_to_write field (8 bytes)
         header_size = 16 if include_header else 0
 
@@ -809,6 +796,10 @@ class Journal:
             # Read metadata (position 0, METADATA_SIZE bytes)
             meta_get, meta_put, meta_sz = self._metadata.read()
 
+            # Special case for empty journal
+            if meta_get == -1 or meta_sz == 0:
+                return 0  # Return 0 bytes read for empty journal
+
             # Determine start position for journal read
             start_pos = self.META_LEN if meta_get == -1 else meta_get
 
@@ -838,7 +829,7 @@ class Journal:
 
             # Read end tag using read_64bit
             self.seek(end_tag_pos)
-            end_tag = read_64bit(self.journal_file)
+            end_tag = read_64bit(self.journal_file)  # Use read_64bit directly
             self.read_log.append((end_tag_pos, END_TAG_SIZE))
 
             # Verify start and end tags
@@ -848,6 +839,7 @@ class Journal:
                 if "Invalid end tag" in str(e):
                     if self.debug:
                         end_tag_logger.error(f"Error in rd_last_jrnl: {e}")
+                        end_tag_logger.error(f"End tag position: {end_tag_pos}, End tag value: {end_tag:x}")
                 else:
                     if self.debug:
                         logger.error(f"Error in rd_last_jrnl: {e}")
