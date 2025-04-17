@@ -592,6 +592,10 @@ def test_journal_tags_after_purge_delay(temp_journal_file):
         # Write to journal
         journal.write_change_log_to_journal(change_log)
 
+        # Clear the change log to prepare for next change
+        change_log.the_log.clear()
+        change_log.cg_line_ct = 0
+
         # Simulate time passing
         journal.last_jrnl_purge_time = 0  # Force purge
 
@@ -606,11 +610,17 @@ def test_journal_tags_after_purge_delay(temp_journal_file):
 
         # Read back and verify we can read the new entry
         test_log = ChangeLog(test_sw=True)
-        journal.rd_last_jrnl(test_log)
+        journal.rd_last_jrnl_new(test_log)  # Use the newer method
 
         # Should find block 1 but not block 0
         assert 1 in test_log.the_log, "Post-purge change not found"
         assert 0 not in test_log.the_log, "Pre-purge change should not be present"
+
+        # Further verify the content of the post-purge change
+        assert len(test_log.the_log[1]) == 1, "Expected exactly one change for block 1"
+        assert test_log.the_log[1][0].block_num == 1
+        assert len(test_log.the_log[1][0].new_data) > 0
+        assert test_log.the_log[1][0].new_data[0] == b'B' * u32Const.BYTES_PER_LINE.value
 
     finally:
         # Cleanup
