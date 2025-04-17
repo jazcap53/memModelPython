@@ -60,13 +60,21 @@ class Journal:
     # Constants and class-level attributes
     START_TAG = 0x4f6df70c778691f1
     END_TAG = 0xae0da05e65275d3a
-    START_TAG_SIZE = 8
-    CT_BYTES_TO_WRITE_SIZE = 8
-    END_TAG_SIZE = 8
-    META_LEN = START_TAG_SIZE + CT_BYTES_TO_WRITE_SIZE + END_TAG_SIZE
+
+    # Size constants in bytes
+    START_TAG_SIZE = 8  # Size of the start tag
+    BYTES_COUNT_SIZE = 8  # Size of the ct_bytes_to_write field
+    END_TAG_SIZE = 8  # Size of the end tag (kept for clarity)
+
+    # Computed size constants
+    HEADER_SIZE = START_TAG_SIZE + BYTES_COUNT_SIZE  # Size of header (16 bytes)
+    METADATA_SIZE = START_TAG_SIZE + BYTES_COUNT_SIZE + END_TAG_SIZE  # Size of metadata region (24 bytes)
+    META_LEN = METADATA_SIZE  # Alias for backward compatibility
+
+    # Other constants
     PAGE_BUFFER_SIZE = 16
-    CPP_SELECT_T_SZ = 8
-    START_RW_AT_META_LEN = -1
+    CPP_SELECT_T_SZ = 8  # Consider renaming to SELECTOR_SIZE?
+    START_RW_AT_META_LEN = -1  # Special value indicating read/write at META_LEN
 
     total_bytes_read = 0
     total_bytes_written = 0
@@ -786,13 +794,6 @@ class Journal:
         self.read_log = []
 
         try:
-            # Use meaningful constants instead of magic numbers
-            METADATA_SIZE = 24  # Size of metadata (meta_get, meta_put, meta_sz combined)
-            START_TAG_SIZE = 8  # Size of the START_TAG field
-            BYTES_COUNT_SIZE = 8  # Size of the ct_bytes_to_write field
-            HEADER_SIZE = START_TAG_SIZE + BYTES_COUNT_SIZE  # Combined size of START_TAG and bytes count
-            END_TAG_SIZE = 8  # Size of the END_TAG field
-
             # Read metadata (position 0, METADATA_SIZE bytes)
             meta_get, meta_put, meta_sz = self._metadata.read()
 
@@ -806,17 +807,17 @@ class Journal:
             # Read start tag using read_64bit
             self.seek(start_pos)
             start_tag = read_64bit(self.journal_file)
-            self.read_log.append((start_pos, START_TAG_SIZE))
+            self.read_log.append((start_pos, self.START_TAG_SIZE))
 
             # Read bytes count using read_64bit
-            bytes_count_pos = start_pos + START_TAG_SIZE
+            bytes_count_pos = start_pos + self.START_TAG_SIZE
             self.seek(bytes_count_pos)
             ct_bytes_to_write = read_64bit(self.journal_file)
             self.ct_bytes_to_write = ct_bytes_to_write
-            self.read_log.append((bytes_count_pos, BYTES_COUNT_SIZE))
+            self.read_log.append((bytes_count_pos, self.BYTES_COUNT_SIZE))
 
             # Read changes (ct_bytes_to_write bytes)
-            changes_start_pos = start_pos + HEADER_SIZE
+            changes_start_pos = start_pos + self.HEADER_SIZE
             self.seek(changes_start_pos)
             bytes_read = self._read_changes(r_j_cg_log, ct_bytes_to_write)
             self.read_log.append((changes_start_pos, ct_bytes_to_write))
@@ -830,7 +831,7 @@ class Journal:
             # Read end tag using read_64bit
             self.seek(end_tag_pos)
             end_tag = read_64bit(self.journal_file)  # Use read_64bit directly
-            self.read_log.append((end_tag_pos, END_TAG_SIZE))
+            self.read_log.append((end_tag_pos, self.END_TAG_SIZE))
 
             # Verify start and end tags
             try:
