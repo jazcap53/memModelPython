@@ -1122,50 +1122,80 @@ class Journal:
             self._journal = journal_instance
 
         def wrt_field(self, data: bytes, dat_len: int, do_ct: bool) -> int:
-            """Write a field to the journal file"""
+            """Write a field to the journal file with proper handling for all data sizes.
+
+            Args:
+                data: Data bytes to write
+                dat_len: Expected length of data
+                do_ct: Whether to count bytes in ttl_bytes_written
+
+            Returns:
+                Number of bytes written
+            """
             bytes_written = 0
             p_pos = self._journal.tell()
             buf_sz = u32Const.JRNL_SIZE.value
             end_pt = p_pos + dat_len
 
+            # Ensure data is of expected length
+            if len(data) != dat_len:
+                raise ValueError(f"Data length mismatch: expected {dat_len}, got {len(data)}")
+
+            # Handle wraparound case
             if end_pt > buf_sz:
-                # Existing wraparound handling code
+                # Handle wraparound case
                 overflow_bytes = end_pt - buf_sz
                 bytes_until_end = dat_len - overflow_bytes
 
-                if dat_len == 8:  # 64-bit value
-                    # Write the first part
-                    self._journal.write(data[:bytes_until_end])
-                    bytes_written += bytes_until_end
-                    if do_ct:
-                        self._journal.ttl_bytes_written += bytes_until_end
+                if dat_len == 8:
+                    # Use dedicated function for 64-bit values
+                    value = from_bytes_64bit(data)
+                    # This internally handles the wraparound correctly
+                    write_64bit(self._journal.journal_file, value)
+                    bytes_written = 8
+                elif dat_len == 4:
+                    # Use dedicated function for 32-bit values
+                    value = from_bytes_32bit(data)
+                    write_32bit(self._journal.journal_file, value)
+                    bytes_written = 4
+                else:
+                    # For arbitrary-length data, we need to split at the wraparound point
+                    # while preserving byte order
 
-                    # Move to the correct position after wraparound
+                    # 1. Write the first part (up to the buffer boundary)
+                    first_part = data[:bytes_until_end]
+                    first_written = self._journal.write(first_part)
+                    bytes_written += first_written
+
+                    # 2. Seek to the beginning of the data section
                     self._journal.seek(self._journal.META_LEN)
 
-                    # Write the remaining part
-                    self._journal.write(data[bytes_until_end:])
-                    bytes_written += overflow_bytes
-                    if do_ct:
-                        self._journal.ttl_bytes_written += overflow_bytes
-
-                elif dat_len == 4:  # 32-bit value
-                    value = int.from_bytes(data, byteorder='little')
-                    write_32bit(self._journal.journal_file, value & ((1 << (bytes_until_end * 8)) - 1))
-                    bytes_written += bytes_until_end
-                    if do_ct:
-                        self._journal.ttl_bytes_written += bytes_until_end
-                    self._journal.seek(self._journal.META_LEN)
-                    write_32bit(self._journal.journal_file, value >> (bytes_until_end * 8))
-                    bytes_written += overflow_bytes
-                    if do_ct:
-                        self._journal.ttl_bytes_written += overflow_bytes
+                    # 3. Write the remaining part
+                    second_part = data[bytes_until_end:]
+                    second_written = self._journal.write(second_part)
+                    bytes_written += second_written
             else:
-                bytes_written = self._journal.write(data)
-                if do_ct:
-                    self._journal.ttl_bytes_written += bytes_written
+                # No wraparound, simple write
+                if dat_len == 8:
+                    # Use dedicated function for 64-bit values
+                    write_64bit(self._journal.journal_file, from_bytes_64bit(data))
+                    bytes_written = 8
+                elif dat_len == 4:
+                    # Use dedicated function for 32-bit values
+                    write_32bit(self._journal.journal_file, from_bytes_32bit(data))
+                    bytes_written = 4
+                else:
+                    # Direct write for other sizes
+                    bytes_written = self._journal.write(data)
 
-            assert bytes_written == dat_len, f"Expected to write {dat_len} bytes, but wrote {bytes_written} bytes"
+            # Update total bytes counter if requested
+            if do_ct:
+                self._journal.ttl_bytes_written += bytes_written
+
+            # Verify we wrote the expected number of bytes
+            if bytes_written != dat_len:
+                raise IOError(f"Write error: expected to write {dat_len} bytes, but wrote {bytes_written} bytes")
+
             return bytes_written
 
         def rd_field(self, dat_len: int) -> bytes:
