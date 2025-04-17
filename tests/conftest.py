@@ -2,7 +2,7 @@ import pytest
 import logging
 import os
 from journal import Journal
-from change import ChangeLog
+from change import Change, ChangeLog
 from ajTypes import u32Const, bNum_tConst
 
 
