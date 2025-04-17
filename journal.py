@@ -180,17 +180,24 @@ class Journal:
         """Initialize journal metadata to default values."""
         self._metadata.init()
 
-    def calculate_end_tag_position(self, start_pos: int, data_size: int, include_header: bool = True) -> int:
-        """Calculate the consistent position for an end tag."""
-        # Header is START_TAG (8 bytes) + ct_bytes_to_write field (8 bytes)
-        header_size = 16 if include_header else 0
+    def calculate_end_tag_position(self, start_pos: int, data_size: int) -> int:
+        """Calculate the consistent position for an end tag.
 
-        # Calculate end position
-        end_tag_pos = start_pos + header_size + data_size
+        Args:
+            start_pos: Position where the journal entry starts (where START_TAG is)
+            data_size: Size of actual data content (excluding START_TAG and bytes count field)
+
+        Returns:
+            Position where the END_TAG should be placed
+        """
+        # Calculate end position as: start_pos + header + data
+        end_tag_pos = start_pos + self.HEADER_SIZE + data_size
 
         # Handle wraparound, potentially multiple times
         while end_tag_pos >= u32Const.JRNL_SIZE.value:
-            end_tag_pos = self.META_LEN + (end_tag_pos - u32Const.JRNL_SIZE.value)
+            # When wrapping, land at META_LEN plus the overflow amount
+            overflow = end_tag_pos - u32Const.JRNL_SIZE.value
+            end_tag_pos = self.META_LEN + overflow
 
         # Validate final position is within bounds
         assert self.META_LEN <= end_tag_pos < u32Const.JRNL_SIZE.value, \
@@ -388,18 +395,7 @@ class Journal:
         return self.rd_last_jrnl_new(r_j_cg_log)
 
     def rd_jrnl(self, r_j_cg_log: ChangeLog, start_pos: int) -> Tuple[int, int, int]:
-        """Read journal contents from a given position.
-
-        Args:
-            r_j_cg_log: Change log to populate
-            start_pos: Position to start reading from
-
-        Returns:
-            Tuple of (start_tag, end_tag, bytes_read)
-
-        Raises:
-            ValueError: If start_pos is invalid
-        """
+        """Read journal contents from a given position."""
         # Validate start position
         if start_pos < self.META_LEN or start_pos >= u32Const.JRNL_SIZE.value:
             raise ValueError(f"Invalid start position: {start_pos}")
@@ -407,23 +403,26 @@ class Journal:
         self.seek(start_pos)
 
         # Read start tag and convert to integer
-        start_tag_bytes = self._file_io.rd_field(8)
+        start_tag_bytes = self._file_io.rd_field(self.START_TAG_SIZE)
         start_tag = from_bytes_64bit(start_tag_bytes)
 
         # Read bytes-to-write count and convert to integer
-        ct_bytes_bytes = self._file_io.rd_field(8)
+        ct_bytes_bytes = self._file_io.rd_field(self.BYTES_COUNT_SIZE)
         ct_bytes_to_write = from_bytes_64bit(ct_bytes_bytes)
         self.ct_bytes_to_write = ct_bytes_to_write
 
-        # Read changes (now passing an integer)
+        # Read changes
         bytes_read = self._read_changes(r_j_cg_log, ct_bytes_to_write)
 
-        # Calculate and seek to end tag position
-        end_tag_pos = self.calculate_end_tag_position(start_pos, ct_bytes_to_write)
+        # Calculate end tag position using consistent method
+        end_tag_pos = self.calculate_end_tag_position(
+            start_pos,
+            ct_bytes_to_write  # This is ONLY the data size
+        )
         self.seek(end_tag_pos)
 
         # Read end tag and convert to integer
-        end_tag_bytes = self._file_io.rd_field(8)
+        end_tag_bytes = self._file_io.rd_field(self.END_TAG_SIZE)
         end_tag = from_bytes_64bit(end_tag_bytes)
 
         # Verify tags
@@ -822,27 +821,26 @@ class Journal:
             bytes_read = self._read_changes(r_j_cg_log, ct_bytes_to_write)
             self.read_log.append((changes_start_pos, ct_bytes_to_write))
 
-            # Calculate end tag position
+            # Calculate end tag position using the same method as the writer
             end_tag_pos = self.calculate_end_tag_position(
                 start_pos,
-                ct_bytes_to_write
+                ct_bytes_to_write  # This is ONLY the data size
             )
 
             # Read end tag using read_64bit
             self.seek(end_tag_pos)
-            end_tag = read_64bit(self.journal_file)  # Use read_64bit directly
+            end_tag = read_64bit(self.journal_file)
             self.read_log.append((end_tag_pos, self.END_TAG_SIZE))
 
             # Verify start and end tags
             try:
                 self._verify_journal_tags(start_tag, end_tag)
             except ValueError as e:
-                if "Invalid end tag" in str(e):
-                    if self.debug:
+                if self.debug:
+                    if "Invalid end tag" in str(e):
                         end_tag_logger.error(f"Error in rd_last_jrnl: {e}")
                         end_tag_logger.error(f"End tag position: {end_tag_pos}, End tag value: {end_tag:x}")
-                else:
-                    if self.debug:
+                    else:
                         logger.error(f"Error in rd_last_jrnl: {e}")
                 raise  # Re-raise the exception
 
@@ -1723,23 +1721,17 @@ class Journal:
 
             self._journal._file_io.wrt_cgs_to_jrnl(r_cg_log)
 
-            # Calculate end tag position more explicitly
-            # The offset is 16 (START_TAG + ct_bytes_to_write fields) plus the data
+            # Calculate end tag position using consistent method
             end_tag_pos = self._journal.calculate_end_tag_position(
                 start_pos,
-                self._journal.ct_bytes_to_write
+                self._journal.ct_bytes_to_write  # This is ONLY the data size
             )
 
             # Store the end tag position for later validation
             self._journal.end_tag_posn = end_tag_pos
 
-            # Use the stored position for seeking
-            self._journal.seek(self._journal.end_tag_posn)
-
-            # Verify position before writing end tag
-            actual_end_pos = self._journal.tell()
-            if actual_end_pos != end_tag_pos:
-                logger.error(f"End tag position mismatch: expected {end_tag_pos}, got {actual_end_pos}")
+            # Use the calculated position for seeking
+            self._journal.seek(end_tag_pos)
 
             # Write end tag
             write_64bit(self._journal.journal_file, self._journal.END_TAG)
@@ -1747,7 +1739,7 @@ class Journal:
             # Update metadata
             new_g_pos = self._journal.META_LEN
             new_p_pos = self._journal.tell()
-            ttl_bytes = self._journal.ct_bytes_to_write + self._journal.META_LEN
+            ttl_bytes = self._journal.ct_bytes_to_write + self._journal.HEADER_SIZE + self._journal.END_TAG_SIZE
 
             self._update_metadata(new_g_pos, new_p_pos, ttl_bytes)
             self._flush_and_update_status()

@@ -82,7 +82,45 @@ def test_rd_last_jrnl_new_basic(basic_journal):
     journal = basic_journal
     change_log = ChangeLog(test_sw=True)
 
-    # Read using new method
+    # Clear the file and write properly formatted data
+    journal.seek(journal.META_LEN)
+
+    # Write start tag
+    write_64bit(journal.journal_file, journal.START_TAG)
+
+    # Write size (32 bytes of change data: 8+8+8+64+8)
+    # Block num (8) + timestamp (8) + selector (8) + data (64) + crc (8) = 96 bytes actually
+    actual_data_size = 8 + 8 + 8 + 64 + 8
+    write_64bit(journal.journal_file, actual_data_size)
+
+    # Write a simple change (block 1, timestamp 12345)
+    write_64bit(journal.journal_file, 1)  # block number
+    write_64bit(journal.journal_file, 12345)  # timestamp
+
+    # Write a selector with bit 0 and MSB set
+    selector_value = (1 << 63) | 1  # 0x8000000000000001
+    write_64bit(journal.journal_file, selector_value)
+
+    # Write data line
+    journal.journal_file.write(b'Test data' + b'\x00' * 56)
+
+    # Write CRC and padding
+    journal.journal_file.write(b'\x00' * 8)  # CRC + padding
+
+    # Now calculate and write end tag at the proper position
+    end_pos = journal.META_LEN + journal.HEADER_SIZE + actual_data_size
+    assert end_pos == journal.tell(), f"Expected position {end_pos}, got {journal.tell()}"
+    write_64bit(journal.journal_file, journal.END_TAG)
+
+    # Update metadata
+    journal._metadata.write(journal.META_LEN, journal.tell(), actual_data_size)
+
+    # Sync file and reset position
+    journal.journal_file.flush()
+    os.fsync(journal.journal_file.fileno())
+    journal.seek(0)
+
+    # Now test the reading
     bytes_read = journal.rd_last_jrnl_new(change_log)
 
     # Verify changes were read correctly
@@ -104,8 +142,8 @@ def test_rd_last_jrnl_new_basic(basic_journal):
         (0, 24),  # Metadata read
         (journal.META_LEN, 8),  # Start tag
         (journal.META_LEN + 8, 8),  # Size field
-        (journal.META_LEN + 16, 32),  # Change data
-        (journal.META_LEN + 48, 8)  # End tag
+        (journal.META_LEN + 16, actual_data_size),  # Change data
+        (journal.META_LEN + 16 + actual_data_size, 8)  # End tag
     ]
     verify_read_pattern(journal, expected_positions)
 
@@ -188,7 +226,10 @@ def test_rd_last_jrnl_new_wraparound(journal):
 
     # Write start tag and size
     write_64bit(journal.journal_file, journal.START_TAG)
-    write_64bit(journal.journal_file, 40)  # Will wrap around
+
+    # Calculate actual data size that will be written
+    data_size = 8 + 8 + 8 + 64 + 8  # block + timestamp + selector + data + crc
+    write_64bit(journal.journal_file, data_size)
 
     # Write change header
     write_64bit(journal.journal_file, 3)  # block 3
@@ -218,11 +259,13 @@ def test_rd_last_jrnl_new_wraparound(journal):
     # Write CRC and padding
     journal.journal_file.write(b'\x00' * 8)
 
-    # Write end tag
+    # Calculate proper end tag position
+    expected_end_pos = journal.calculate_end_tag_position(wrap_start_pos, data_size)
+    journal.seek(expected_end_pos)
     write_64bit(journal.journal_file, journal.END_TAG)
 
     # Update metadata
-    journal._metadata.write(wrap_start_pos, journal.tell(), 40)
+    journal._metadata.write(wrap_start_pos, journal.tell(), data_size)
 
     # Sync file and reset position
     journal.journal_file.flush()

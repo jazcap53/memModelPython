@@ -67,3 +67,18 @@ def journal(mock_sim_disk, mock_change_log, mock_status, mock_crash_chk, temp_jo
     assert os.path.getsize(temp_journal_file) == u32Const.JRNL_SIZE.value
 
     return journal
+
+
+@pytest.fixture
+def properly_written_journal(journal):
+    """Create a journal with properly written entries using the application's own methods."""
+    # Create a change
+    change = Change(1)
+    change.add_line(0, b'Test data' + b'\x00' * (u32Const.BYTES_PER_LINE.value - len(b'Test data')))
+    change_log = ChangeLog(test_sw=True)
+    change_log.add_to_log(change)
+
+    # Write it using the proper method
+    journal.write_change_log_to_journal(change_log)
+
+    return journal
