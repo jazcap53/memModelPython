@@ -220,58 +220,36 @@ def test_rd_last_jrnl_new_multiple_changes(journal):
 
 def test_rd_last_jrnl_new_wraparound(journal):
     """Test reading journal data that wraps around the buffer."""
-    # Calculate position near the end of journal
-    wrap_start_pos = u32Const.JRNL_SIZE.value - 20
-
-    # Position to wrap start
-    journal.seek(wrap_start_pos)
-
-    # Write start tag and size
-    write_64bit(journal.journal_file, journal.START_TAG)
-
-    # Calculate actual data size that will be written
-    data_size = 8 + 8 + 8 + 64 + 8  # block + timestamp + selector + data + crc
-    write_64bit(journal.journal_file, data_size)
-
-    # Write change header
-    write_64bit(journal.journal_file, 3)  # block 3
-
-    # Calculate bytes until end
-    bytes_written = 24  # Start tag + size + block number
-
-    # Write timestamp using the proper function with wraparound handling
-    write_64bit(journal.journal_file, 54321)
-
-    # Write selector
-    write_64bit(journal.journal_file, (1 << 63) | 1)
-
-    # Write data using proper wraparound handling
-    data_line = b'Wrapped data'.ljust(u32Const.BYTES_PER_LINE.value, b'\x00')
-    journal._file_io.wrt_field(data_line, u32Const.BYTES_PER_LINE.value, False)
-
-    # Write CRC and padding using proper wraparound handling
-    journal._file_io.wrt_field(b'\x00' * 4, 4, False)  # CRC
-    journal._file_io.wrt_field(b'\x00' * 4, 4, False)  # Padding
-
-    # Calculate proper end tag position
-    expected_end_pos = journal.calculate_end_tag_position(wrap_start_pos, data_size)
-    journal.seek(expected_end_pos)
-    write_64bit(journal.journal_file, journal.END_TAG)
-
-    # Update metadata
-    journal._metadata.write(wrap_start_pos, journal.tell(), data_size)
-
-    # Sync file and reset position
-    journal.journal_file.flush()
-    os.fsync(journal.journal_file.fileno())
-    journal.seek(0)
-
-    # Read changes
+    # Create a change log with a change that will force wraparound
     change_log = ChangeLog(test_sw=True)
-    bytes_read = journal.rd_last_jrnl_new(change_log)
+
+    # Create a change
+    change = Change(3)
+    change.time_stamp = 54321  # Set timestamp explicitly
+
+    # Add selector and data
+    selector = Select()
+    selector.value = (1 << 63) | 1  # Set bit 0 and the last-block flag (bit 63)
+    change.selectors.append(selector)
+    change.new_data.append(b'Wrapped data'.ljust(u32Const.BYTES_PER_LINE.value, b'\x00'))
+
+    # Add to change log
+    change_log.add_to_log(change)
+
+    # Position journal near end to force wraparound
+    wrap_start_pos = u32Const.JRNL_SIZE.value - 20
+    journal.seek(wrap_start_pos)
+    journal._metadata.write(-1, wrap_start_pos, 0)  # Reset metadata to this position
+
+    # Write using journal's proper API
+    journal.write_change_log_to_journal(change_log)
+
+    # Read changes back
+    read_log = ChangeLog(test_sw=True)
+    bytes_read = journal.rd_last_jrnl_new(read_log)
 
     # Verify change was read correctly
-    assert 3 in change_log.the_log, f"Block 3 not found in change log: {change_log.the_log.keys()}"
+    assert 3 in read_log.the_log, f"Block 3 not found in change log: {read_log.the_log.keys()}"
 
     expected_change = {
         'block_num': 3,
@@ -280,7 +258,7 @@ def test_rd_last_jrnl_new_wraparound(journal):
         'selector_bits': [[0, 63]],
         'data_content': [b'Wrapped data']
     }
-    verify_change_content(change_log.the_log[3][0], expected_change)
+    verify_change_content(read_log.the_log[3][0], expected_change)
 
 
 def test_rd_last_jrnl_new_empty_journal(journal):
