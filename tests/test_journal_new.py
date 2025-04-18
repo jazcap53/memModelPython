@@ -238,28 +238,20 @@ def test_rd_last_jrnl_new_wraparound(journal):
 
     # Calculate bytes until end
     bytes_written = 24  # Start tag + size + block number
-    bytes_until_end = u32Const.JRNL_SIZE.value - (wrap_start_pos + bytes_written)
 
-    # Write timestamp that will cross boundary
-    timestamp_bytes = (54321).to_bytes(8, byteorder='little')
-    first_part = bytes_until_end if bytes_until_end < 8 else 8
-    journal.journal_file.write(timestamp_bytes[:first_part])
-
-    # Wrap to start of data section
-    journal.seek(journal.META_LEN)
-
-    # Write rest of timestamp if needed
-    if first_part < 8:
-        journal.journal_file.write(timestamp_bytes[first_part:])
+    # Write timestamp using the proper function with wraparound handling
+    write_64bit(journal.journal_file, 54321)
 
     # Write selector
     write_64bit(journal.journal_file, (1 << 63) | 1)
 
-    # Write data
-    journal.journal_file.write(b'Wrapped data' + b'\x00' * 52)
+    # Write data using proper wraparound handling
+    data_line = b'Wrapped data'.ljust(u32Const.BYTES_PER_LINE.value, b'\x00')
+    journal._file_io.wrt_field(data_line, u32Const.BYTES_PER_LINE.value, False)
 
-    # Write CRC and padding
-    journal.journal_file.write(b'\x00' * 8)
+    # Write CRC and padding using proper wraparound handling
+    journal._file_io.wrt_field(b'\x00' * 4, 4, False)  # CRC
+    journal._file_io.wrt_field(b'\x00' * 4, 4, False)  # Padding
 
     # Calculate proper end tag position
     expected_end_pos = journal.calculate_end_tag_position(wrap_start_pos, data_size)
