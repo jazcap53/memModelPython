@@ -26,7 +26,7 @@ def test_read_properly_written_journal(properly_written_journal):
     assert change.block_num == 1
     assert len(change.selectors) == 1
     assert change.selectors[0].is_set(0)  # First bit should be set
-    assert change.selectors[0].is_last_block()  # Last block bit should be set
+    assert change.selectors[0].is_last_selector()  # Last block bit should be set
     assert len(change.new_data) == 1
     assert change.new_data[0].startswith(b'Test data')
 

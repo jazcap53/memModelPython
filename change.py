@@ -31,10 +31,10 @@ class Select:
         else:
             raise ValueError("Invalid line number")
 
-    def is_last_block(self) -> bool:
+    def is_last_selector(self) -> bool:
         return bool(self.value & (1 << 63))
 
-    def set_last_block(self):
+    def set_last_selector(self):
         self.value |= (1 << 63)
 
     def to_bytes(self) -> bytes:
@@ -57,7 +57,7 @@ class Change:
     def add_selector(self, is_last: bool):
         selector = Select()
         if is_last:
-            selector.set_last_block()
+            selector.set_last_selector()
         self.selectors.append(selector)
 
     def add_line(self, line_num: int, data: bytes):
@@ -70,12 +70,12 @@ class Change:
         # Update the last block flag - clear it from all selectors and set it on the last one
         for i, selector in enumerate(self.selectors):
             if i == len(self.selectors) - 1:
-                selector.set_last_block()
+                selector.set_last_selector()
             else:
                 selector.value &= ~(1 << 63)  # Clear the MSB
 
     def is_last_block(self) -> bool:
-        return any(selector.is_last_block() for selector in self.selectors)
+        return any(selector.is_last_selector() for selector in self.selectors)
 
     def __lt__(self, other):
         return self.time_stamp < other.time_stamp

@@ -60,11 +60,11 @@ def test_add_selector(empty_change):
     """Test adding selectors to a Change object."""
     empty_change.add_selector(is_last=True)
     assert len(empty_change.selectors) == 1
-    assert empty_change.selectors[0].is_last_block()
+    assert empty_change.selectors[0].is_last_selector()
 
     empty_change.add_selector(is_last=False)
     assert len(empty_change.selectors) == 2
-    assert not empty_change.selectors[1].is_last_block()
+    assert not empty_change.selectors[1].is_last_selector()
 
 
 def test_add_line(empty_change):
@@ -86,7 +86,7 @@ def test_add_line(empty_change):
 
 
 def test_is_last_block(empty_change):
-    """Test is_last_block functionality."""
+    """Test is_last_selector functionality."""
     assert not empty_change.is_last_block()  # Should be false when empty
 
     empty_change.add_selector(is_last=True)
@@ -172,15 +172,15 @@ def test_select_functionality():
     assert not select.is_set(6)
 
     # Test last block flag
-    assert not select.is_last_block()
-    select.set_last_block()
-    assert select.is_last_block()
+    assert not select.is_last_selector()
+    select.set_last_selector()
+    assert select.is_last_selector()
 
     # Test conversion to/from bytes
     bytes_data = select.to_bytes()
     new_select = Select.from_bytes(bytes_data)
     assert new_select.is_set(5)
-    assert new_select.is_last_block()
+    assert new_select.is_last_selector()
 
 
 def test_change_print(empty_change, capsys):

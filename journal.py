@@ -500,7 +500,7 @@ class Journal:
             data_bytes_read = self._read_data_for_selector(selector, cg, bytes_read)
             bytes_read += data_bytes_read
 
-            if selector.is_last_block():
+            if selector.is_last_selector():
                 break
 
         return cg, bytes_read
@@ -946,7 +946,7 @@ class Journal:
                         cg.new_data.append(line_data)
 
                     # If this was the last selector, we're done with this change
-                    if selector.is_last_block():
+                    if selector.is_last_selector():
                         break
 
                 # Skip CRC and padding (8 bytes)
@@ -1582,7 +1582,7 @@ class Journal:
                         total_bytes += set_bits * u32Const.BYTES_PER_LINE.value
 
                         # Break after processing the last selector (MSB set)
-                        if selector.is_last_block():
+                        if selector.is_last_selector():
                             break
 
                     # CRC value (4 bytes) and Zero padding (4 bytes)
