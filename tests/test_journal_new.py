@@ -101,8 +101,10 @@ def test_rd_last_jrnl_new_basic(basic_journal):
     selector_value = (1 << 63) | 1  # 0x8000000000000001
     write_64bit(journal.journal_file, selector_value)
 
-    # Write data line
-    journal.journal_file.write(b'Test data' + b'\x00' * 56)
+    # Write data line (must be exactly 64 bytes)
+    test_data = b'Test data'
+    padding_length = u32Const.BYTES_PER_LINE.value - len(test_data)
+    journal.journal_file.write(test_data + b'\x00' * padding_length)
 
     # Write CRC and padding
     journal.journal_file.write(b'\x00' * 8)  # CRC + padding
