@@ -1188,21 +1188,32 @@ class Journal:
             return bytes_written
 
         def rd_field(self, dat_len: int) -> bytes:
-            """Read a field from the journal file.
-
-            Args:
-                dat_len: Number of bytes to read
-
-            Returns:
-                bytes: Data read from journal file
-            """
+            """Read a field from the journal file."""
             g_pos = self._journal.tell()
             buf_sz = u32Const.JRNL_SIZE.value
             end_pt = g_pos + dat_len
 
+            # Debug logging
+            print(f"DEBUG: rd_field called - position: {g_pos}, dat_len: {dat_len}, end_pt: {end_pt}, buf_sz: {buf_sz}")
+
             if end_pt > buf_sz:
+                print(f"DEBUG: Wraparound needed - end_pt ({end_pt}) > buf_sz ({buf_sz})")
                 return self._read_with_wraparound(dat_len, buf_sz, end_pt)
+
+            elif end_pt == buf_sz:
+                # We'll finish reading exactly at the boundary
+                print(f"DEBUG: Reading exactly to boundary - end_pt ({end_pt}) == buf_sz ({buf_sz})")
+                data = self._read_without_wraparound(dat_len)
+
+                # After reading, we're at the boundary, so position ourselves for next read
+                if self._journal.tell() == buf_sz:
+                    self._journal.seek(self._journal.META_LEN)
+                    print(f"DEBUG: Positioned at META_LEN ({self._journal.META_LEN}) for next read")
+
+                return data
+
             else:
+                print(f"DEBUG: No wraparound needed - end_pt ({end_pt}) < buf_sz ({buf_sz})")
                 return self._read_without_wraparound(dat_len)
 
         def _read_with_wraparound(self, dat_len: int, buf_sz: int, end_pt: int) -> bytes:
@@ -1219,11 +1230,14 @@ class Journal:
 
         def _read_without_wraparound(self, dat_len: int) -> bytes:
             """Read data that fits within the current journal space."""
+            print(f"DEBUG: _read_without_wraparound called for {dat_len} bytes")
             file_obj = self._journal.get_file()
 
             if dat_len == 8:
                 value = read_64bit(file_obj)
-                return to_bytes_64bit(value)
+                bytes_read = to_bytes_64bit(value)
+                print(f"DEBUG: Read 8 bytes: {bytes_read.hex()}")
+                return bytes_read
             elif dat_len == 4:
                 value = read_32bit(file_obj)
                 return to_bytes_32bit(value)
