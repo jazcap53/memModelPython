@@ -854,20 +854,7 @@ class Journal:
             raise  # Re-raise all exceptions
 
     def _read_changes_new(self, r_j_cg_log: ChangeLog, ct_bytes_to_write: int, start_pos: int) -> int:
-        """Read changes data with safer positioning and improved error handling.
-
-        This implementation reads all data at once to avoid position errors that
-        could occur when reading incrementally, especially when dealing with
-        wrapped-around journal entries.
-
-        Args:
-            r_j_cg_log: Change log to populate with read data
-            ct_bytes_to_write: Number of bytes to read
-            start_pos: Starting position for the changes section
-
-        Returns:
-            Number of bytes that were read
-        """
+        """Read changes data with safer positioning and improved error handling."""
         # Read all change data at once to avoid position errors
         all_data = bytearray()
         bytes_remaining = ct_bytes_to_write
@@ -888,8 +875,10 @@ class Journal:
             bytes_remaining -= len(chunk)
 
             # Wrap around if needed
-            if bytes_remaining > 0:
+            if bytes_remaining > 0 and current_pos + bytes_to_read >= u32Const.JRNL_SIZE.value:
                 current_pos = self.META_LEN
+            else:
+                current_pos += bytes_to_read
 
         # Process the data in memory
         data_pos = 0
@@ -1261,18 +1250,24 @@ class Journal:
             """Read a 64-bit value that wraps around in the journal."""
             file_obj = self._journal.get_file()
 
-            # Read low bits
-            low_value = read_64bit(file_obj)
+            # Read the first part (before wraparound)
+            data1 = self._journal.read(under)
             self._update_bytes_read(under)
 
-            # Read high bits from start of data section
+            # Wrap to the beginning of the data section
             self._journal.seek(self._journal.META_LEN)
-            high_value = read_64bit(file_obj)
+
+            # Read the second part (after wraparound)
+            data2 = self._journal.read(8 - under)
             self._update_bytes_read(8 - under)
 
-            # Combine values
-            combined_value = (high_value << (under * 8)) | low_value
-            return to_bytes_64bit(combined_value)
+            # Combine the two parts
+            full_data = data1 + data2
+
+            # Convert to integer using from_bytes_64bit
+            value = from_bytes_64bit(full_data)
+
+            return to_bytes_64bit(value)
 
         def _read_32bit_wraparound(self, under: int) -> bytes:
             """Read a 32-bit value that wraps around in the journal."""
