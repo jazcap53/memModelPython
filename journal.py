@@ -1960,14 +1960,16 @@ def test_basic_io():
 
 
 if __name__ == "__main__":
+    print("\n=== Testing basic I/O functionality ===")
     if test_basic_io():
         print("Basic I/O test passed")
     else:
         print("Basic I/O test failed")
 
+    print("\n=== Testing journal purging ===")
     # Minimal test for journal purging
     from ajUtils import set_test_mode
-    from change import Change, ChangeLog
+    from change import Change, ChangeLog, Select
     from ajTypes import u32Const
     from crashChk import CrashChk
     from status import Status
@@ -2005,9 +2007,124 @@ if __name__ == "__main__":
     print(f"Expected bytes: {test_journal.ct_bytes_to_write + test_journal.META_LEN}")
     print(f"Actual bytes read: {test_journal.total_bytes_read}")
 
-    # Clean up
+    # Clean up previous test files
     import os
+
     for file in [test_journal_file, test_disk_file, test_free_file,
                  test_inode_file, test_status_file]:
         if os.path.exists(file):
             os.remove(file)
+
+    print("\n=== Testing wraparound handling ===")
+
+    # Create test files for wraparound test
+    test_journal_file = "test_wraparound_journal.bin"
+    test_disk_file = "test_wraparound_disk.bin"
+    test_free_file = "test_wraparound_free.bin"
+    test_inode_file = "test_wraparound_inode.bin"
+    test_status_file = "test_wraparound_status.txt"
+
+    try:
+        # Setup components for wraparound test
+        status = Status(test_status_file)
+        sim_disk = SimDisk(status, test_disk_file, test_journal_file,
+                           test_free_file, test_inode_file)
+        crash_chk = CrashChk()
+
+        # Create journal instance for wraparound test
+        test_journal = Journal(test_journal_file, sim_disk, ChangeLog(test_sw=True),
+                               status, crash_chk, debug=True)
+
+        print(f"Journal file size: {u32Const.JRNL_SIZE.value} bytes")
+        print(f"META_LEN: {test_journal.META_LEN} bytes")
+
+        # Create a change log with a change that will force wraparound
+        change_log = ChangeLog(test_sw=True)
+
+        # Create a change with specific values from the test
+        change = Change(3)
+        change.time_stamp = 54321  # Set timestamp explicitly
+
+        # Add selector and data
+        selector = Select()
+        selector.value = (1 << 63) | 1  # Set bit 0 and the last-block flag (bit 63)
+        change.selectors.append(selector)
+        change.new_data.append(b'Wrapped data'.ljust(u32Const.BYTES_PER_LINE.value, b'\x00'))
+
+        # Add to change log
+        change_log.add_to_log(change)
+
+        # Calculate the position near the end that will force wraparound
+        wrap_start_pos = u32Const.JRNL_SIZE.value - 20
+        print(f"\nPositioning journal at byte {wrap_start_pos} to force wraparound")
+        test_journal.seek(wrap_start_pos)
+        test_journal._metadata.write(-1, wrap_start_pos, 0)  # Reset metadata to this position
+
+        # Show current position before write
+        print(f"Current position before write: {test_journal.tell()}")
+
+        # Write using journal's proper API
+        print("\nWriting change log to journal...")
+        test_journal.write_change_log_to_journal(change_log)
+
+        # Show position after write
+        print(f"Position after write: {test_journal.tell()}")
+
+        # Debug: Check what was actually written
+        test_journal.seek(wrap_start_pos)
+        start_tag_bytes = test_journal.read(8)
+        start_tag = from_bytes_64bit(start_tag_bytes)
+        print(f"\nStart tag at position {wrap_start_pos}: 0x{start_tag:x}")
+        print(f"Expected start tag: 0x{Journal.START_TAG:x}")
+
+        # Show metadata after write
+        meta_get, meta_put, meta_sz = test_journal._metadata.read()
+        print(f"\nMetadata after write: get={meta_get}, put={meta_put}, sz={meta_sz}")
+
+        # Read changes back
+        print("\nAttempting to read changes back from journal...")
+        read_log = ChangeLog(test_sw=True)
+
+        try:
+            bytes_read = test_journal.rd_last_jrnl_new(read_log)
+            print(f"Bytes read: {bytes_read}")
+
+            # Verify the change was read correctly
+            if 3 in read_log.the_log:
+                print("Success: Block 3 found in change log")
+
+                # Display read change content
+                read_change = read_log.the_log[3][0]
+                print(f"Read change - block_num: {read_change.block_num}")
+                print(f"Read change - timestamp: {read_change.time_stamp}")
+                print(f"Read change - data: {read_change.new_data[0][:12]}")  # First 12 bytes
+
+                # Verify change content
+                assert read_change.block_num == 3, f"Block number mismatch: {read_change.block_num}"
+                assert read_change.time_stamp == 54321, f"Timestamp mismatch: {read_change.time_stamp}"
+                assert read_change.new_data[0].startswith(b'Wrapped data'), "Data content mismatch"
+
+                print("Test passed: Wraparound handled correctly")
+            else:
+                print(f"Test failed: Block 3 not found in change log: {read_log.the_log.keys()}")
+
+        except ValueError as e:
+            print(f"Error reading from journal: {e}")
+            # Debug: Show read log for troubleshooting
+            if hasattr(test_journal, 'read_log'):
+                print("\nRead log:")
+                for pos, size in test_journal.read_log:
+                    print(f"  Position: {pos}, Size: {size} bytes")
+
+    except Exception as e:
+        print(f"Test failed with exception: {e}")
+        import traceback
+
+        traceback.print_exc()
+
+    finally:
+        # Clean up test files
+        for file in [test_journal_file, test_disk_file, test_free_file,
+                     test_inode_file, test_status_file]:
+            if os.path.exists(file):
+                os.remove(file)
