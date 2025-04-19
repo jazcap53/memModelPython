@@ -1767,7 +1767,7 @@ class Journal:
             write_64bit(self._journal.journal_file, self._journal.END_TAG)
 
             # Update metadata
-            new_g_pos = self._journal.META_LEN
+            new_g_pos = start_pos
             new_p_pos = self._journal.tell()
             ttl_bytes = self._journal.ct_bytes_to_write + self._journal.HEADER_SIZE + self._journal.END_TAG_SIZE
 
