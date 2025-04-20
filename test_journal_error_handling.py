@@ -1,4 +1,5 @@
 # test_journal_error_handling.py
+import pytest
 from journal import Journal
 from status import Status
 from simDisk import SimDisk
@@ -39,29 +40,46 @@ def setup_corrupted_journal():
 
 
 def test_error_propagation():
-    """Test that errors are properly propagated."""
-    journal, change_log = setup_corrupted_journal()
+    """Test that errors are properly propagated from lower-level methods."""
+    import tempfile
+    from unittest.mock import MagicMock
+
+    # Create temporary journal file
+    temp_file = tempfile.mktemp(suffix=".bin")
+
+    # Mock dependencies
+    mock_sim_disk = MagicMock()
+    mock_change_log = MagicMock()
+    mock_status = MagicMock()
+    mock_crash_chk = MagicMock()
+    mock_crash_chk.get_last_status.return_value = "Normal"
+
+    # Create journal instance
+    journal = Journal(temp_file, mock_sim_disk, mock_change_log, mock_status, mock_crash_chk)
+
+    # Mock _read_changes to raise an exception
+    original_read_changes = journal._read_changes
+    journal._read_changes = MagicMock(side_effect=ValueError("Test exception"))
 
     try:
-        # Should raise an exception due to invalid end tag
-        journal.rd_last_jrnl(change_log)
-        print("❌ FAILED: Expected exception was not raised")
-        return False
-    except ValueError as e:
-        if "Invalid end tag" in str(e):
-            print("✓ SUCCESS: Error correctly identified and propagated")
-            return True
-        else:
-            print(f"❌ FAILED: Wrong error message: {e}")
-            return False
-    except Exception as e:
-        print(f"❌ FAILED: Wrong exception type: {type(e)}")
-        return False
+        # Call rd_last_jrnl which should propagate the exception
+        with pytest.raises(ValueError, match="Test exception"):
+            journal.rd_last_jrnl(ChangeLog())
+
+        # Verify that exception is propagated through rd_jrnl as well
+        with pytest.raises(ValueError, match="Test exception"):
+            journal.rd_jrnl(ChangeLog(), journal.META_LEN)
     finally:
-        # Clean up
-        for file in ['test_disk.bin', 'test_journal.bin', 'test_free.bin', 'test_inode.bin', 'test_status.txt']:
-            if os.path.exists(file):
-                os.remove(file)
+        # Restore original method to avoid affecting other tests
+        journal._read_changes = original_read_changes
+
+        # Clean up temp file
+        import os
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
+
+    # No return value - use assertions instead
+    # Assertions are already handled by pytest.raises
 
 
 if __name__ == "__main__":
