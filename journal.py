@@ -1550,25 +1550,23 @@ class Journal:
 
         def get_next_lin_num(self, cg: Change) -> lNum_t:
             """Get the next line number from a change's selectors."""
-            if not cg.selectors:
-                return 0xFF  # Return sentinel value immediately if no selectors
+            while cg.selectors:
+                current_selector = cg.selectors[0]
 
-            current_selector = cg.selectors[0]
-
-            for i in range(64):
-                if current_selector.is_set(i):
-                    if i == cg.arr_next:
+                for i in range(64):
+                    if current_selector.is_set(i) and i == cg.arr_next:
                         cg.arr_next += 1
                         if cg.arr_next == 64:
                             cg.selectors.popleft()
                             cg.arr_next = 0
-
                         return i
 
-            # If we've gone through all bits and found nothing, move to the next selector
-            cg.selectors.popleft()
-            cg.arr_next = 0
-            return self.get_next_lin_num(cg)  # Recursive call to check next selector
+                # No match found in this selector, move to the next one
+                cg.selectors.popleft()
+                cg.arr_next = 0
+
+            # No selectors left
+            return 0xFF
 
         def calculate_ct_bytes_to_write(self, r_cg_log: ChangeLog) -> int:
             """Calculate total bytes needed to write a change log."""
