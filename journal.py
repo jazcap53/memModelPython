@@ -1139,13 +1139,18 @@ class Journal:
                 if dat_len == 8:
                     # Use dedicated function for 64-bit values
                     value = from_bytes_64bit(data)
-                    # This internally handles the wraparound correctly
-                    write_64bit(self._journal.journal_file, value)
+                    # Write the first part that fits before wraparound
+                    self._journal.write(data[:bytes_until_end])
+                    self._journal.seek(self._journal.META_LEN)  # Wrap to start of data area
+                    self._journal.write(data[bytes_until_end:])  # Write remaining bytes
                     bytes_written = 8
                 elif dat_len == 4:
                     # Use dedicated function for 32-bit values
                     value = from_bytes_32bit(data)
-                    write_32bit(self._journal.journal_file, value)
+                    # Write first part
+                    self._journal.write(data[:bytes_until_end])
+                    self._journal.seek(self._journal.META_LEN)
+                    self._journal.write(data[bytes_until_end:])
                     bytes_written = 4
                 else:
                     # For arbitrary-length data, we need to split at the wraparound point
@@ -1167,11 +1172,11 @@ class Journal:
                 # No wraparound, simple write
                 if dat_len == 8:
                     # Use dedicated function for 64-bit values
-                    write_64bit(self._journal.journal_file, from_bytes_64bit(data))
+                    self._journal.write(data)
                     bytes_written = 8
                 elif dat_len == 4:
                     # Use dedicated function for 32-bit values
-                    write_32bit(self._journal.journal_file, from_bytes_32bit(data))
+                    self._journal.write(data)
                     bytes_written = 4
                 else:
                     # Direct write for other sizes
@@ -1234,31 +1239,24 @@ class Journal:
             file_obj = self._journal.get_file()
 
             if dat_len == 8:
-                value = read_64bit(file_obj)
-                bytes_read = to_bytes_64bit(value)
-                print(f"DEBUG: Read 8 bytes: {bytes_read.hex()}")
-                return bytes_read
+                # Read raw bytes instead of converting to/from integers
+                data = file_obj.read(8)
+                if len(data) != 8:
+                    raise IOError(f"Expected to read 8 bytes but got {len(data)}")
+                print(f"DEBUG: Read 8 bytes: {data.hex()}")
+                return data
             elif dat_len == 4:
-                value = read_32bit(file_obj)
-                return to_bytes_32bit(value)
+                # Read raw bytes instead of converting to/from integers
+                data = file_obj.read(4)
+                if len(data) != 4:
+                    raise IOError(f"Expected to read 4 bytes but got {len(data)}")
+                return data
             else:
-                # For other lengths, read in chunks of appropriate size
-                data = bytearray()
-                remaining = dat_len
-                while remaining > 0:
-                    if remaining >= 8:
-                        value = read_64bit(file_obj)
-                        data.extend(to_bytes_64bit(value))
-                        remaining -= 8
-                    elif remaining >= 4:
-                        value = read_32bit(file_obj)
-                        data.extend(to_bytes_32bit(value))
-                        remaining -= 4
-                    else:
-                        # Read remaining bytes one at a time
-                        data.extend(to_bytes_32bit(read_32bit(file_obj))[:remaining])
-                        remaining = 0
-                return bytes(data)
+                # For other lengths, read all bytes at once
+                data = file_obj.read(dat_len)
+                if len(data) != dat_len:
+                    raise IOError(f"Expected to read {dat_len} bytes but got {len(data)}")
+                return data
 
         def _read_64bit_wraparound(self, under: int) -> bytes:
             """Read a 64-bit value that wraps around in the journal."""
@@ -1268,20 +1266,26 @@ class Journal:
             data1 = self._journal.read(under)
             self._update_bytes_read(under)
 
+            # If we couldn't read the expected bytes, we have an error
+            if len(data1) != under:
+                raise IOError(f"Expected to read {under} bytes but got {len(data1)}")
+
             # Wrap to the beginning of the data section
             self._journal.seek(self._journal.META_LEN)
 
             # Read the second part (after wraparound)
-            data2 = self._journal.read(8 - under)
-            self._update_bytes_read(8 - under)
+            data2_size = 8 - under
+            data2 = self._journal.read(data2_size)
+            self._update_bytes_read(data2_size)
+
+            # If we couldn't read the expected bytes, we have an error
+            if len(data2) != data2_size:
+                raise IOError(f"Expected to read {data2_size} bytes but got {len(data2)}")
 
             # Combine the two parts
             full_data = data1 + data2
 
-            # Convert to integer using from_bytes_64bit
-            value = from_bytes_64bit(full_data)
-
-            return to_bytes_64bit(value)
+            return full_data  # Return raw bytes, not converted to integer and back
 
         def _read_32bit_wraparound(self, under: int) -> bytes:
             """Read a 32-bit value that wraps around in the journal."""
@@ -1773,8 +1777,8 @@ class Journal:
             # Write end tag
             write_64bit(self._journal.journal_file, self._journal.END_TAG)
 
-            # Update metadata
-            new_g_pos = start_pos
+            # Update metadata with the correct start position
+            new_g_pos = start_pos  # Use the actual start position
             new_p_pos = self._journal.tell()
             ttl_bytes = self._journal.ct_bytes_to_write + self._journal.HEADER_SIZE + self._journal.END_TAG_SIZE
 
