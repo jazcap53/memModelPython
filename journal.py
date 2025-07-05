@@ -260,6 +260,10 @@ class Journal:
             return
         self._change_log_handler._implement_journal_write(r_cg_log)
 
+    def wrt_cg_to_pg(self, cg: Change, pg: Page):
+        """Write a change to a page. Public interface method."""
+        self._change_log_handler.wrt_cg_to_pg(cg, pg)
+
     def wrt_cg_log_to_jrnl(self, r_cg_log: ChangeLog):
         """Alias for write_change_log_to_journal for backward compatibility."""
         return self.write_change_log_to_journal(r_cg_log)
@@ -1260,6 +1264,7 @@ class Journal:
 
         def _read_64bit_wraparound(self, under: int) -> bytes:
             """Read a 64-bit value that wraps around in the journal."""
+            print(f"DEBUG: _read_64bit_wraparound called with under as {under} bytes")
             file_obj = self._journal.get_file()
 
             # Read the first part (before wraparound)
@@ -1289,6 +1294,7 @@ class Journal:
 
         def _read_32bit_wraparound(self, under: int) -> bytes:
             """Read a 32-bit value that wraps around in the journal."""
+            print(f"DEBUG: _read_32bit_wraparound called with under as {under} bytes")
             file_obj = self._journal.get_file()
 
             # Read low bits
@@ -1306,6 +1312,7 @@ class Journal:
 
         def _read_generic_wraparound(self, under: int, over: int) -> bytes:
             """Read generic data that wraps around in the journal."""
+            print(f"DEBUG: _read_generic_wraparound called with under as {under} over as {over} bytes")
             file_obj = self._journal.get_file()
             data = bytearray()
 
